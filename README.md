@@ -140,6 +140,10 @@ docs/                  Architecture notes
 scripts/               Developer helper scripts
 ```
 
+## Phase Plans
+
+- [Phase 1: EPUB Ingestion MVP](docs/phase-1-ingestor.md)
+
 ## Roadmap
 
 ### Phase 0: Workspace Foundation
@@ -151,6 +155,9 @@ scripts/               Developer helper scripts
 - Document architecture and local-first constraints.
 
 ### Phase 1: EPUB Ingestion MVP
+
+See the detailed implementation plan:
+[Phase 1: EPUB Ingestion MVP](docs/phase-1-ingestor.md).
 
 - Scan the configured books directory for EPUB files.
 - Compute file hashes to skip unchanged books.
