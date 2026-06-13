@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python -m compileall apps packages
-
+python3 -m compileall apps packages scripts tests
+scripts/test.sh

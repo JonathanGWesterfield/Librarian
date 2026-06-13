@@ -72,6 +72,12 @@ Initial behavior:
 - Print how many EPUB files were found.
 - Fail clearly if the configured directory does not exist.
 
+Initial script:
+
+```bash
+python scripts/ingest_epubs.py --books-dir ./Epub-Books --list
+```
+
 ## Step 2: EPUB Parsing
 
 Use the ingestion package as the parsing boundary:
@@ -224,4 +230,3 @@ The first implementation PR for this phase should include:
 
 Real embedding generation should remain out of scope until the ingestion output
 is reliable and easy to inspect.
-
