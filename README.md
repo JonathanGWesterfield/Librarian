@@ -248,6 +248,18 @@ Or start the container stack:
 docker compose up --build
 ```
 
+Run the test suite:
+
+```bash
+scripts/test.sh
+```
+
+Run checks used by pull requests:
+
+```bash
+scripts/check.sh
+```
+
 By default, Docker Compose mounts `./Epub-Books` into the API container at
 `/books`. To use a different local folder, create a `.env` file and set:
 
