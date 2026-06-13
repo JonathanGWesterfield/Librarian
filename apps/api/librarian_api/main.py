@@ -10,6 +10,7 @@ def health() -> dict[str, object]:
     return {
         "status": "ok",
         "books_dir": settings.books_dir,
+        "host_books_dir": settings.host_books_dir,
         "codex_broker_enabled": settings.enable_codex_broker,
     }
 
@@ -20,4 +21,3 @@ def root() -> dict[str, str]:
         "name": "Librarian",
         "message": "Local-first EPUB RAG workspace is ready.",
     }
-

@@ -2,7 +2,8 @@
 
 ## Local-First Constraints
 
-- EPUB source files live in `./books`.
+- EPUB source files live in a configurable local folder.
+- The default local test folder is `./Epub-Books`, which is ignored by Git.
 - Runtime databases and indexes live in `./data`.
 - Embeddings are generated locally.
 - OpenAI API keys are not required.
@@ -29,4 +30,3 @@ loop works end to end.
 4. Rerank or score candidates.
 5. Send top passages to the generator.
 6. Return an answer with citations.
-

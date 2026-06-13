@@ -12,7 +12,7 @@ infrastructure.
 
 ## Goals
 
-- Ingest EPUB files from a local folder.
+- Ingest EPUB files from a configurable local folder.
 - Extract useful book, author, chapter, and document structure metadata.
 - Chunk books in a way that preserves source context.
 - Generate embeddings locally without OpenAI API keys.
@@ -58,7 +58,7 @@ model that can run comfortably on local hardware.
 ## Architecture
 
 ```text
-books/*.epub
+configured EPUB folder
   -> ingestion worker
   -> EPUB parser
   -> text cleaner
@@ -74,10 +74,10 @@ books/*.epub
 
 ### EPUB Ingestion
 
-The ingestion layer reads EPUB files from `./books`, extracts metadata, and
-turns book content into normalized text. EPUB files can have messy metadata and
-inconsistent internal structure, so this layer should be defensive and keep the
-original file hash for idempotent re-ingestion.
+The ingestion layer reads EPUB files from the configured books directory,
+extracts metadata, and turns book content into normalized text. EPUB files can
+have messy metadata and inconsistent internal structure, so this layer should be
+defensive and keep the original file hash for idempotent re-ingestion.
 
 ### Chunking
 
@@ -120,7 +120,7 @@ storage or ingestion infrastructure.
 
 ## First Target
 
-- Parse EPUBs from `./books`.
+- Parse EPUBs from the configured books directory.
 - Store book, author, chapter, and chunk metadata locally.
 - Generate embeddings locally.
 - Retrieve relevant chunks for a user query.
@@ -132,7 +132,8 @@ storage or ingestion infrastructure.
 apps/api/              FastAPI application surface
 apps/codex_broker/     Host-side Codex CLI wrapper service
 packages/ingestion/    EPUB parsing and chunking package
-books/                 Local EPUB input folder, ignored by Git
+books/                 Optional local EPUB input folder, ignored by Git
+Epub-Books/            Local test EPUB folder, ignored by Git
 data/                  Local runtime data, ignored by Git
 models/                Local model cache/config, ignored by Git
 docs/                  Architecture notes
@@ -151,7 +152,7 @@ scripts/               Developer helper scripts
 
 ### Phase 1: EPUB Ingestion MVP
 
-- Scan `./books` for EPUB files.
+- Scan the configured books directory for EPUB files.
 - Compute file hashes to skip unchanged books.
 - Parse EPUB metadata and text.
 - Store book and chunk records locally.
@@ -239,6 +240,17 @@ Or start the container stack:
 ```bash
 docker compose up --build
 ```
+
+By default, Docker Compose mounts `./Epub-Books` into the API container at
+`/books`. To use a different local folder, create a `.env` file and set:
+
+```bash
+LIBRARIAN_HOST_BOOKS_DIR=/absolute/path/to/epubs
+```
+
+Inside the container, the application reads from `LIBRARIAN_BOOKS_DIR`, which
+defaults to `/books`. When running outside Docker, set `LIBRARIAN_BOOKS_DIR`
+directly to the local folder you want to ingest from.
 
 ## Codex Usage Boundary
 

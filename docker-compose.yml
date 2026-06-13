@@ -8,8 +8,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./books:/books:ro
+      - ${LIBRARIAN_HOST_BOOKS_DIR:-./Epub-Books}:/books:ro
       - ./data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
-

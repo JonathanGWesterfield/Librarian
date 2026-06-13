@@ -15,6 +15,10 @@ build/
 !.env.example
 
 # Local library/runtime state
+Epub-Books/
+Epub-books/
+epub-books/
+epub/
 books/*
 !books/.gitkeep
 data/*
@@ -26,4 +30,3 @@ models/*
 .DS_Store
 .idea/
 .vscode/
-
