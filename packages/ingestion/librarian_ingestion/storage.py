@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ class BookRecord:
     title: Optional[str]
     authors: list[str]
     status: str
+    publisher: Optional[str] = None
     error_message: Optional[str] = None
     discovered_at: str = field(default_factory=lambda: utc_now())
     ingested_at: Optional[str] = None
@@ -55,6 +57,11 @@ class IngestionStore(Protocol):
     ) -> StoredBookSnapshot | None:
         ...
 
+    def get_book_by_identity(
+        self, title: Optional[str], authors: list[str], publisher: Optional[str]
+    ) -> StoredBookSnapshot | None:
+        ...
+
     def save_book_with_chunks(
         self, book: BookRecord, chunks: list[ChunkRecord]
     ) -> None:
@@ -80,7 +87,39 @@ class SQLiteIngestionStore:
         self.connection = sqlite3.connect(self.database_path)
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.executescript(SCHEMA)
+        self._migrate_schema()
         self.connection.commit()
+
+    def _migrate_schema(self) -> None:
+        columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(books)").fetchall()
+        }
+        if "publisher" not in columns:
+            self._connection.execute("ALTER TABLE books ADD COLUMN publisher TEXT")
+        if "identity_key" not in columns:
+            self._connection.execute("ALTER TABLE books ADD COLUMN identity_key TEXT")
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_books_identity_key ON books(identity_key)"
+        )
+        rows = self._connection.execute(
+            """
+            SELECT id, title, authors_json, publisher
+            FROM books
+            WHERE identity_key IS NULL
+            """
+        ).fetchall()
+        for book_id, title, authors_json, publisher in rows:
+            try:
+                authors = json.loads(authors_json)
+            except json.JSONDecodeError:
+                authors = []
+            identity_key = build_book_identity_key(title, authors, publisher)
+            if identity_key:
+                self._connection.execute(
+                    "UPDATE books SET identity_key = ? WHERE id = ?",
+                    (identity_key, book_id),
+                )
 
     def get_book_by_relative_path(
         self, relative_path: str
@@ -95,6 +134,37 @@ class SQLiteIngestionStore:
             GROUP BY books.id
             """,
             (relative_path,),
+        ).fetchone()
+        if row is None:
+            return None
+        return StoredBookSnapshot(
+            id=row[0],
+            relative_path=row[1],
+            file_hash=row[2],
+            status=row[3],
+            chunk_count=row[4],
+        )
+
+    def get_book_by_identity(
+        self, title: Optional[str], authors: list[str], publisher: Optional[str]
+    ) -> StoredBookSnapshot | None:
+        identity_key = build_book_identity_key(title, authors, publisher)
+        if identity_key is None:
+            return None
+
+        row = self._connection.execute(
+            """
+            SELECT books.id, books.relative_path, books.file_hash, books.status,
+                   COUNT(chunks.id) AS chunk_count
+            FROM books
+            LEFT JOIN chunks ON chunks.book_id = books.id
+            WHERE books.identity_key = ?
+              AND books.status = 'ingested'
+            GROUP BY books.id
+            ORDER BY books.ingested_at ASC
+            LIMIT 1
+            """,
+            (identity_key,),
         ).fetchone()
         if row is None:
             return None
@@ -122,10 +192,10 @@ class SQLiteIngestionStore:
                 """
                 INSERT INTO books (
                     id, source_path, relative_path, file_hash, size_bytes, title,
-                    authors_json, status, error_message, discovered_at,
+                    authors_json, publisher, identity_key, status, error_message, discovered_at,
                     ingested_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(relative_path) DO UPDATE SET
                     id = excluded.id,
                     source_path = excluded.source_path,
@@ -133,6 +203,8 @@ class SQLiteIngestionStore:
                     size_bytes = excluded.size_bytes,
                     title = excluded.title,
                     authors_json = excluded.authors_json,
+                    publisher = excluded.publisher,
+                    identity_key = excluded.identity_key,
                     status = excluded.status,
                     error_message = excluded.error_message,
                     ingested_at = excluded.ingested_at,
@@ -146,6 +218,8 @@ class SQLiteIngestionStore:
                     book.size_bytes,
                     book.title,
                     json.dumps(book.authors),
+                    book.publisher,
+                    build_book_identity_key(book.title, book.authors, book.publisher),
                     book.status,
                     book.error_message,
                     book.discovered_at,
@@ -208,6 +282,36 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def build_book_identity_key(
+    title: Optional[str], authors: list[str], publisher: Optional[str]
+) -> str | None:
+    normalized_title = normalize_metadata_value(title)
+    normalized_authors = sorted(
+        author
+        for author in (normalize_metadata_value(author) for author in authors)
+        if author
+    )
+    if not normalized_title or not normalized_authors:
+        return None
+
+    return json.dumps(
+        {
+            "title": normalized_title,
+            "authors": normalized_authors,
+            "publisher": normalize_metadata_value(publisher) or "",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def normalize_metadata_value(value: Optional[str]) -> str | None:
+    if value is None:
+        return None
+    normalized = re.sub(r"\s+", " ", value).strip().casefold()
+    return normalized or None
+
+
 def create_ingestion_store(database_url: str) -> IngestionStore:
     if database_url.startswith("sqlite:///"):
         return SQLiteIngestionStore(sqlite_path_from_url(database_url))
@@ -225,6 +329,8 @@ CREATE TABLE IF NOT EXISTS books (
     size_bytes INTEGER NOT NULL,
     title TEXT,
     authors_json TEXT NOT NULL,
+    publisher TEXT,
+    identity_key TEXT,
     status TEXT NOT NULL,
     error_message TEXT,
     discovered_at TEXT NOT NULL,

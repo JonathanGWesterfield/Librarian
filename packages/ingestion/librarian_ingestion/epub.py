@@ -13,6 +13,7 @@ class ParsedBook(BaseModel):
     source_path: str
     title: Optional[str] = None
     authors: list[str] = Field(default_factory=list)
+    publisher: Optional[str] = None
     text: str
 
 
@@ -21,6 +22,7 @@ def parse_epub(path: str | Path) -> ParsedBook:
     book = epub.read_epub(str(source))
     title = _first_metadata(book, "DC", "title")
     authors = [value for value, _attrs in book.get_metadata("DC", "creator")]
+    publisher = _first_metadata(book, "DC", "publisher")
     text_parts: list[str] = []
 
     for item in book.get_items_of_type(ITEM_DOCUMENT):
@@ -35,6 +37,7 @@ def parse_epub(path: str | Path) -> ParsedBook:
         source_path=str(source),
         title=title,
         authors=authors,
+        publisher=publisher,
         text="\n\n".join(text_parts),
     )
 

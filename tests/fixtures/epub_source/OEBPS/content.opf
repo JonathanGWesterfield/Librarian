@@ -4,6 +4,7 @@
     <dc:identifier id="book-id">urn:uuid:11111111-2222-3333-4444-555555555555</dc:identifier>
     <dc:title>The Clockwork Garden</dc:title>
     <dc:creator>Test Author</dc:creator>
+    <dc:publisher>Fixture Press</dc:publisher>
     <dc:language>en</dc:language>
   </metadata>
   <manifest>
