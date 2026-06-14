@@ -16,6 +16,10 @@ from ingest_epubs import main
 
 class IngestEpubsScriptTests(unittest.TestCase):
     def test_script_stores_sample_epub_and_skips_unchanged_second_run(self) -> None:
+        """Verify the real CLI entry point performs an idempotent ingestion.
+        The first run should create one book plus chunks, while the second run
+        should recognize the unchanged file hash and avoid duplicating records.
+        """
         with TemporaryDirectory() as temp_dir:
             database_path = Path(temp_dir) / "librarian.db"
             database_url = f"sqlite:///{database_path}"

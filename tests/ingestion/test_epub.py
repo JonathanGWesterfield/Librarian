@@ -28,6 +28,10 @@ else:
 )
 class ParseEpubTests(unittest.TestCase):
     def test_parse_sample_epub_extracts_expected_metadata_and_text(self) -> None:
+        """Verify EPUB parsing against the deterministic source-of-truth book.
+        This protects metadata extraction and body text extraction, including
+        the bug we fixed where chapter text was empty.
+        """
         parsed = parse_epub(SAMPLE_EPUB)
 
         self.assertEqual(parsed.source_path, str(SAMPLE_EPUB))
@@ -39,4 +43,3 @@ class ParseEpubTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

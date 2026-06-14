@@ -27,6 +27,10 @@ from librarian_ingestion.storage import (
 
 class DatabaseConfigTests(unittest.TestCase):
     def test_resolve_database_url_uses_env_then_default(self) -> None:
+        """Verify database configuration follows the same env-first pattern.
+        This lets local development use the default SQLite file while tests and
+        future deployments can point storage somewhere else.
+        """
         self.assertEqual(
             resolve_database_url(env={"LIBRARIAN_DATABASE_URL": "sqlite:///tmp.db"}),
             "sqlite:///tmp.db",
@@ -34,20 +38,36 @@ class DatabaseConfigTests(unittest.TestCase):
         self.assertEqual(resolve_database_url(env={}), "sqlite:///data/librarian.db")
 
     def test_sqlite_path_from_url_accepts_relative_and_absolute_paths(self) -> None:
+        """Verify SQLite URL parsing supports common local paths.
+        The CLI accepts database URLs, but the SQLite adapter needs filesystem
+        paths, so this test protects that translation.
+        """
         self.assertEqual(sqlite_path_from_url("sqlite:///data/test.db"), Path("data/test.db"))
         self.assertEqual(sqlite_path_from_url("sqlite:////tmp/test.db"), Path("/tmp/test.db"))
 
     def test_sqlite_path_from_url_rejects_non_sqlite_url(self) -> None:
+        """Verify SQLite-specific parsing refuses other database schemes.
+        This keeps adapter selection explicit instead of accidentally treating a
+        Postgres URL like a broken file path.
+        """
         with self.assertRaises(ValueError):
             sqlite_path_from_url("postgresql://localhost/librarian")
 
     def test_create_ingestion_store_rejects_unimplemented_postgres(self) -> None:
+        """Verify the adapter factory recognizes Postgres but blocks it for now.
+        This documents the planned extension point while preventing callers from
+        believing Postgres persistence already exists.
+        """
         with self.assertRaises(NotImplementedError):
             create_ingestion_store("postgresql://localhost/librarian")
 
 
 class SQLiteIngestionStoreTests(unittest.TestCase):
     def test_save_book_with_chunks_persists_book_and_chunks(self) -> None:
+        """Verify the SQLite adapter persists the core ingestion records.
+        This stores a parsed fixture book and its chunks, then reads them back
+        through both the adapter and raw SQL to protect the schema contract.
+        """
         with TemporaryDirectory() as temp_dir:
             database_path = Path(temp_dir) / "librarian.db"
             parsed = parse_epub(SAMPLE_EPUB)
