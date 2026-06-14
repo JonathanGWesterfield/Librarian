@@ -260,6 +260,12 @@ Run checks used by pull requests:
 scripts/check.sh
 ```
 
+Run EPUB ingestion into the local SQLite database:
+
+```bash
+python3 scripts/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db
+```
+
 By default, Docker Compose mounts `./Epub-Books` into the API container at
 `/books`. To use a different local folder, create a `.env` file and set:
 
