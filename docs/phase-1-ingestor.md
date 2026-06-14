@@ -145,20 +145,37 @@ TextChunk(
 
 ## Step 5: Local Persistence
 
-For Phase 1, use JSONL files instead of a database. This keeps the output easy
-to inspect while the parser and chunker are still evolving.
+For Phase 1, use SQLite behind a storage adapter. SQLite keeps the first local
+implementation simple, inspectable, and serverless, while the adapter lets us
+add a Postgres implementation later without rewriting the ingestion pipeline.
 
-Suggested output paths:
+Default output path:
 
 ```text
-data/ingestion/books.jsonl
-data/ingestion/chunks.jsonl
-data/ingestion/manifest.json
+data/librarian.db
 ```
 
-`books.jsonl` should contain one record per parsed EPUB. `chunks.jsonl` should
-contain one record per text chunk. `manifest.json` should track file hashes and
-ingestion state.
+Initial tables:
+
+```text
+books
+chunks
+```
+
+`books` stores source path, relative path, file hash, metadata, ingestion status,
+and timestamps. `chunks` stores ordered text chunks linked back to the book.
+
+The ingestor should depend on an adapter protocol rather than SQLite directly:
+
+```python
+class IngestionStore:
+    def initialize(self) -> None: ...
+    def get_book_by_relative_path(self, relative_path: str): ...
+    def save_book_with_chunks(self, book, chunks) -> None: ...
+```
+
+Postgres is a likely future upgrade when full-text search, pgvector, hybrid
+retrieval, or heavier concurrent use become important.
 
 ## Step 6: Embedding Interface
 
@@ -206,14 +223,13 @@ An example successful run:
 ```text
 Librarian EPUB ingestion
 Books directory: ./Epub-Books
+Database: sqlite:///data/librarian.db
 Found 57 EPUB files
 Parsed 54
 Skipped unchanged 3
 Failed 0
-Wrote:
-  data/ingestion/books.jsonl
-  data/ingestion/chunks.jsonl
-  data/ingestion/manifest.json
+Stored chunks 4120
+Database totals: 54 books, 4120 chunks
 ```
 
 ## First Pull Request Scope
