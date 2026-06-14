@@ -227,6 +227,7 @@ Database: sqlite:///data/librarian.db
 Found 57 EPUB files
 Parsed 54
 Skipped unchanged 3
+Skipped duplicates 0
 Failed 0
 Stored chunks 4120
 Database totals: 54 books, 4120 chunks

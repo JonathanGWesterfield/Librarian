@@ -1,6 +1,7 @@
 import sqlite3
 import sys
 import unittest
+from shutil import copyfile
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -61,6 +62,53 @@ class IngestEpubsScriptTests(unittest.TestCase):
         self.assertEqual(book_count, 1)
         self.assertGreater(chunk_count, 0)
         self.assertEqual(file_hash, SAMPLE_EPUB_SHA256)
+
+    def test_script_marks_different_hash_with_same_metadata_as_duplicate(self) -> None:
+        """Verify the CLI blocks duplicate books beyond exact file hashes.
+        A copied EPUB with extra bytes has a different hash, but matching title,
+        author, and publisher should be stored as duplicate without chunks.
+        """
+        duplicate_path = Path(self.temp_dir.name) / "duplicate-source.epub"
+        copyfile(self.books_dir / "sample.epub", duplicate_path)
+        with duplicate_path.open("ab") as file:
+            file.write(b"\n")
+
+        duplicate_books_dir = Path(self.temp_dir.name) / "books"
+        duplicate_books_dir.mkdir()
+        copyfile(self.books_dir / "sample.epub", duplicate_books_dir / "a-sample.epub")
+        copyfile(duplicate_path, duplicate_books_dir / "z-sample-copy.epub")
+
+        with redirect_stdout(StringIO()):
+            exit_code = main(
+                [
+                    "--books-dir",
+                    str(duplicate_books_dir),
+                    "--database-url",
+                    self.database_url,
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+
+        with sqlite3.connect(self.database_path) as connection:
+            statuses = dict(
+                connection.execute(
+                    "SELECT relative_path, status FROM books ORDER BY relative_path"
+                ).fetchall()
+            )
+            duplicate_chunk_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM chunks
+                WHERE book_id = (
+                    SELECT id FROM books WHERE relative_path = 'z-sample-copy.epub'
+                )
+                """
+            ).fetchone()[0]
+
+        self.assertEqual(statuses["a-sample.epub"], "ingested")
+        self.assertEqual(statuses["z-sample-copy.epub"], "duplicate")
+        self.assertEqual(duplicate_chunk_count, 0)
 
 
 if __name__ == "__main__":

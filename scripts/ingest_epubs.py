@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parsed_count = 0
     skipped_count = 0
+    duplicate_count = 0
     failed_count = 0
     chunk_count = 0
 
@@ -94,6 +95,33 @@ def main(argv: list[str] | None = None) -> int:
 
             try:
                 parsed = parse_epub(discovered.path)
+                duplicate = store.get_book_by_identity(
+                    parsed.title, parsed.authors, parsed.publisher
+                )
+                if (
+                    duplicate
+                    and duplicate.file_hash != discovered.sha256
+                    and not args.force
+                ):
+                    duplicate_book = BookRecord(
+                        id=discovered.sha256,
+                        source_path=str(discovered.path),
+                        relative_path=discovered.relative_path,
+                        file_hash=discovered.sha256,
+                        size_bytes=discovered.size_bytes,
+                        title=parsed.title,
+                        authors=parsed.authors,
+                        publisher=parsed.publisher,
+                        status="duplicate",
+                        error_message=(
+                            "Duplicate metadata matches already ingested book: "
+                            f"{duplicate.relative_path}"
+                        ),
+                    )
+                    store.save_book_with_chunks(duplicate_book, [])
+                    duplicate_count += 1
+                    continue
+
                 chunks = chunk_text(parsed.text)
                 book = BookRecord(
                     id=discovered.sha256,
@@ -103,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
                     size_bytes=discovered.size_bytes,
                     title=parsed.title,
                     authors=parsed.authors,
+                    publisher=parsed.publisher,
                     status="ingested",
                     ingested_at=utc_now(),
                 )
@@ -143,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Parsed {parsed_count}")
     print(f"Skipped unchanged {skipped_count}")
+    print(f"Skipped duplicates {duplicate_count}")
     print(f"Failed {failed_count}")
     print(f"Stored chunks {chunk_count}")
     print(f"Database totals: {total_books} books, {total_chunks} chunks")

@@ -5,6 +5,7 @@ from pathlib import Path
 from tests.ingestion.fixtures import (
     SAMPLE_AUTHORS,
     SAMPLE_EPUB,
+    SAMPLE_PUBLISHER,
     SAMPLE_TEXT_FRAGMENTS,
     SAMPLE_TITLE,
 )
@@ -37,6 +38,7 @@ class ParseEpubTests(unittest.TestCase):
         self.assertEqual(parsed.source_path, str(SAMPLE_EPUB))
         self.assertEqual(parsed.title, SAMPLE_TITLE)
         self.assertEqual(parsed.authors, SAMPLE_AUTHORS)
+        self.assertEqual(parsed.publisher, SAMPLE_PUBLISHER)
         for fragment in SAMPLE_TEXT_FRAGMENTS:
             self.assertIn(fragment, parsed.text)
 

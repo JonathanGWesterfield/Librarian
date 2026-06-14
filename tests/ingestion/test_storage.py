@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tests.ingestion.fixtures import SAMPLE_EPUB, SAMPLE_EPUB_SHA256
+from tests.ingestion.fixtures import SAMPLE_EPUB, SAMPLE_EPUB_SHA256, SAMPLE_PUBLISHER
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
@@ -20,6 +20,7 @@ from librarian_ingestion.storage import (
     BookRecord,
     ChunkRecord,
     SQLiteIngestionStore,
+    build_book_identity_key,
     create_ingestion_store,
     utc_now,
 )
@@ -61,6 +62,24 @@ class DatabaseConfigTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             create_ingestion_store("postgresql://localhost/librarian")
 
+    def test_book_identity_key_uses_title_author_and_publisher(self) -> None:
+        """Verify duplicate detection normalizes stable book metadata.
+        Different casing or spacing should not hide duplicate books, while a
+        different publisher can represent a distinct edition/source.
+        """
+        original = build_book_identity_key(
+            "The Clockwork Garden", ["Test Author"], "Fixture Press"
+        )
+        normalized = build_book_identity_key(
+            " the   clockwork garden ", ["test author"], "fixture press"
+        )
+        different_publisher = build_book_identity_key(
+            "The Clockwork Garden", ["Test Author"], "Other Press"
+        )
+
+        self.assertEqual(original, normalized)
+        self.assertNotEqual(original, different_publisher)
+
 
 class SQLiteIngestionStoreTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -86,6 +105,7 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
             title=parsed.title,
             authors=parsed.authors,
             status="ingested",
+            publisher=parsed.publisher,
             ingested_at=utc_now(),
         )
         chunk_records = [
@@ -114,8 +134,8 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(stored.chunk_count, len(chunks))
 
         with sqlite3.connect(self.database_path) as connection:
-            title, authors_json = connection.execute(
-                "SELECT title, authors_json FROM books WHERE relative_path = ?",
+            title, authors_json, publisher = connection.execute(
+                "SELECT title, authors_json, publisher FROM books WHERE relative_path = ?",
                 ("sample.epub",),
             ).fetchone()
             first_chunk = connection.execute(
@@ -125,7 +145,42 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
 
         self.assertEqual(title, "The Clockwork Garden")
         self.assertIn("Test Author", authors_json)
+        self.assertEqual(publisher, SAMPLE_PUBLISHER)
         self.assertIn("The clockwork garden woke at dawn.", first_chunk)
+
+    def test_get_book_by_identity_finds_existing_book_metadata(self) -> None:
+        """Verify the adapter can find an already ingested book by metadata.
+        This is the guardrail that prevents a different file hash of the same
+        title, author, and publisher from being ingested as another full book.
+        """
+        parsed = parse_epub(SAMPLE_EPUB)
+        book = BookRecord(
+            id=SAMPLE_EPUB_SHA256,
+            source_path=str(SAMPLE_EPUB),
+            relative_path="sample.epub",
+            file_hash=SAMPLE_EPUB_SHA256,
+            size_bytes=SAMPLE_EPUB.stat().st_size,
+            title=parsed.title,
+            authors=parsed.authors,
+            status="ingested",
+            publisher=parsed.publisher,
+            ingested_at=utc_now(),
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+
+            stored = store.get_book_by_identity(
+                " the clockwork garden ", ["test author"], SAMPLE_PUBLISHER
+            )
+            different_publisher = store.get_book_by_identity(
+                "The Clockwork Garden", ["Test Author"], "Other Press"
+            )
+
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored.relative_path, "sample.epub")
+        self.assertIsNone(different_publisher)
 
 
 if __name__ == "__main__":
