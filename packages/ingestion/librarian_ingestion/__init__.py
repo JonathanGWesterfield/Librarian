@@ -2,12 +2,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from librarian_ingestion.chunk import TextChunk
+    from librarian_ingestion.embeddings import Embedder, EmbeddingError
     from librarian_ingestion.epub import ParsedBook
     from librarian_ingestion.ingest import IngestionOptions, IngestionResult
     from librarian_ingestion.scan import DiscoveredEpub, EpubSourceError
     from librarian_ingestion.storage import (
         BookRecord,
         ChunkRecord,
+        EmbeddingRecord,
         IngestionStore,
         IngestionSummary,
         StoredBookRecord,
@@ -17,6 +19,9 @@ __all__ = [
     "BookRecord",
     "ChunkRecord",
     "DiscoveredEpub",
+    "Embedder",
+    "EmbeddingError",
+    "EmbeddingRecord",
     "EpubSourceError",
     "IngestionStore",
     "IngestionOptions",
@@ -27,6 +32,7 @@ __all__ = [
     "TextChunk",
     "chunk_text",
     "clean_text",
+    "create_embedder",
     "create_ingestion_store",
     "parse_epub",
     "run_ingestion",
@@ -62,9 +68,23 @@ def __getattr__(name: str):
             "clean_text": clean_text,
         }[name]
 
+    if name in {"Embedder", "EmbeddingError", "create_embedder"}:
+        from librarian_ingestion.embeddings import (
+            Embedder,
+            EmbeddingError,
+            create_embedder,
+        )
+
+        return {
+            "Embedder": Embedder,
+            "EmbeddingError": EmbeddingError,
+            "create_embedder": create_embedder,
+        }[name]
+
     if name in {
         "BookRecord",
         "ChunkRecord",
+        "EmbeddingRecord",
         "IngestionStore",
         "IngestionSummary",
         "StoredBookRecord",
@@ -73,6 +93,7 @@ def __getattr__(name: str):
         from librarian_ingestion.storage import (
             BookRecord,
             ChunkRecord,
+            EmbeddingRecord,
             IngestionStore,
             IngestionSummary,
             StoredBookRecord,
@@ -82,6 +103,7 @@ def __getattr__(name: str):
         return {
             "BookRecord": BookRecord,
             "ChunkRecord": ChunkRecord,
+            "EmbeddingRecord": EmbeddingRecord,
             "IngestionStore": IngestionStore,
             "IngestionSummary": IngestionSummary,
             "StoredBookRecord": StoredBookRecord,

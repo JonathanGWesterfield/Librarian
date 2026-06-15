@@ -276,7 +276,9 @@ The API also exposes ingestion-oriented endpoints that a future Electron or
 Tauri frontend can call:
 
 ```text
-POST /ingestion/run        body: books_dir, database_url, force, list_epubs
+POST /ingestion/run        body: books_dir, database_url, force, list_epubs,
+                            embed_chunks, embedding_provider, embedding_model,
+                            ollama_base_url, embedding_batch_size
 GET  /ingestion/summary    query: database_url
 GET  /books                query: database_url, status, limit, offset
 ```
@@ -306,4 +308,23 @@ large book processing -> local deterministic pipeline
 embedding generation  -> local embedding model
 retrieval             -> local database/index
 final synthesis       -> optional Codex broker
+```
+
+Embedding models are runtime dependencies, not repository assets. The repo
+tracks the provider, model name, and storage schema, but model weights should
+live in Ollama's local model cache or another local model runtime.
+
+Current embedding configuration:
+
+```bash
+LIBRARIAN_EMBEDDING_PROVIDER=noop
+LIBRARIAN_EMBEDDING_MODEL=all-minilm
+LIBRARIAN_OLLAMA_BASE_URL=http://localhost:11434
+```
+
+To exercise the Ollama path after pulling a model locally:
+
+```bash
+ollama pull all-minilm
+python3 scripts/ingest_epubs.py --embed --embedding-provider ollama --embedding-model all-minilm
 ```

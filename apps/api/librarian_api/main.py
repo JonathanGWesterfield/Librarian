@@ -19,6 +19,11 @@ class IngestionRunRequest(BaseModel):
     database_url: Optional[str] = None
     force: bool = False
     list_epubs: bool = False
+    embed_chunks: bool = False
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    embedding_batch_size: int = 16
 
 
 @app.get("/health")
@@ -48,6 +53,11 @@ def run_ingestion_endpoint(request: IngestionRunRequest) -> dict[str, object]:
                 database_url=request.database_url or settings.database_url,
                 force=request.force,
                 list_epubs=request.list_epubs,
+                embed_chunks=request.embed_chunks,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+                ollama_base_url=request.ollama_base_url,
+                embedding_batch_size=request.embedding_batch_size,
             )
         )
     except (EpubSourceError, ValueError, NotImplementedError) as error:

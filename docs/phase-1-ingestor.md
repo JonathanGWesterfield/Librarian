@@ -193,7 +193,9 @@ CLI:
   python3 scripts/ingest_epubs.py --json
 
 API:
-  POST /ingestion/run        body: books_dir, database_url, force, list_epubs
+  POST /ingestion/run        body: books_dir, database_url, force, list_epubs,
+                              embed_chunks, embedding_provider, embedding_model,
+                              ollama_base_url, embedding_batch_size
   GET  /ingestion/summary    query: database_url
   GET  /books                query: database_url, status, limit, offset
 ```
@@ -221,7 +223,31 @@ class NoopEmbedder:
         return []
 ```
 
-Later implementations can target local providers such as Ollama,
+The first concrete provider target is Ollama. Librarian should track the
+provider name, model name, and Ollama base URL in configuration, but model
+weights must not live in the repository. They should be pulled into Ollama's
+local model cache by the user or by a future setup helper.
+
+Current provider settings:
+
+```bash
+LIBRARIAN_EMBEDDING_PROVIDER=noop
+LIBRARIAN_EMBEDDING_MODEL=all-minilm
+LIBRARIAN_OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Ollama embedding generation should call `POST /api/embed` with `model` and
+`input`. The older `/api/embeddings` endpoint is superseded, so new code should
+avoid building against it.
+
+Example manual setup:
+
+```bash
+ollama pull all-minilm
+python3 scripts/ingest_epubs.py --embed --embedding-provider ollama --embedding-model all-minilm
+```
+
+Other later implementations can target local providers such as
 sentence-transformers, LM Studio, or another local embedding service.
 
 ## Step 7: Idempotency

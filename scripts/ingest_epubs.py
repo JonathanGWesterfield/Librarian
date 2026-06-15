@@ -14,6 +14,9 @@ if str(INGESTION_PACKAGE) not in sys.path:
 from librarian_ingestion.config import (
     BOOKS_DIR_ENV,
     DATABASE_URL_ENV,
+    EMBEDDING_MODEL_ENV,
+    EMBEDDING_PROVIDER_ENV,
+    OLLAMA_BASE_URL_ENV,
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
@@ -46,6 +49,30 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print machine-readable JSON for desktop apps and automation.",
     )
+    parser.add_argument(
+        "--embed",
+        action="store_true",
+        help="Generate and store chunk embeddings during ingestion.",
+    )
+    parser.add_argument(
+        "--embedding-provider",
+        choices=["noop", "ollama"],
+        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+    )
+    parser.add_argument(
+        "--ollama-base-url",
+        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+    )
+    parser.add_argument(
+        "--embedding-batch-size",
+        type=int,
+        default=16,
+        help="Number of chunks to send to the embedder per request.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -55,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
                 database_url=args.database_url,
                 force=args.force,
                 list_epubs=args.list,
+                embed_chunks=args.embed,
+                embedding_provider=args.embedding_provider,
+                embedding_model=args.embedding_model,
+                ollama_base_url=args.ollama_base_url,
+                embedding_batch_size=args.embedding_batch_size,
             )
         )
     except (EpubSourceError, ValueError, NotImplementedError) as error:
@@ -68,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     print("Librarian EPUB ingestion")
     print(f"Books directory: {result.books_dir}")
     print(f"Database: {result.database_url}")
+    print(f"Embedding provider: {result.embedding_provider}")
+    print(f"Embedding model: {result.embedding_model}")
     print(f"Found {result.found} EPUB files")
 
     if args.list:
@@ -86,7 +120,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Skipped duplicates {result.skipped_duplicates}")
     print(f"Failed {result.failed}")
     print(f"Stored chunks {result.stored_chunks}")
-    print(f"Database totals: {result.total_books} books, {result.total_chunks} chunks")
+    print(f"Stored embeddings {result.stored_embeddings}")
+    print(
+        "Database totals: "
+        f"{result.total_books} books, "
+        f"{result.total_chunks} chunks, "
+        f"{result.total_embeddings} embeddings"
+    )
 
     return 0
 
