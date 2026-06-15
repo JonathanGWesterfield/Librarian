@@ -18,9 +18,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install ingestion package
-        run: python -m pip install -e "packages/ingestion[dev]"
+      - name: Install Python packages
+        run: python -m pip install -e "packages/ingestion[dev]" -e "apps/api[dev]"
 
       - name: Run checks
         run: scripts/check.sh
-

@@ -266,6 +266,21 @@ Run EPUB ingestion into the local SQLite database:
 python3 scripts/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db
 ```
 
+For automation or a future desktop shell, request JSON output:
+
+```bash
+python3 scripts/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db --json
+```
+
+The API also exposes ingestion-oriented endpoints that a future Electron or
+Tauri frontend can call:
+
+```text
+POST /ingestion/run        body: books_dir, database_url, force, list_epubs
+GET  /ingestion/summary    query: database_url
+GET  /books                query: database_url, status, limit, offset
+```
+
 By default, Docker Compose mounts `./Epub-Books` into the API container at
 `/books`. To use a different local folder, create a `.env` file and set:
 

@@ -3,8 +3,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from librarian_ingestion.chunk import TextChunk
     from librarian_ingestion.epub import ParsedBook
+    from librarian_ingestion.ingest import IngestionOptions, IngestionResult
     from librarian_ingestion.scan import DiscoveredEpub, EpubSourceError
-    from librarian_ingestion.storage import BookRecord, ChunkRecord, IngestionStore
+    from librarian_ingestion.storage import (
+        BookRecord,
+        ChunkRecord,
+        IngestionStore,
+        IngestionSummary,
+        StoredBookRecord,
+    )
 
 __all__ = [
     "BookRecord",
@@ -12,12 +19,17 @@ __all__ = [
     "DiscoveredEpub",
     "EpubSourceError",
     "IngestionStore",
+    "IngestionOptions",
+    "IngestionResult",
+    "IngestionSummary",
     "ParsedBook",
+    "StoredBookRecord",
     "TextChunk",
     "chunk_text",
     "clean_text",
     "create_ingestion_store",
     "parse_epub",
+    "run_ingestion",
     "scan_epub_files",
 ]
 
@@ -50,11 +62,20 @@ def __getattr__(name: str):
             "clean_text": clean_text,
         }[name]
 
-    if name in {"BookRecord", "ChunkRecord", "IngestionStore", "create_ingestion_store"}:
+    if name in {
+        "BookRecord",
+        "ChunkRecord",
+        "IngestionStore",
+        "IngestionSummary",
+        "StoredBookRecord",
+        "create_ingestion_store",
+    }:
         from librarian_ingestion.storage import (
             BookRecord,
             ChunkRecord,
             IngestionStore,
+            IngestionSummary,
+            StoredBookRecord,
             create_ingestion_store,
         )
 
@@ -62,7 +83,22 @@ def __getattr__(name: str):
             "BookRecord": BookRecord,
             "ChunkRecord": ChunkRecord,
             "IngestionStore": IngestionStore,
+            "IngestionSummary": IngestionSummary,
+            "StoredBookRecord": StoredBookRecord,
             "create_ingestion_store": create_ingestion_store,
+        }[name]
+
+    if name in {"IngestionOptions", "IngestionResult", "run_ingestion"}:
+        from librarian_ingestion.ingest import (
+            IngestionOptions,
+            IngestionResult,
+            run_ingestion,
+        )
+
+        return {
+            "IngestionOptions": IngestionOptions,
+            "IngestionResult": IngestionResult,
+            "run_ingestion": run_ingestion,
         }[name]
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

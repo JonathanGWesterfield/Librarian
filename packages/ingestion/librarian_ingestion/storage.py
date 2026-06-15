@@ -48,6 +48,25 @@ class StoredBookSnapshot:
     chunk_count: int
 
 
+@dataclass(frozen=True)
+class StoredBookRecord:
+    id: str
+    relative_path: str
+    title: Optional[str]
+    authors: list[str]
+    publisher: Optional[str]
+    status: str
+    error_message: Optional[str]
+    chunk_count: int
+
+
+@dataclass(frozen=True)
+class IngestionSummary:
+    total_books: int
+    total_chunks: int
+    status_counts: dict[str, int]
+
+
 class IngestionStore(Protocol):
     def initialize(self) -> None:
         ...
@@ -71,6 +90,14 @@ class IngestionStore(Protocol):
         ...
 
     def count_chunks(self) -> int:
+        ...
+
+    def get_summary(self) -> IngestionSummary:
+        ...
+
+    def list_books(
+        self, *, status: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[StoredBookRecord]:
         ...
 
     def close(self) -> None:
@@ -259,6 +286,58 @@ class SQLiteIngestionStore:
     def count_chunks(self) -> int:
         return self._connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
 
+    def get_summary(self) -> IngestionSummary:
+        status_counts = {
+            status: count
+            for status, count in self._connection.execute(
+                "SELECT status, COUNT(*) FROM books GROUP BY status"
+            ).fetchall()
+        }
+        return IngestionSummary(
+            total_books=self.count_books(),
+            total_chunks=self.count_chunks(),
+            status_counts=status_counts,
+        )
+
+    def list_books(
+        self, *, status: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[StoredBookRecord]:
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        parameters: list[object] = []
+        where = ""
+        if status:
+            where = "WHERE books.status = ?"
+            parameters.append(status)
+
+        rows = self._connection.execute(
+            f"""
+            SELECT books.id, books.relative_path, books.title, books.authors_json,
+                   books.publisher, books.status, books.error_message,
+                   COUNT(chunks.id) AS chunk_count
+            FROM books
+            LEFT JOIN chunks ON chunks.book_id = books.id
+            {where}
+            GROUP BY books.id
+            ORDER BY COALESCE(books.title, books.relative_path) ASC
+            LIMIT ? OFFSET ?
+            """,
+            (*parameters, limit, offset),
+        ).fetchall()
+        return [
+            StoredBookRecord(
+                id=row[0],
+                relative_path=row[1],
+                title=row[2],
+                authors=_decode_authors(row[3]),
+                publisher=row[4],
+                status=row[5],
+                error_message=row[6],
+                chunk_count=row[7],
+            )
+            for row in rows
+        ]
+
     def close(self) -> None:
         if self.connection is not None:
             self.connection.close()
@@ -310,6 +389,16 @@ def normalize_metadata_value(value: Optional[str]) -> str | None:
         return None
     normalized = re.sub(r"\s+", " ", value).strip().casefold()
     return normalized or None
+
+
+def _decode_authors(authors_json: str) -> list[str]:
+    try:
+        authors = json.loads(authors_json)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(authors, list):
+        return []
+    return [author for author in authors if isinstance(author, str)]
 
 
 def create_ingestion_store(database_url: str) -> IngestionStore:

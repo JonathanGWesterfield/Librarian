@@ -78,6 +78,12 @@ Initial script:
 python scripts/ingest_epubs.py --books-dir ./Epub-Books --list
 ```
 
+Machine-readable output for desktop apps and automation:
+
+```bash
+python3 scripts/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db --json
+```
+
 ## Step 2: EPUB Parsing
 
 Use the ingestion package as the parsing boundary:
@@ -176,6 +182,25 @@ class IngestionStore:
 
 Postgres is a likely future upgrade when full-text search, pgvector, hybrid
 retrieval, or heavier concurrent use become important.
+
+## Desktop/API Integration
+
+The ingestion flow should be easy to trigger from a future Electron or Tauri
+desktop app. The current integration points are:
+
+```text
+CLI:
+  python3 scripts/ingest_epubs.py --json
+
+API:
+  POST /ingestion/run        body: books_dir, database_url, force, list_epubs
+  GET  /ingestion/summary    query: database_url
+  GET  /books                query: database_url, status, limit, offset
+```
+
+`POST /ingestion/run` executes the same ingestion service as the CLI. `GET
+/ingestion/summary` returns book/chunk totals and status counts. `GET /books`
+returns stored book records with their ingestion status and chunk counts.
 
 ## Step 6: Embedding Interface
 
