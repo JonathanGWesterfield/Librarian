@@ -1,10 +1,11 @@
+import json
 import sqlite3
 import sys
 import unittest
-from shutil import copyfile
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from shutil import copyfile
 from tempfile import TemporaryDirectory
 
 from tests.ingestion.fixtures import SAMPLE_EPUB_SHA256
@@ -63,6 +64,30 @@ class IngestEpubsScriptTests(unittest.TestCase):
         self.assertGreater(chunk_count, 0)
         self.assertEqual(file_hash, SAMPLE_EPUB_SHA256)
 
+    def test_script_can_emit_json_for_desktop_or_automation_clients(self) -> None:
+        """Verify the CLI has a machine-readable integration path.
+        A future Electron or Tauri shell can call the script and parse JSON
+        instead of scraping human-oriented terminal output.
+        """
+        output = StringIO()
+        with redirect_stdout(output):
+            exit_code = main(
+                [
+                    "--books-dir",
+                    str(self.books_dir),
+                    "--database-url",
+                    self.database_url,
+                    "--json",
+                ]
+            )
+
+        payload = json.loads(output.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["found"], 1)
+        self.assertEqual(payload["parsed"], 1)
+        self.assertEqual(payload["total_books"], 1)
+
     def test_script_marks_different_hash_with_same_metadata_as_duplicate(self) -> None:
         """Verify the CLI blocks duplicate books beyond exact file hashes.
         A copied EPUB with extra bytes has a different hash, but matching title,
@@ -109,6 +134,38 @@ class IngestEpubsScriptTests(unittest.TestCase):
         self.assertEqual(statuses["a-sample.epub"], "ingested")
         self.assertEqual(statuses["z-sample-copy.epub"], "duplicate")
         self.assertEqual(duplicate_chunk_count, 0)
+
+    def test_script_marks_exact_file_copy_as_duplicate(self) -> None:
+        """Verify duplicate detection handles exact copies under new filenames.
+        Exact copies have the same SHA-256 hash, so duplicate records need a
+        path-scoped database ID to avoid colliding with the ingested source.
+        """
+        duplicate_books_dir = Path(self.temp_dir.name) / "books"
+        duplicate_books_dir.mkdir()
+        copyfile(self.books_dir / "sample.epub", duplicate_books_dir / "a-sample.epub")
+        copyfile(self.books_dir / "sample.epub", duplicate_books_dir / "z-sample-copy.epub")
+
+        with redirect_stdout(StringIO()):
+            exit_code = main(
+                [
+                    "--books-dir",
+                    str(duplicate_books_dir),
+                    "--database-url",
+                    self.database_url,
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+
+        with sqlite3.connect(self.database_path) as connection:
+            statuses = dict(
+                connection.execute(
+                    "SELECT relative_path, status FROM books ORDER BY relative_path"
+                ).fetchall()
+            )
+
+        self.assertEqual(statuses["a-sample.epub"], "ingested")
+        self.assertEqual(statuses["z-sample-copy.epub"], "duplicate")
 
 
 if __name__ == "__main__":

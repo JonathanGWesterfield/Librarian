@@ -148,6 +148,36 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(publisher, SAMPLE_PUBLISHER)
         self.assertIn("The clockwork garden woke at dawn.", first_chunk)
 
+    def test_summary_and_book_listing_support_read_clients(self) -> None:
+        """Verify desktop/API clients can inspect stored ingestion state.
+        The summary and listing helpers provide read models without requiring
+        callers to know the SQLite schema.
+        """
+        parsed = parse_epub(SAMPLE_EPUB)
+        book = BookRecord(
+            id=SAMPLE_EPUB_SHA256,
+            source_path=str(SAMPLE_EPUB),
+            relative_path="sample.epub",
+            file_hash=SAMPLE_EPUB_SHA256,
+            size_bytes=SAMPLE_EPUB.stat().st_size,
+            title=parsed.title,
+            authors=parsed.authors,
+            status="ingested",
+            publisher=parsed.publisher,
+            ingested_at=utc_now(),
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+
+            summary = store.get_summary()
+            books = store.list_books()
+
+        self.assertEqual(summary.total_books, 1)
+        self.assertEqual(summary.status_counts["ingested"], 1)
+        self.assertEqual(books[0].title, "The Clockwork Garden")
+        self.assertEqual(books[0].authors, ["Test Author"])
+
     def test_get_book_by_identity_finds_existing_book_metadata(self) -> None:
         """Verify the adapter can find an already ingested book by metadata.
         This is the guardrail that prevents a different file hash of the same
