@@ -4,12 +4,20 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from librarian_ingestion.chunk import chunk_text
-from librarian_ingestion.config import resolve_books_dir, resolve_database_url
+from librarian_ingestion.config import (
+    resolve_books_dir,
+    resolve_database_url,
+    resolve_embedding_model,
+    resolve_embedding_provider,
+    resolve_ollama_base_url,
+)
+from librarian_ingestion.embeddings import create_embedder
 from librarian_ingestion.epub import parse_epub
 from librarian_ingestion.scan import DiscoveredEpub, scan_epub_files
 from librarian_ingestion.storage import (
     BookRecord,
     ChunkRecord,
+    EmbeddingRecord,
     create_ingestion_store,
     utc_now,
 )
@@ -21,6 +29,11 @@ class IngestionOptions:
     database_url: str | None = None
     force: bool = False
     list_epubs: bool = False
+    embed_chunks: bool = False
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    ollama_base_url: str | None = None
+    embedding_batch_size: int = 16
 
 
 @dataclass(frozen=True)
@@ -36,14 +49,18 @@ class BookIngestionResult:
 class IngestionResult:
     books_dir: str
     database_url: str
+    embedding_provider: str
+    embedding_model: str
     found: int
     parsed: int = 0
     skipped_unchanged: int = 0
     skipped_duplicates: int = 0
     failed: int = 0
     stored_chunks: int = 0
+    stored_embeddings: int = 0
     total_books: int = 0
     total_chunks: int = 0
+    total_embeddings: int = 0
     books: list[BookIngestionResult] = field(default_factory=list)
     discovered: list[dict[str, object]] = field(default_factory=list)
 
@@ -55,6 +72,9 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
     options = options or IngestionOptions()
     books_dir = resolve_books_dir(options.books_dir)
     database_url = resolve_database_url(options.database_url)
+    embedding_provider = resolve_embedding_provider(options.embedding_provider)
+    embedding_model = resolve_embedding_model(options.embedding_model)
+    ollama_base_url = resolve_ollama_base_url(options.ollama_base_url)
     discovered_epubs = scan_epub_files(books_dir)
     book_results: list[BookIngestionResult] = []
 
@@ -63,6 +83,14 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
     duplicate_count = 0
     failed_count = 0
     chunk_count = 0
+    embedding_count = 0
+    embedder = None
+    if options.embed_chunks:
+        embedder = create_embedder(
+            embedding_provider,
+            model=embedding_model,
+            ollama_base_url=ollama_base_url,
+        )
 
     store = create_ingestion_store(database_url)
     store.initialize()
@@ -123,6 +151,16 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                     for chunk in chunks
                 ]
                 store.save_book_with_chunks(book, chunk_records)
+                if embedder is not None:
+                    embedding_records = _embed_chunks(
+                        chunk_records,
+                        provider=embedder.provider,
+                        model=embedder.model,
+                        batch_size=options.embedding_batch_size,
+                        embed_texts=embedder.embed_texts,
+                    )
+                    store.save_chunk_embeddings(embedding_records)
+                    embedding_count += len(embedding_records)
                 parsed_count += 1
                 chunk_count += len(chunk_records)
                 book_results.append(
@@ -137,6 +175,7 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
 
         total_books = store.count_books()
         total_chunks = store.count_chunks()
+        total_embeddings = store.count_embeddings()
     finally:
         store.close()
 
@@ -152,17 +191,55 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
     return IngestionResult(
         books_dir=str(books_dir),
         database_url=database_url,
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
         found=len(discovered_epubs),
         parsed=parsed_count,
         skipped_unchanged=skipped_count,
         skipped_duplicates=duplicate_count,
         failed=failed_count,
         stored_chunks=chunk_count,
+        stored_embeddings=embedding_count,
         total_books=total_books,
         total_chunks=total_chunks,
+        total_embeddings=total_embeddings,
         books=book_results,
         discovered=discovered,
     )
+
+
+def _embed_chunks(
+    chunks: list[ChunkRecord],
+    *,
+    provider: str,
+    model: str,
+    batch_size: int,
+    embed_texts,
+) -> list[EmbeddingRecord]:
+    if not chunks:
+        return []
+
+    records: list[EmbeddingRecord] = []
+    safe_batch_size = max(1, batch_size)
+    for start in range(0, len(chunks), safe_batch_size):
+        batch = chunks[start:start + safe_batch_size]
+        vectors = embed_texts([chunk.text for chunk in batch])
+        if not vectors:
+            continue
+        if len(vectors) != len(batch):
+            raise ValueError("embedder returned a different number of vectors")
+        for chunk, vector in zip(batch, vectors):
+            records.append(
+                EmbeddingRecord(
+                    id=f"{chunk.id}:{provider}:{model}",
+                    chunk_id=chunk.id,
+                    provider=provider,
+                    model=model,
+                    vector=vector,
+                    dimensions=len(vector),
+                )
+            )
+    return records
 
 
 def _book_record(

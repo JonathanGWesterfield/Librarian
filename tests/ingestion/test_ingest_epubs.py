@@ -87,6 +87,35 @@ class IngestEpubsScriptTests(unittest.TestCase):
         self.assertEqual(payload["found"], 1)
         self.assertEqual(payload["parsed"], 1)
         self.assertEqual(payload["total_books"], 1)
+        self.assertEqual(payload["embedding_provider"], "noop")
+        self.assertEqual(payload["total_embeddings"], 0)
+
+    def test_script_can_run_embedding_path_with_noop_provider(self) -> None:
+        """Verify the embedding path can be enabled without a real model.
+        This gives us coverage for the CLI flags and pipeline wiring while
+        keeping unit tests independent from Ollama.
+        """
+        output = StringIO()
+        with redirect_stdout(output):
+            exit_code = main(
+                [
+                    "--books-dir",
+                    str(self.books_dir),
+                    "--database-url",
+                    self.database_url,
+                    "--embed",
+                    "--embedding-provider",
+                    "noop",
+                    "--json",
+                ]
+            )
+
+        payload = json.loads(output.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["stored_chunks"], 1)
+        self.assertEqual(payload["stored_embeddings"], 0)
+        self.assertEqual(payload["embedding_provider"], "noop")
 
     def test_script_marks_different_hash_with_same_metadata_as_duplicate(self) -> None:
         """Verify the CLI blocks duplicate books beyond exact file hashes.

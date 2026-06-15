@@ -6,9 +6,15 @@ from typing import Mapping
 
 BOOKS_DIR_ENV = "LIBRARIAN_BOOKS_DIR"
 DATABASE_URL_ENV = "LIBRARIAN_DATABASE_URL"
+EMBEDDING_PROVIDER_ENV = "LIBRARIAN_EMBEDDING_PROVIDER"
+EMBEDDING_MODEL_ENV = "LIBRARIAN_EMBEDDING_MODEL"
+OLLAMA_BASE_URL_ENV = "LIBRARIAN_OLLAMA_BASE_URL"
 DEFAULT_LOCAL_BOOKS_DIR = "Epub-Books"
 DEFAULT_CONTAINER_BOOKS_DIR = "/books"
 DEFAULT_DATABASE_URL = "sqlite:///data/librarian.db"
+DEFAULT_EMBEDDING_PROVIDER = "noop"
+DEFAULT_EMBEDDING_MODEL = "all-minilm"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 
 
 def resolve_books_dir(
@@ -43,6 +49,42 @@ def resolve_database_url(
 
     source_env = env if env is not None else os.environ
     return source_env.get(DATABASE_URL_ENV, DEFAULT_DATABASE_URL)
+
+
+def resolve_embedding_provider(
+    embedding_provider: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    if embedding_provider:
+        return embedding_provider
+
+    source_env = env if env is not None else os.environ
+    return source_env.get(EMBEDDING_PROVIDER_ENV, DEFAULT_EMBEDDING_PROVIDER)
+
+
+def resolve_embedding_model(
+    embedding_model: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    if embedding_model:
+        return embedding_model
+
+    source_env = env if env is not None else os.environ
+    return source_env.get(EMBEDDING_MODEL_ENV, DEFAULT_EMBEDDING_MODEL)
+
+
+def resolve_ollama_base_url(
+    ollama_base_url: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    if ollama_base_url:
+        return ollama_base_url.rstrip("/")
+
+    source_env = env if env is not None else os.environ
+    return source_env.get(OLLAMA_BASE_URL_ENV, DEFAULT_OLLAMA_BASE_URL).rstrip("/")
 
 
 def sqlite_path_from_url(database_url: str) -> Path:

@@ -12,6 +12,9 @@ sys.path.insert(0, str(INGESTION_PACKAGE))
 
 from librarian_ingestion.chunk import chunk_text
 from librarian_ingestion.config import (
+    resolve_embedding_model,
+    resolve_embedding_provider,
+    resolve_ollama_base_url,
     resolve_database_url,
     sqlite_path_from_url,
 )
@@ -19,6 +22,7 @@ from librarian_ingestion.epub import parse_epub
 from librarian_ingestion.storage import (
     BookRecord,
     ChunkRecord,
+    EmbeddingRecord,
     SQLiteIngestionStore,
     build_book_identity_key,
     create_ingestion_store,
@@ -37,6 +41,22 @@ class DatabaseConfigTests(unittest.TestCase):
             "sqlite:///tmp.db",
         )
         self.assertEqual(resolve_database_url(env={}), "sqlite:///data/librarian.db")
+
+    def test_resolve_embedding_config_tracks_local_provider_settings(self) -> None:
+        """Verify embedding settings are configurable but harmless by default.
+        The repo can remember that Ollama is the likely provider while default
+        ingestion still avoids any model download or network call.
+        """
+        env = {
+            "LIBRARIAN_EMBEDDING_PROVIDER": "ollama",
+            "LIBRARIAN_EMBEDDING_MODEL": "all-minilm",
+            "LIBRARIAN_OLLAMA_BASE_URL": "http://localhost:11434/",
+        }
+
+        self.assertEqual(resolve_embedding_provider(env=env), "ollama")
+        self.assertEqual(resolve_embedding_model(env=env), "all-minilm")
+        self.assertEqual(resolve_ollama_base_url(env=env), "http://localhost:11434")
+        self.assertEqual(resolve_embedding_provider(env={}), "noop")
 
     def test_sqlite_path_from_url_accepts_relative_and_absolute_paths(self) -> None:
         """Verify SQLite URL parsing supports common local paths.
@@ -177,6 +197,63 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(summary.status_counts["ingested"], 1)
         self.assertEqual(books[0].title, "The Clockwork Garden")
         self.assertEqual(books[0].authors, ["Test Author"])
+
+    def test_save_chunk_embeddings_persists_provider_model_and_vector(self) -> None:
+        """Verify chunk embeddings are stored as local runtime data.
+        Model weights stay outside the repo, but the database records which
+        provider/model produced each vector so future retrieval is reproducible.
+        """
+        parsed = parse_epub(SAMPLE_EPUB)
+        book = BookRecord(
+            id=SAMPLE_EPUB_SHA256,
+            source_path=str(SAMPLE_EPUB),
+            relative_path="sample.epub",
+            file_hash=SAMPLE_EPUB_SHA256,
+            size_bytes=SAMPLE_EPUB.stat().st_size,
+            title=parsed.title,
+            authors=parsed.authors,
+            status="ingested",
+            publisher=parsed.publisher,
+            ingested_at=utc_now(),
+        )
+        chunk = ChunkRecord(
+            id=f"{SAMPLE_EPUB_SHA256}:0",
+            book_id=SAMPLE_EPUB_SHA256,
+            chunk_index=0,
+            text="The clockwork garden woke at dawn.",
+            character_count=35,
+            token_estimate=8,
+        )
+        embedding = EmbeddingRecord(
+            id=f"{chunk.id}:ollama:all-minilm",
+            chunk_id=chunk.id,
+            provider="ollama",
+            model="all-minilm",
+            vector=[0.1, 0.2, 0.3],
+            dimensions=3,
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [chunk])
+            store.save_chunk_embeddings([embedding])
+            summary = store.get_summary()
+
+        self.assertEqual(summary.total_embeddings, 1)
+
+        with sqlite3.connect(self.database_path) as connection:
+            provider, model, dimensions, vector_json = connection.execute(
+                """
+                SELECT provider, model, dimensions, vector_json
+                FROM chunk_embeddings
+                WHERE chunk_id = ?
+                """,
+                (chunk.id,),
+            ).fetchone()
+
+        self.assertEqual(provider, "ollama")
+        self.assertEqual(model, "all-minilm")
+        self.assertEqual(dimensions, 3)
+        self.assertEqual(vector_json, "[0.1, 0.2, 0.3]")
 
     def test_get_book_by_identity_finds_existing_book_metadata(self) -> None:
         """Verify the adapter can find an already ingested book by metadata.

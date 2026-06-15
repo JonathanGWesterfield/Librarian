@@ -40,6 +40,17 @@ class ChunkRecord:
 
 
 @dataclass(frozen=True)
+class EmbeddingRecord:
+    id: str
+    chunk_id: str
+    provider: str
+    model: str
+    vector: list[float]
+    dimensions: int
+    created_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass(frozen=True)
 class StoredBookSnapshot:
     id: str
     relative_path: str
@@ -64,6 +75,7 @@ class StoredBookRecord:
 class IngestionSummary:
     total_books: int
     total_chunks: int
+    total_embeddings: int
     status_counts: dict[str, int]
 
 
@@ -86,10 +98,16 @@ class IngestionStore(Protocol):
     ) -> None:
         ...
 
+    def save_chunk_embeddings(self, embeddings: list[EmbeddingRecord]) -> None:
+        ...
+
     def count_books(self) -> int:
         ...
 
     def count_chunks(self) -> int:
+        ...
+
+    def count_embeddings(self) -> int:
         ...
 
     def get_summary(self) -> IngestionSummary:
@@ -280,11 +298,44 @@ class SQLiteIngestionStore:
                 ],
             )
 
+    def save_chunk_embeddings(self, embeddings: list[EmbeddingRecord]) -> None:
+        with self._connection:
+            self._connection.executemany(
+                """
+                INSERT INTO chunk_embeddings (
+                    id, chunk_id, provider, model, dimensions, vector_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chunk_id, provider, model) DO UPDATE SET
+                    id = excluded.id,
+                    dimensions = excluded.dimensions,
+                    vector_json = excluded.vector_json,
+                    created_at = excluded.created_at
+                """,
+                [
+                    (
+                        embedding.id,
+                        embedding.chunk_id,
+                        embedding.provider,
+                        embedding.model,
+                        embedding.dimensions,
+                        json.dumps(embedding.vector),
+                        embedding.created_at,
+                    )
+                    for embedding in embeddings
+                ],
+            )
+
     def count_books(self) -> int:
         return self._connection.execute("SELECT COUNT(*) FROM books").fetchone()[0]
 
     def count_chunks(self) -> int:
         return self._connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+
+    def count_embeddings(self) -> int:
+        return self._connection.execute(
+            "SELECT COUNT(*) FROM chunk_embeddings"
+        ).fetchone()[0]
 
     def get_summary(self) -> IngestionSummary:
         status_counts = {
@@ -296,6 +347,7 @@ class SQLiteIngestionStore:
         return IngestionSummary(
             total_books=self.count_books(),
             total_chunks=self.count_chunks(),
+            total_embeddings=self.count_embeddings(),
             status_counts=status_counts,
         )
 
@@ -443,4 +495,20 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_book_id ON chunks(book_id);
+
+CREATE TABLE IF NOT EXISTS chunk_embeddings (
+    id TEXT PRIMARY KEY,
+    chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    vector_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(chunk_id, provider, model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_chunk_id
+ON chunk_embeddings(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_provider_model
+ON chunk_embeddings(provider, model);
 """
