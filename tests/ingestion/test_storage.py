@@ -237,8 +237,16 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
             store.save_book_with_chunks(book, [chunk])
             store.save_chunk_embeddings([embedding])
             summary = store.get_summary()
+            embeddings = store.list_embeddings()
+            embedding_models = store.get_embedding_model_summaries()
 
         self.assertEqual(summary.total_embeddings, 1)
+        self.assertEqual(embeddings[0].chunk_id, chunk.id)
+        self.assertEqual(embeddings[0].relative_path, "sample.epub")
+        self.assertEqual(embeddings[0].vector_sample, [0.1, 0.2, 0.3])
+        self.assertIn("The clockwork garden", embeddings[0].text_preview)
+        self.assertEqual(embedding_models[0].provider, "ollama")
+        self.assertEqual(embedding_models[0].embedding_count, 1)
 
         with sqlite3.connect(self.database_path) as connection:
             provider, model, dimensions, vector_json = connection.execute(
