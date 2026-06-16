@@ -228,6 +228,33 @@ See the detailed implementation plan:
 
 ## Local Development
 
+System dependencies that cannot live in this repository:
+
+- Python 3.12+
+- Docker runtime: Docker Desktop, or Homebrew Docker CLI plus Colima
+- Docker Compose plugin
+- Ollama for local embedding models
+
+Run the setup helper to check system dependencies and install Python packages:
+
+```bash
+scripts/setup_local.sh
+```
+
+To let the helper install Homebrew-managed CLI dependencies where possible:
+
+```bash
+scripts/setup_local.sh --install-system-deps
+```
+
+The setup helper will not silently install Docker Desktop or other GUI apps. If
+you use Homebrew Docker instead of Docker Desktop, install Colima as the Docker
+runtime:
+
+```bash
+brew install docker docker-compose colima ollama
+```
+
 Install Python dependencies:
 
 ```bash
