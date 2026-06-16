@@ -3,8 +3,9 @@
 
 This script is intentionally human/operator-facing: it exposes step-by-step
 commands for ingesting EPUBs, previewing books/chunks, rebuilding embeddings,
-and inspecting database state. Product code should call the package services
-or FastAPI endpoints rather than shelling out to this script.
+running local search, and inspecting database state. Product code should call
+the package services or FastAPI endpoints rather than shelling out to this
+script.
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ from librarian_ingestion.embedding_ops import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
+from librarian_ingestion.search import SearchOptions, search_chunks
 from librarian_ingestion.storage import create_ingestion_store
 
 
@@ -128,6 +130,32 @@ def main(argv: list[str] | None = None) -> int:
     _add_paging(embeddings_parser, default_limit=5)
     _add_json_flag(embeddings_parser)
 
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Embed a query and rank stored chunks by cosine similarity.",
+    )
+    search_parser.add_argument("query", help="Natural-language search query.")
+    search_parser.add_argument(
+        "--embedding-provider",
+        choices=["noop", "ollama"],
+        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+    )
+    search_parser.add_argument(
+        "--embedding-model",
+        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+    )
+    search_parser.add_argument(
+        "--ollama-base-url",
+        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+    )
+    search_parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum ranked chunks to show.",
+    )
+    _add_json_flag(search_parser)
+
     args = parser.parse_args(argv)
     database_url = resolve_database_url(args.database_url)
 
@@ -184,6 +212,23 @@ def main(argv: list[str] | None = None) -> int:
                 offset=args.offset,
             )
             _print_payload(payload, args.json)
+            return 0
+        if args.command == "search":
+            result = search_chunks(
+                SearchOptions(
+                    query=args.query,
+                    database_url=database_url,
+                    embedding_provider=args.embedding_provider,
+                    embedding_model=args.embedding_model,
+                    ollama_base_url=args.ollama_base_url,
+                    limit=args.limit,
+                )
+            )
+            payload = result.to_dict()
+            if args.json:
+                _print_payload(payload, args.json)
+            else:
+                _print_search_response(payload)
             return 0
     except (EpubSourceError, ValueError, NotImplementedError, RuntimeError) as error:
         print(f"Error: {error}", file=sys.stderr)
@@ -311,6 +356,44 @@ def _print_payload(payload: object, as_json: bool) -> None:
 def _print_dict(payload: dict[str, object]) -> None:
     for key, value in payload.items():
         print(f"{key}: {value}")
+
+
+def _print_search_response(payload: dict[str, object]) -> None:
+    print("Librarian search")
+    print(f"Query: {payload['query']}")
+    print(
+        "Embedding: "
+        f"{payload['embedding_provider']} / {payload['embedding_model']} "
+        f"({payload['dimensions']} dimensions)"
+    )
+    print(f"Candidates scored: {payload['candidate_count']}")
+    print()
+
+    results = payload["results"]
+    if not isinstance(results, list) or not results:
+        print("No matching chunks found.")
+        return
+
+    for index, result in enumerate(results, start=1):
+        if not isinstance(result, dict):
+            continue
+        title = result["title"] or result["relative_path"]
+        authors = result["authors"]
+        author_text = ", ".join(authors) if isinstance(authors, list) else authors
+        print(f"{index}. score={float(result['score']):.4f}")
+        print(f"   book: {title}")
+        if author_text:
+            print(f"   authors: {author_text}")
+        print(f"   source: {result['relative_path']} chunk {result['chunk_index']}")
+        print(f"   text: {_single_line(str(result['text']), max_length=360)}")
+        print()
+
+
+def _single_line(text: str, *, max_length: int) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= max_length:
+        return compact
+    return f"{compact[: max_length - 3]}..."
 
 
 if __name__ == "__main__":
