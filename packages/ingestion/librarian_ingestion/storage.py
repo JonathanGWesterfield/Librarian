@@ -83,6 +83,28 @@ class StoredBookRecord:
 
 
 @dataclass(frozen=True)
+class StoredEmbeddingRecord:
+    id: str
+    chunk_id: str
+    book_id: str
+    relative_path: str
+    chunk_index: int
+    provider: str
+    model: str
+    dimensions: int
+    vector_sample: list[float]
+    text_preview: str
+
+
+@dataclass(frozen=True)
+class EmbeddingModelSummary:
+    provider: str
+    model: str
+    dimensions: int
+    embedding_count: int
+
+
+@dataclass(frozen=True)
 class IngestionSummary:
     total_books: int
     total_chunks: int
@@ -118,6 +140,19 @@ class IngestionStore(Protocol):
         ...
 
     def list_chunks(self, *, limit: int = 500, offset: int = 0) -> list[StoredChunkRecord]:
+        ...
+
+    def list_embeddings(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[StoredEmbeddingRecord]:
+        ...
+
+    def get_embedding_model_summaries(self) -> list[EmbeddingModelSummary]:
         ...
 
     def count_books(self) -> int:
@@ -393,6 +428,77 @@ class SQLiteIngestionStore:
             for row in rows
         ]
 
+    def list_embeddings(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[StoredEmbeddingRecord]:
+        limit = max(1, min(limit, 500))
+        offset = max(0, offset)
+        where: list[str] = []
+        parameters: list[object] = []
+        if provider:
+            where.append("chunk_embeddings.provider = ?")
+            parameters.append(provider)
+        if model:
+            where.append("chunk_embeddings.model = ?")
+            parameters.append(model)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+        rows = self._connection.execute(
+            f"""
+            SELECT chunk_embeddings.id, chunk_embeddings.chunk_id, chunks.book_id,
+                   books.relative_path, chunks.chunk_index, chunk_embeddings.provider,
+                   chunk_embeddings.model, chunk_embeddings.dimensions,
+                   chunk_embeddings.vector_json, chunks.text
+            FROM chunk_embeddings
+            JOIN chunks ON chunks.id = chunk_embeddings.chunk_id
+            JOIN books ON books.id = chunks.book_id
+            {where_sql}
+            ORDER BY books.relative_path ASC, chunks.chunk_index ASC,
+                     chunk_embeddings.provider ASC, chunk_embeddings.model ASC
+            LIMIT ? OFFSET ?
+            """,
+            (*parameters, limit, offset),
+        ).fetchall()
+        return [
+            StoredEmbeddingRecord(
+                id=row[0],
+                chunk_id=row[1],
+                book_id=row[2],
+                relative_path=row[3],
+                chunk_index=row[4],
+                provider=row[5],
+                model=row[6],
+                dimensions=row[7],
+                vector_sample=_decode_vector_sample(row[8]),
+                text_preview=_preview_text(row[9]),
+            )
+            for row in rows
+        ]
+
+    def get_embedding_model_summaries(self) -> list[EmbeddingModelSummary]:
+        rows = self._connection.execute(
+            """
+            SELECT provider, model, dimensions, COUNT(*) AS embedding_count
+            FROM chunk_embeddings
+            GROUP BY provider, model, dimensions
+            ORDER BY provider ASC, model ASC, dimensions ASC
+            """
+        ).fetchall()
+        return [
+            EmbeddingModelSummary(
+                provider=row[0],
+                model=row[1],
+                dimensions=row[2],
+                embedding_count=row[3],
+            )
+            for row in rows
+        ]
+
     def count_books(self) -> int:
         return self._connection.execute("SELECT COUNT(*) FROM books").fetchone()[0]
 
@@ -518,6 +624,29 @@ def _decode_authors(authors_json: str) -> list[str]:
     if not isinstance(authors, list):
         return []
     return [author for author in authors if isinstance(author, str)]
+
+
+def _decode_vector_sample(vector_json: str, sample_size: int = 5) -> list[float]:
+    try:
+        vector = json.loads(vector_json)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(vector, list):
+        return []
+    sample: list[float] = []
+    for value in vector[:sample_size]:
+        try:
+            sample.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return sample
+
+
+def _preview_text(text: str, max_length: int = 140) -> str:
+    preview = re.sub(r"\s+", " ", text).strip()
+    if len(preview) <= max_length:
+        return preview
+    return f"{preview[:max_length - 3]}..."
 
 
 def create_ingestion_store(database_url: str) -> IngestionStore:

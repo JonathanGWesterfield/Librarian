@@ -13,10 +13,12 @@ if TYPE_CHECKING:
     from librarian_ingestion.storage import (
         BookRecord,
         ChunkRecord,
+        EmbeddingModelSummary,
         EmbeddingRecord,
         IngestionStore,
         IngestionSummary,
         StoredBookRecord,
+        StoredEmbeddingRecord,
     )
 
 __all__ = [
@@ -25,6 +27,7 @@ __all__ = [
     "DiscoveredEpub",
     "Embedder",
     "EmbeddingError",
+    "EmbeddingModelSummary",
     "EmbeddingRecord",
     "EpubSourceError",
     "IngestionStore",
@@ -35,6 +38,7 @@ __all__ = [
     "RebuildEmbeddingsOptions",
     "RebuildEmbeddingsResult",
     "StoredBookRecord",
+    "StoredEmbeddingRecord",
     "TextChunk",
     "chunk_text",
     "clean_text",
@@ -108,29 +112,35 @@ def __getattr__(name: str):
     if name in {
         "BookRecord",
         "ChunkRecord",
+        "EmbeddingModelSummary",
         "EmbeddingRecord",
         "IngestionStore",
         "IngestionSummary",
         "StoredBookRecord",
+        "StoredEmbeddingRecord",
         "create_ingestion_store",
     }:
         from librarian_ingestion.storage import (
             BookRecord,
             ChunkRecord,
+            EmbeddingModelSummary,
             EmbeddingRecord,
             IngestionStore,
             IngestionSummary,
             StoredBookRecord,
+            StoredEmbeddingRecord,
             create_ingestion_store,
         )
 
         return {
             "BookRecord": BookRecord,
             "ChunkRecord": ChunkRecord,
+            "EmbeddingModelSummary": EmbeddingModelSummary,
             "EmbeddingRecord": EmbeddingRecord,
             "IngestionStore": IngestionStore,
             "IngestionSummary": IngestionSummary,
             "StoredBookRecord": StoredBookRecord,
+            "StoredEmbeddingRecord": StoredEmbeddingRecord,
             "create_ingestion_store": create_ingestion_store,
         }[name]
 
