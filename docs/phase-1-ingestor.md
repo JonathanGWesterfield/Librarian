@@ -32,6 +32,7 @@ Package services:
 Product/API endpoints:
   POST /ingestion/run
   POST /embeddings/rebuild
+  POST /embeddings/query
   GET  /ingestion/summary
   GET  /books
 

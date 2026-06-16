@@ -42,6 +42,56 @@ class RebuildEmbeddingsResult:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class EmbedQueryOptions:
+    query: str
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    ollama_base_url: str | None = None
+
+
+@dataclass(frozen=True)
+class EmbedQueryResult:
+    query: str
+    embedding_provider: str
+    embedding_model: str
+    dimensions: int
+    vector: list[float]
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def embed_query(options: EmbedQueryOptions) -> EmbedQueryResult:
+    query = options.query.strip()
+    if not query:
+        raise ValueError("query must not be empty")
+
+    provider = resolve_embedding_provider(options.embedding_provider)
+    model = resolve_embedding_model(options.embedding_model)
+    ollama_base_url = resolve_ollama_base_url(options.ollama_base_url)
+    embedder = create_embedder(
+        provider,
+        model=model,
+        ollama_base_url=ollama_base_url,
+    )
+    vectors = embedder.embed_texts([query])
+    if not vectors:
+        vector: list[float] = []
+    elif len(vectors) == 1:
+        vector = vectors[0]
+    else:
+        raise ValueError("embedder returned a different number of vectors")
+
+    return EmbedQueryResult(
+        query=query,
+        embedding_provider=embedder.provider,
+        embedding_model=embedder.model,
+        dimensions=len(vector),
+        vector=vector,
+    )
+
+
 def rebuild_embeddings(
     options: RebuildEmbeddingsOptions | None = None,
 ) -> RebuildEmbeddingsResult:

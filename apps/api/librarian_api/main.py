@@ -8,7 +8,9 @@ from pydantic import BaseModel
 
 from librarian_api.config import settings
 from librarian_ingestion.embedding_ops import (
+    EmbedQueryOptions,
     RebuildEmbeddingsOptions,
+    embed_query,
     rebuild_embeddings,
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
@@ -39,6 +41,13 @@ class RebuildEmbeddingsRequest(BaseModel):
     chunk_page_size: int = 500
     reset: bool = False
     reset_all: bool = False
+
+
+class EmbedQueryRequest(BaseModel):
+    query: str
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
 
 
 @app.get("/health")
@@ -106,6 +115,22 @@ def rebuild_embeddings_endpoint(request: RebuildEmbeddingsRequest) -> dict[str, 
                 chunk_page_size=request.chunk_page_size,
                 reset=request.reset,
                 reset_all=request.reset_all,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.post("/embeddings/query")
+def embed_query_endpoint(request: EmbedQueryRequest) -> dict[str, object]:
+    try:
+        result = embed_query(
+            EmbedQueryOptions(
+                query=request.query,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+                ollama_base_url=request.ollama_base_url,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:

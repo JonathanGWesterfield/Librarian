@@ -328,6 +328,8 @@ POST /ingestion/run        body: books_dir, database_url, force, list_epubs,
                             ollama_base_url, embedding_batch_size
 POST /embeddings/rebuild   body: database_url, embedding_provider,
                             embedding_model, ollama_base_url, reset, reset_all
+POST /embeddings/query     body: query, embedding_provider, embedding_model,
+                            ollama_base_url
 GET  /ingestion/summary    query: database_url
 GET  /books                query: database_url, status, limit, offset
 ```
