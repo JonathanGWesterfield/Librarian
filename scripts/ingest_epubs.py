@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Narrow CLI wrapper for the canonical EPUB ingestion workflow.
+
+This script exists for direct local/batch ingestion. It delegates the real
+parse/chunk/store behavior to librarian_ingestion.ingest.run_ingestion, which
+is also used by API and playground entrypoints.
+"""
 from __future__ import annotations
 
 import argparse

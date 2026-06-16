@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""Developer playground CLI for inspecting Librarian's local pipeline.
+
+This script is intentionally human/operator-facing: it exposes step-by-step
+commands for ingesting EPUBs, previewing books/chunks, rebuilding embeddings,
+and inspecting database state. Product code should call the package services
+or FastAPI endpoints rather than shelling out to this script.
+"""
 from __future__ import annotations
 
 import argparse
