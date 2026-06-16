@@ -9,9 +9,8 @@ from librarian_ingestion.config import (
     resolve_database_url,
     resolve_embedding_model,
     resolve_embedding_provider,
-    resolve_ollama_base_url,
 )
-from librarian_ingestion.embeddings import create_embedder
+from librarian_ingestion.embeddings import create_configured_embedder
 from librarian_ingestion.epub import parse_epub
 from librarian_ingestion.scan import DiscoveredEpub, scan_epub_files
 from librarian_ingestion.storage import (
@@ -74,7 +73,6 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
     database_url = resolve_database_url(options.database_url)
     embedding_provider = resolve_embedding_provider(options.embedding_provider)
     embedding_model = resolve_embedding_model(options.embedding_model)
-    ollama_base_url = resolve_ollama_base_url(options.ollama_base_url)
     discovered_epubs = scan_epub_files(books_dir)
     book_results: list[BookIngestionResult] = []
 
@@ -86,10 +84,10 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
     embedding_count = 0
     embedder = None
     if options.embed_chunks:
-        embedder = create_embedder(
-            embedding_provider,
-            model=embedding_model,
-            ollama_base_url=ollama_base_url,
+        embedder = create_configured_embedder(
+            provider=options.embedding_provider,
+            model=options.embedding_model,
+            ollama_base_url=options.ollama_base_url,
         )
 
     store = create_ingestion_store(database_url)

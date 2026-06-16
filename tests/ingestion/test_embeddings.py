@@ -7,7 +7,12 @@ REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
 INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
-from librarian_ingestion.embeddings import NoopEmbedder, OllamaEmbedder, create_embedder
+from librarian_ingestion.embeddings import (
+    NoopEmbedder,
+    OllamaEmbedder,
+    create_configured_embedder,
+    create_embedder,
+)
 
 
 class EmbeddingProviderTests(unittest.TestCase):
@@ -27,6 +32,20 @@ class EmbeddingProviderTests(unittest.TestCase):
         """
         embedder = create_embedder(
             "ollama",
+            model="all-minilm",
+            ollama_base_url="http://localhost:11434",
+        )
+
+        self.assertIsInstance(embedder, OllamaEmbedder)
+        self.assertEqual(embedder.model, "all-minilm")
+
+    def test_create_configured_embedder_resolves_provider_settings(self) -> None:
+        """Verify common provider/model resolution stays in one helper.
+        Ingestion, embedding rebuilds, and query embedding all use this helper
+        so provider configuration does not drift across workflows.
+        """
+        embedder = create_configured_embedder(
+            provider="ollama",
             model="all-minilm",
             ollama_base_url="http://localhost:11434",
         )
