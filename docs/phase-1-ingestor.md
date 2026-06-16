@@ -1,30 +1,44 @@
 # Phase 1: EPUB Ingestion MVP
 
-Phase 1 builds the first real ingestion loop for Librarian. The goal is a
-standalone Python script that can scan a configured EPUB directory, parse each
-book, extract text, prepare chunks for embeddings, and write local ingestion
-artifacts that are easy to inspect.
+Phase 1 built the first real ingestion loop for Librarian. The current system
+can scan a configured EPUB directory, parse each book, extract text, chunk it,
+store local records, and prepare or generate local embeddings through Ollama.
 
-This phase should not call a hosted LLM and should not require an OpenAI API
-key. Embedding generation will be added behind an interface, but the first
-version can run without a real embedding model.
+This phase does not call a hosted LLM and does not require an OpenAI API key.
+Codex remains an optional generation layer after retrieval, not part of full
+book ingestion.
 
 ## Goals
 
-- Add a standalone ingestion script.
+- Add a standalone ingestion script and interactive playground script.
 - Read the EPUB source directory from configuration.
 - Scan all EPUB files in the configured directory.
 - Compute file hashes so unchanged books can be skipped.
 - Extract EPUB metadata and text.
 - Clean and normalize extracted text.
 - Split text into source-aware chunks.
-- Write local ingestion output for books, chunks, and manifest state.
+- Write local ingestion output for books, chunks, and embedding vectors.
 - Leave a clear interface for local embedding generation.
+- Expose FastAPI endpoints for ingestion, summary, book listing, and embedding
+  rebuilds.
 
-## Proposed Entry Point
+## Entry Points
 
 ```text
-scripts/play/ingest_epubs.py
+Package services:
+  librarian_ingestion.ingest.run_ingestion
+  librarian_ingestion.embedding_ops.rebuild_embeddings
+
+Product/API endpoints:
+  POST /ingestion/run
+  POST /embeddings/rebuild
+  GET  /ingestion/summary
+  GET  /books
+
+Development/operator scripts:
+  scripts/play/ingest_epubs.py
+  scripts/play/librarian.py
+  scripts/rebuild_embeddings.py
 ```
 
 Example local usage:
@@ -39,9 +53,8 @@ Example Docker-oriented usage:
 LIBRARIAN_BOOKS_DIR=/books python scripts/play/ingest_epubs.py
 ```
 
-The script should use the same settings model as the API when possible, so the
-configured ingestion location stays consistent across local and containerized
-runs.
+The FastAPI endpoints and CLI wrappers delegate to the same package services,
+so the product path and developer scripts share behavior.
 
 ## Pipeline
 
@@ -54,8 +67,8 @@ load settings
   -> extract metadata
   -> clean text
   -> chunk text
-  -> prepare embedding inputs
-  -> write local artifacts
+  -> optionally generate embeddings
+  -> write local books, chunks, and embeddings
   -> print ingestion summary
 ```
 
@@ -256,22 +269,16 @@ without deleting `books`, `chunks`, or raw text.
 Other later implementations can target local providers such as
 sentence-transformers, LM Studio, or another local embedding service.
 
-## Step 7: Idempotency
+## Idempotency
 
-The script should avoid reprocessing unchanged EPUBs. At minimum,
-`manifest.json` should store:
+The original plan mentioned a `manifest.json`, but the implementation now uses
+SQLite as the manifest of record. `books.relative_path`, `books.file_hash`, and
+`books.status` let ingestion skip unchanged EPUBs. When a file changes, the
+book and its chunks are rewritten through the storage adapter.
 
-```json
-{
-  "source_path": "...",
-  "file_hash": "...",
-  "ingested_at": "...",
-  "chunk_count": 123
-}
-```
-
-If an EPUB path and hash are unchanged, the script can skip it. If a file hash
-changes, the script should reprocess that book.
+Embedding rebuilds are intentionally separate from EPUB parsing. They operate
+on existing `chunks` rows and can delete/regenerate only `chunk_embeddings`
+without deleting raw book text.
 
 ## Expected Output
 
@@ -287,20 +294,30 @@ Skipped unchanged 3
 Skipped duplicates 0
 Failed 0
 Stored chunks 4120
-Database totals: 54 books, 4120 chunks
+Stored embeddings 4120
+Database totals: 54 books, 4120 chunks, 4120 embeddings
 ```
 
-## First Pull Request Scope
-
-The first implementation PR for this phase should include:
+## Completed Scope
 
 - `scripts/play/ingest_epubs.py`
+- `scripts/play/librarian.py`
+- `scripts/rebuild_embeddings.py`
 - Chunking utilities in `packages/ingestion`
-- JSONL persistence under `data/ingestion`
+- SQLite persistence under `data/librarian.db`
 - Config-based `LIBRARIAN_BOOKS_DIR` support
 - File hashing and unchanged-file skipping
 - Summary output
-- Tests for cleaning, chunking, and manifest behavior
+- Local Ollama embedding provider scaffolding
+- Embedding rebuild support
+- Tests for scanning, parsing, cleaning, chunking, storage, ingestion,
+  embeddings, and playground flows
 
-Real embedding generation should remain out of scope until the ingestion output
-is reliable and easy to inspect.
+## Next Phase
+
+Phase 2 continues from this base by adding retrieval:
+
+- Generate a query embedding.
+- Compare it against stored chunk embeddings.
+- Return top matching chunks with similarity scores and source metadata.
+- Expose a simple `/search` endpoint and playground command.
