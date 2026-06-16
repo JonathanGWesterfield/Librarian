@@ -63,3 +63,29 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(books_response.status_code, 200)
         self.assertEqual(summary_response.json()["total_books"], 1)
         self.assertEqual(books_response.json()[0]["relative_path"], "sample.epub")
+
+    def test_embedding_rebuild_endpoint_supports_noop_rebuilds(self) -> None:
+        """Verify desktop clients can trigger embedding maintenance.
+        The endpoint should operate on existing chunk rows and return counts
+        even when the no-op provider is used for local tests.
+        """
+        self.client.post(
+            "/ingestion/run",
+            json={
+                "books_dir": str(self.books_dir),
+                "database_url": self.database_url,
+            },
+        )
+
+        response = self.client.post(
+            "/embeddings/rebuild",
+            json={
+                "database_url": self.database_url,
+                "embedding_provider": "noop",
+                "reset": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["chunks_seen"], 1)
+        self.assertEqual(response.json()["embeddings_stored"], 0)
