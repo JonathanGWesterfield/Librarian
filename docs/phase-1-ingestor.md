@@ -196,6 +196,8 @@ API:
   POST /ingestion/run        body: books_dir, database_url, force, list_epubs,
                               embed_chunks, embedding_provider, embedding_model,
                               ollama_base_url, embedding_batch_size
+  POST /embeddings/rebuild   body: database_url, embedding_provider,
+                              embedding_model, ollama_base_url, reset, reset_all
   GET  /ingestion/summary    query: database_url
   GET  /books                query: database_url, status, limit, offset
 ```
@@ -231,7 +233,7 @@ local model cache by the user or by a future setup helper.
 Current provider settings:
 
 ```bash
-LIBRARIAN_EMBEDDING_PROVIDER=noop
+LIBRARIAN_EMBEDDING_PROVIDER=ollama
 LIBRARIAN_EMBEDDING_MODEL=all-minilm
 LIBRARIAN_OLLAMA_BASE_URL=http://localhost:11434
 ```
@@ -244,8 +246,12 @@ Example manual setup:
 
 ```bash
 ollama pull all-minilm
-python3 scripts/ingest_epubs.py --embed --embedding-provider ollama --embedding-model all-minilm
+python3 scripts/rebuild_embeddings.py --reset --embedding-provider ollama --embedding-model all-minilm
 ```
+
+`scripts/rebuild_embeddings.py` operates only on existing chunk rows. It can
+delete embedding rows for a selected provider/model and regenerate vectors
+without deleting `books`, `chunks`, or raw text.
 
 Other later implementations can target local providers such as
 sentence-transformers, LM Studio, or another local embedding service.
