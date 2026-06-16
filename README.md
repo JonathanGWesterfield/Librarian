@@ -279,6 +279,8 @@ Tauri frontend can call:
 POST /ingestion/run        body: books_dir, database_url, force, list_epubs,
                             embed_chunks, embedding_provider, embedding_model,
                             ollama_base_url, embedding_batch_size
+POST /embeddings/rebuild   body: database_url, embedding_provider,
+                            embedding_model, ollama_base_url, reset, reset_all
 GET  /ingestion/summary    query: database_url
 GET  /books                query: database_url, status, limit, offset
 ```
@@ -317,14 +319,30 @@ live in Ollama's local model cache or another local model runtime.
 Current embedding configuration:
 
 ```bash
-LIBRARIAN_EMBEDDING_PROVIDER=noop
+LIBRARIAN_EMBEDDING_PROVIDER=ollama
 LIBRARIAN_EMBEDDING_MODEL=all-minilm
 LIBRARIAN_OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-To exercise the Ollama path after pulling a model locally:
+For local development on macOS, run Ollama natively and let Dockerized
+Librarian call it through `host.docker.internal`. Start the local stack with:
 
 ```bash
-ollama pull all-minilm
-python3 scripts/ingest_epubs.py --embed --embedding-provider ollama --embedding-model all-minilm
+scripts/start_local.sh
+```
+
+The startup script opens Docker Desktop when needed, starts native Ollama when
+it is not already running, pulls the configured embedding model, then runs
+`docker compose up -d`.
+
+To rebuild embeddings without deleting raw book text or chunks:
+
+```bash
+python3 scripts/rebuild_embeddings.py --reset --embedding-provider ollama --embedding-model all-minilm
+```
+
+The matching API hook is:
+
+```text
+POST /embeddings/rebuild
 ```
