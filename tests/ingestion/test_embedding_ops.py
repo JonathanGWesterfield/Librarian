@@ -41,7 +41,7 @@ class RebuildEmbeddingsTests(unittest.TestCase):
         self._seed_book_chunk_and_embedding()
 
         with patch(
-            "librarian_ingestion.embedding_ops.create_embedder",
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
             return_value=_FakeEmbedder(),
         ):
             result = rebuild_embeddings(
@@ -108,7 +108,7 @@ class EmbedQueryTests(unittest.TestCase):
         stored chunk embeddings, so it should preserve provider/model metadata.
         """
         with patch(
-            "librarian_ingestion.embedding_ops.create_embedder",
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
             return_value=_FakeEmbedder(),
         ):
             result = embed_query(

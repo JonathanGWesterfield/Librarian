@@ -46,6 +46,7 @@ __all__ = [
     "TextChunk",
     "chunk_text",
     "clean_text",
+    "create_configured_embedder",
     "create_embedder",
     "create_ingestion_store",
     "embed_query",
@@ -84,16 +85,23 @@ def __getattr__(name: str):
             "clean_text": clean_text,
         }[name]
 
-    if name in {"Embedder", "EmbeddingError", "create_embedder"}:
+    if name in {
+        "Embedder",
+        "EmbeddingError",
+        "create_configured_embedder",
+        "create_embedder",
+    }:
         from librarian_ingestion.embeddings import (
             Embedder,
             EmbeddingError,
+            create_configured_embedder,
             create_embedder,
         )
 
         return {
             "Embedder": Embedder,
             "EmbeddingError": EmbeddingError,
+            "create_configured_embedder": create_configured_embedder,
             "create_embedder": create_embedder,
         }[name]
 

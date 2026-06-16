@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib import error, request
 
+from librarian_ingestion.config import (
+    resolve_embedding_model,
+    resolve_embedding_provider,
+    resolve_ollama_base_url,
+)
+
 
 class EmbeddingError(RuntimeError):
     pass
@@ -82,3 +88,19 @@ def create_embedder(
     if normalized == "ollama":
         return OllamaEmbedder(model=model, base_url=ollama_base_url)
     raise ValueError(f"unsupported embedding provider: {provider}")
+
+
+def create_configured_embedder(
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    ollama_base_url: str | None = None,
+) -> Embedder:
+    resolved_provider = resolve_embedding_provider(provider)
+    resolved_model = resolve_embedding_model(model)
+    resolved_ollama_base_url = resolve_ollama_base_url(ollama_base_url)
+    return create_embedder(
+        resolved_provider,
+        model=resolved_model,
+        ollama_base_url=resolved_ollama_base_url,
+    )
