@@ -335,6 +335,19 @@ The startup script opens Docker Desktop when needed, starts native Ollama when
 it is not already running, pulls the configured embedding model, then runs
 `docker compose up -d`.
 
+Stop the local Docker Compose services with:
+
+```bash
+scripts/stop_local.sh
+```
+
+By default this leaves native Ollama and the Docker runtime running. To stop
+native Ollama too:
+
+```bash
+scripts/stop_local.sh --ollama
+```
+
 On macOS, Docker can be provided either by Docker Desktop or by Homebrew's
 Docker CLI plus a runtime such as Colima. If Homebrew installs Docker Compose
 as a CLI plugin, `scripts/start_local.sh` will add
