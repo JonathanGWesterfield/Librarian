@@ -60,6 +60,7 @@ live under `scripts/play/`.
 7. Return an answer with citations.
 
 The immediate next implementation step is a simple vector retrieval loop over
-stored SQLite embeddings. That can compute cosine similarity in Python first,
-then move to a vector extension or Postgres/pgvector after retrieval behavior is
-proven end to end.
+stored SQLite embeddings. Query embedding is exposed through
+`POST /embeddings/query`; retrieval can use that vector to compute cosine
+similarity in Python first, then move to a vector extension or Postgres/pgvector
+after retrieval behavior is proven end to end.

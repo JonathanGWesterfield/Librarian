@@ -10,7 +10,9 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
 from librarian_ingestion.embedding_ops import (
+    EmbedQueryOptions,
     RebuildEmbeddingsOptions,
+    embed_query,
     rebuild_embeddings,
 )
 from librarian_ingestion.storage import (
@@ -97,6 +99,38 @@ class RebuildEmbeddingsTests(unittest.TestCase):
         with SQLiteIngestionStore(self.database_path) as store:
             store.save_book_with_chunks(book, [chunk])
             store.save_chunk_embeddings([embedding])
+
+
+class EmbedQueryTests(unittest.TestCase):
+    def test_embed_query_generates_one_vector_for_user_text(self) -> None:
+        """Verify query embedding uses the same provider abstraction as chunks.
+        Retrieval will use this vector to compare the user's query against
+        stored chunk embeddings, so it should preserve provider/model metadata.
+        """
+        with patch(
+            "librarian_ingestion.embedding_ops.create_embedder",
+            return_value=_FakeEmbedder(),
+        ):
+            result = embed_query(
+                EmbedQueryOptions(
+                    query="  clockwork gardens  ",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                )
+            )
+
+        self.assertEqual(result.query, "clockwork gardens")
+        self.assertEqual(result.embedding_provider, "ollama")
+        self.assertEqual(result.embedding_model, "all-minilm")
+        self.assertEqual(result.dimensions, 3)
+        self.assertEqual(result.vector, [0.9, 0.8, 0.7])
+
+    def test_embed_query_rejects_empty_text(self) -> None:
+        """Verify empty user queries fail before touching the embedder.
+        Search should not generate meaningless vectors for blank input.
+        """
+        with self.assertRaises(ValueError):
+            embed_query(EmbedQueryOptions(query="  "))
 
 
 class _FakeEmbedder:

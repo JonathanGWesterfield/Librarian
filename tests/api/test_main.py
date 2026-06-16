@@ -89,3 +89,24 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["chunks_seen"], 1)
         self.assertEqual(response.json()["embeddings_stored"], 0)
+
+    def test_query_embedding_endpoint_supports_provider_selection(self) -> None:
+        """Verify clients can create an embedding for a user query.
+        The no-op provider keeps the endpoint test local while proving request
+        validation and response shape before retrieval uses real vectors.
+        """
+        response = self.client.post(
+            "/embeddings/query",
+            json={
+                "query": "clockwork gardens",
+                "embedding_provider": "noop",
+            },
+        )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["query"], "clockwork gardens")
+        self.assertEqual(payload["embedding_provider"], "noop")
+        self.assertEqual(payload["dimensions"], 0)
+        self.assertEqual(payload["vector"], [])
