@@ -15,6 +15,7 @@ from librarian_ingestion.embedding_ops import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
+from librarian_ingestion.search import SearchOptions, search_chunks
 from librarian_ingestion.storage import create_ingestion_store
 
 app = FastAPI(title="Librarian", version="0.1.0")
@@ -48,6 +49,15 @@ class EmbedQueryRequest(BaseModel):
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
+
+
+class SearchRequest(BaseModel):
+    query: str
+    database_url: Optional[str] = None
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    limit: int = 10
 
 
 @app.get("/health")
@@ -131,6 +141,24 @@ def embed_query_endpoint(request: EmbedQueryRequest) -> dict[str, object]:
                 embedding_provider=request.embedding_provider,
                 embedding_model=request.embedding_model,
                 ollama_base_url=request.ollama_base_url,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.post("/search")
+def search_endpoint(request: SearchRequest) -> dict[str, object]:
+    try:
+        result = search_chunks(
+            SearchOptions(
+                query=request.query,
+                database_url=request.database_url or settings.database_url,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+                ollama_base_url=request.ollama_base_url,
+                limit=request.limit,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
