@@ -51,6 +51,17 @@ class EmbeddingRecord:
 
 
 @dataclass(frozen=True)
+class StoredChunkRecord:
+    id: str
+    book_id: str
+    chunk_index: int
+    text: str
+    character_count: int
+    token_estimate: int
+    chapter_title: Optional[str]
+
+
+@dataclass(frozen=True)
 class StoredBookSnapshot:
     id: str
     relative_path: str
@@ -99,6 +110,14 @@ class IngestionStore(Protocol):
         ...
 
     def save_chunk_embeddings(self, embeddings: list[EmbeddingRecord]) -> None:
+        ...
+
+    def delete_chunk_embeddings(
+        self, *, provider: str | None = None, model: str | None = None
+    ) -> int:
+        ...
+
+    def list_chunks(self, *, limit: int = 500, offset: int = 0) -> list[StoredChunkRecord]:
         ...
 
     def count_books(self) -> int:
@@ -325,6 +344,54 @@ class SQLiteIngestionStore:
                     for embedding in embeddings
                 ],
             )
+
+    def delete_chunk_embeddings(
+        self, *, provider: str | None = None, model: str | None = None
+    ) -> int:
+        where: list[str] = []
+        parameters: list[object] = []
+        if provider:
+            where.append("provider = ?")
+            parameters.append(provider)
+        if model:
+            where.append("model = ?")
+            parameters.append(model)
+
+        statement = "DELETE FROM chunk_embeddings"
+        if where:
+            statement = f"{statement} WHERE {' AND '.join(where)}"
+
+        with self._connection:
+            cursor = self._connection.execute(statement, parameters)
+        return cursor.rowcount
+
+    def list_chunks(
+        self, *, limit: int = 500, offset: int = 0
+    ) -> list[StoredChunkRecord]:
+        limit = max(1, min(limit, 1000))
+        offset = max(0, offset)
+        rows = self._connection.execute(
+            """
+            SELECT id, book_id, chunk_index, text, character_count,
+                   token_estimate, chapter_title
+            FROM chunks
+            ORDER BY book_id ASC, chunk_index ASC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+        return [
+            StoredChunkRecord(
+                id=row[0],
+                book_id=row[1],
+                chunk_index=row[2],
+                text=row[3],
+                character_count=row[4],
+                token_estimate=row[5],
+                chapter_title=row[6],
+            )
+            for row in rows
+        ]
 
     def count_books(self) -> int:
         return self._connection.execute("SELECT COUNT(*) FROM books").fetchone()[0]
