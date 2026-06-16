@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "ingest":
             result = run_ingestion(
                 IngestionOptions(
-                    books_dir=args.books_dir,
+                    books_dir=_resolve_play_books_dir(args.books_dir),
                     database_url=database_url,
                     force=args.force,
                     list_epubs=args.list,
@@ -259,6 +259,21 @@ def _add_paging(parser: argparse.ArgumentParser, *, default_limit: int) -> None:
         default=0,
         help="Rows to skip.",
     )
+
+
+def _resolve_play_books_dir(books_dir: str | None) -> str | None:
+    if not books_dir:
+        return None
+
+    path = Path(books_dir).expanduser()
+    if path.is_absolute() or path.exists():
+        return str(path)
+
+    repo_relative = REPO_ROOT / path
+    if repo_relative.exists():
+        return str(repo_relative)
+
+    return str(path)
 
 
 def _database_state(database_url: str) -> dict[str, object]:
