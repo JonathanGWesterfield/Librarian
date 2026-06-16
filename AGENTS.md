@@ -13,6 +13,12 @@
 - For review follow-up, read unresolved PR review threads through the connector,
   patch locally, push commits, and reply to the relevant PR comments when useful.
 
+## Developement
+
+- Prefer code reuse and DRY principles
+- More code is more things to break. Opt for less code when possible
+- For each new FastAPI endpoint added, the api-endpoints.md file must also be updated to contain user info for each endpoint including descriptions of request and response as well as examples
+
 ## Commits
 
 - Prefer small, discrete commits organized by feature or bug fix.
@@ -24,6 +30,7 @@
   grouped only with the feature or fix they directly support.
 - Before committing, review the staged diff to ensure it represents one coherent
   change.
+- For each commit, the link to the PR must be included in the commit message
 
 ## Local Data
 
