@@ -2,6 +2,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from librarian_ingestion.chunk import TextChunk
+    from librarian_ingestion.embedding_ops import (
+        RebuildEmbeddingsOptions,
+        RebuildEmbeddingsResult,
+    )
     from librarian_ingestion.embeddings import Embedder, EmbeddingError
     from librarian_ingestion.epub import ParsedBook
     from librarian_ingestion.ingest import IngestionOptions, IngestionResult
@@ -28,6 +32,8 @@ __all__ = [
     "IngestionResult",
     "IngestionSummary",
     "ParsedBook",
+    "RebuildEmbeddingsOptions",
+    "RebuildEmbeddingsResult",
     "StoredBookRecord",
     "TextChunk",
     "chunk_text",
@@ -35,6 +41,7 @@ __all__ = [
     "create_embedder",
     "create_ingestion_store",
     "parse_epub",
+    "rebuild_embeddings",
     "run_ingestion",
     "scan_epub_files",
 ]
@@ -79,6 +86,23 @@ def __getattr__(name: str):
             "Embedder": Embedder,
             "EmbeddingError": EmbeddingError,
             "create_embedder": create_embedder,
+        }[name]
+
+    if name in {
+        "RebuildEmbeddingsOptions",
+        "RebuildEmbeddingsResult",
+        "rebuild_embeddings",
+    }:
+        from librarian_ingestion.embedding_ops import (
+            RebuildEmbeddingsOptions,
+            RebuildEmbeddingsResult,
+            rebuild_embeddings,
+        )
+
+        return {
+            "RebuildEmbeddingsOptions": RebuildEmbeddingsOptions,
+            "RebuildEmbeddingsResult": RebuildEmbeddingsResult,
+            "rebuild_embeddings": rebuild_embeddings,
         }[name]
 
     if name in {
