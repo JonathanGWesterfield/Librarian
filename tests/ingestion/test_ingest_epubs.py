@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 from tests.ingestion.fixtures import SAMPLE_EPUB_SHA256
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "scripts" / "play"))
 
 from ingest_epubs import main
 

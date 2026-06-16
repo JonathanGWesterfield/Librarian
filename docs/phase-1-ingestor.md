@@ -24,19 +24,19 @@ version can run without a real embedding model.
 ## Proposed Entry Point
 
 ```text
-scripts/ingest_epubs.py
+scripts/play/ingest_epubs.py
 ```
 
 Example local usage:
 
 ```bash
-LIBRARIAN_BOOKS_DIR=./Epub-Books python scripts/ingest_epubs.py
+LIBRARIAN_BOOKS_DIR=./Epub-Books python scripts/play/ingest_epubs.py
 ```
 
 Example Docker-oriented usage:
 
 ```bash
-LIBRARIAN_BOOKS_DIR=/books python scripts/ingest_epubs.py
+LIBRARIAN_BOOKS_DIR=/books python scripts/play/ingest_epubs.py
 ```
 
 The script should use the same settings model as the API when possible, so the
@@ -75,13 +75,13 @@ Initial behavior:
 Initial script:
 
 ```bash
-python scripts/ingest_epubs.py --books-dir ./Epub-Books --list
+python scripts/play/ingest_epubs.py --books-dir ./Epub-Books --list
 ```
 
 Machine-readable output for desktop apps and automation:
 
 ```bash
-python3 scripts/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db --json
+python3 scripts/play/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db --json
 ```
 
 ## Step 2: EPUB Parsing
@@ -190,7 +190,7 @@ desktop app. The current integration points are:
 
 ```text
 CLI:
-  python3 scripts/ingest_epubs.py --json
+  python3 scripts/play/ingest_epubs.py --json
 
 API:
   POST /ingestion/run        body: books_dir, database_url, force, list_epubs,
@@ -294,7 +294,7 @@ Database totals: 54 books, 4120 chunks
 
 The first implementation PR for this phase should include:
 
-- `scripts/ingest_epubs.py`
+- `scripts/play/ingest_epubs.py`
 - Chunking utilities in `packages/ingestion`
 - JSONL persistence under `data/ingestion`
 - Config-based `LIBRARIAN_BOOKS_DIR` support

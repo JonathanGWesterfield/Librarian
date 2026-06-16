@@ -290,20 +290,24 @@ scripts/check.sh
 Run EPUB ingestion into the local SQLite database:
 
 ```bash
-python3 scripts/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db
+python3 scripts/play/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db
 ```
 
 For a more inspectable step-by-step flow, use the playground CLI:
 
 ```bash
-python3 scripts/librarian.py --database-url sqlite:///data/librarian.db state
-python3 scripts/librarian.py --database-url sqlite:///data/librarian.db ingest --books-dir ./Epub-Books
-python3 scripts/librarian.py --database-url sqlite:///data/librarian.db books
-python3 scripts/librarian.py --database-url sqlite:///data/librarian.db chunks --limit 3
-python3 scripts/librarian.py --database-url sqlite:///data/librarian.db embed --reset --embedding-provider ollama --embedding-model all-minilm
-python3 scripts/librarian.py --database-url sqlite:///data/librarian.db embeddings --limit 3
-python3 scripts/librarian.py --database-url sqlite:///data/librarian.db state
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db state
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db ingest --books-dir ./Epub-Books
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db books
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db chunks --limit 3
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db embed --reset --embedding-provider ollama --embedding-model all-minilm
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db embeddings --limit 3
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db state
 ```
+
+Scripts under `scripts/play/` are development/operator tools. They are useful
+for understanding the pipeline, but the product path should call FastAPI
+endpoints or package services directly.
 
 The `ingest` step parses EPUB files and stores chunked raw text. The `embed`
 step reads those stored chunks and writes vectors into `chunk_embeddings`
@@ -312,7 +316,7 @@ without deleting `books`, `chunks`, or raw text.
 For automation or a future desktop shell, request JSON output:
 
 ```bash
-python3 scripts/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db --json
+python3 scripts/play/ingest_epubs.py --books-dir ./Epub-Books --database-url sqlite:///data/librarian.db --json
 ```
 
 The API also exposes ingestion-oriented endpoints that a future Electron or
