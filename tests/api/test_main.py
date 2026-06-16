@@ -2,10 +2,19 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
+
+from librarian_ingestion.storage import (
+    BookRecord,
+    ChunkRecord,
+    EmbeddingRecord,
+    SQLiteIngestionStore,
+    utc_now,
+)
 
 try:
     from fastapi.testclient import TestClient
@@ -110,3 +119,115 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["embedding_provider"], "noop")
         self.assertEqual(payload["dimensions"], 0)
         self.assertEqual(payload["vector"], [])
+
+    def test_search_endpoint_returns_ranked_chunks(self) -> None:
+        """Verify desktop clients can run the first retrieval flow through HTTP.
+        The test seeds real SQLite rows, then patches only query embedding so
+        the endpoint can prove ranking behavior without requiring Ollama.
+        """
+        self._seed_search_fixture()
+
+        with patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            response = self.client.post(
+                "/search",
+                json={
+                    "query": "clockwork garden",
+                    "database_url": self.database_url,
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "limit": 2,
+                },
+            )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["query"], "clockwork garden")
+        self.assertEqual(payload["embedding_provider"], "ollama")
+        self.assertEqual(payload["embedding_model"], "all-minilm")
+        self.assertEqual(payload["dimensions"], 2)
+        self.assertEqual(payload["candidate_count"], 3)
+        self.assertEqual(len(payload["results"]), 2)
+        self.assertEqual(payload["results"][0]["chunk_id"], "api-book:0")
+        self.assertAlmostEqual(payload["results"][0]["score"], 1.0, places=6)
+        self.assertIn("clockwork garden", payload["results"][0]["text"])
+
+    def _seed_search_fixture(self) -> None:
+        book = BookRecord(
+            id="api-book",
+            source_path="/books/api-sample.epub",
+            relative_path="api-sample.epub",
+            file_hash="api-book",
+            size_bytes=100,
+            title="API Sample Book",
+            authors=["Test Author"],
+            publisher="Fixture Press",
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        chunks = [
+            ChunkRecord(
+                id="api-book:0",
+                book_id="api-book",
+                chunk_index=0,
+                text="The clockwork garden woke at dawn.",
+                character_count=35,
+                token_estimate=8,
+            ),
+            ChunkRecord(
+                id="api-book:1",
+                book_id="api-book",
+                chunk_index=1,
+                text="A distant ocean rolled under moonlight.",
+                character_count=39,
+                token_estimate=9,
+            ),
+            ChunkRecord(
+                id="api-book:2",
+                book_id="api-book",
+                chunk_index=2,
+                text="The brass robin counted silver seeds.",
+                character_count=38,
+                token_estimate=9,
+            ),
+        ]
+        embeddings = [
+            EmbeddingRecord(
+                id="api-book:0:ollama:all-minilm",
+                chunk_id="api-book:0",
+                provider="ollama",
+                model="all-minilm",
+                vector=[1.0, 0.0],
+                dimensions=2,
+            ),
+            EmbeddingRecord(
+                id="api-book:1:ollama:all-minilm",
+                chunk_id="api-book:1",
+                provider="ollama",
+                model="all-minilm",
+                vector=[0.0, 1.0],
+                dimensions=2,
+            ),
+            EmbeddingRecord(
+                id="api-book:2:ollama:all-minilm",
+                chunk_id="api-book:2",
+                provider="ollama",
+                model="all-minilm",
+                vector=[0.7, 0.7],
+                dimensions=2,
+            ),
+        ]
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, chunks)
+            store.save_chunk_embeddings(embeddings)
+
+
+class _FakeQueryEmbedder:
+    provider = "ollama"
+    model = "all-minilm"
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] for _text in texts]

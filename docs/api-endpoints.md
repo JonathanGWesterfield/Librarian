@@ -346,9 +346,9 @@ Example:
 
 ## POST `/embeddings/query`
 
-Creates an embedding vector for a user query. This is the first half of the
-retrieval path; a later search endpoint will compare this vector against stored
-chunk embeddings.
+Creates an embedding vector for a user query. Use this when you want to inspect
+the raw query vector directly; most clients should call `POST /search` for the
+full retrieval flow.
 
 This endpoint delegates to `librarian_ingestion.embedding_ops.embed_query`.
 
@@ -413,6 +413,118 @@ Example:
   "embedding_model": "all-minilm",
   "dimensions": 384,
   "vector": [0.0123, -0.0456, 0.0789]
+}
+```
+
+## POST `/search`
+
+Embeds a user query, loads stored chunk embeddings for the same provider/model,
+scores them with cosine similarity, and returns the top matching chunks with
+book metadata.
+
+This endpoint delegates to `librarian_ingestion.search.search_chunks`.
+
+### Request Fields
+
+- `query`: required string. User search/query text. Must not be empty.
+- `database_url`: optional string. Storage URL. Defaults to
+  `LIBRARIAN_DATABASE_URL`.
+- `embedding_provider`: optional string. Currently `noop` or `ollama`.
+- `embedding_model`: optional string. Model name, such as `all-minilm`.
+- `ollama_base_url`: optional string. Ollama base URL.
+- `limit`: integer, default `10`. Maximum number of ranked chunks to return.
+
+### Example Payloads
+
+Search with the default local model:
+
+```json
+{
+  "query": "what does the author say about memory?",
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "limit": 5
+}
+```
+
+Search an explicit local database:
+
+```json
+{
+  "query": "fantasy books with political intrigue",
+  "database_url": "sqlite:///data/librarian.db",
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "ollama_base_url": "http://host.docker.internal:11434",
+  "limit": 10
+}
+```
+
+### Example Requests
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"what does the author say about memory?","embedding_provider":"ollama","embedding_model":"all-minilm","limit":5}'
+```
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"fantasy books with political intrigue","database_url":"sqlite:///data/librarian.db","embedding_provider":"ollama","embedding_model":"all-minilm","limit":10}'
+```
+
+### Response
+
+Fields:
+
+- `query`: normalized query string after trimming whitespace.
+- `embedding_provider`: resolved provider used for the query vector.
+- `embedding_model`: resolved model used for the query vector.
+- `dimensions`: query vector length.
+- `candidate_count`: number of compatible stored chunk embeddings scored.
+- `results`: ranked chunk matches, highest cosine similarity first.
+
+Fields per result:
+
+- `score`: cosine similarity between query vector and chunk vector.
+- `chunk_id`: internal chunk ID linked to the raw text and embedding row.
+- `book_id`: internal book ID.
+- `relative_path`: EPUB path relative to the configured books directory.
+- `title`: parsed EPUB title, when available.
+- `authors`: parsed EPUB author list.
+- `publisher`: parsed EPUB publisher, when available.
+- `chunk_index`: chunk position within the book.
+- `text`: raw chunk text used to generate the stored embedding.
+- `embedding_provider`: provider for the stored chunk embedding.
+- `embedding_model`: model for the stored chunk embedding.
+- `dimensions`: stored chunk vector length.
+
+Example:
+
+```json
+{
+  "query": "what does the author say about memory?",
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "dimensions": 384,
+  "candidate_count": 30780,
+  "results": [
+    {
+      "score": 0.8123,
+      "chunk_id": "abc123:42",
+      "book_id": "abc123",
+      "relative_path": "Example.epub",
+      "title": "Example Book",
+      "authors": ["Example Author"],
+      "publisher": "Example Press",
+      "chunk_index": 42,
+      "text": "Memory is not a fixed archive...",
+      "embedding_provider": "ollama",
+      "embedding_model": "all-minilm",
+      "dimensions": 384
+    }
+  ]
 }
 ```
 
