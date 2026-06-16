@@ -7,6 +7,10 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from librarian_api.config import settings
+from librarian_ingestion.embedding_ops import (
+    RebuildEmbeddingsOptions,
+    rebuild_embeddings,
+)
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
 from librarian_ingestion.storage import create_ingestion_store
@@ -24,6 +28,17 @@ class IngestionRunRequest(BaseModel):
     embedding_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
     embedding_batch_size: int = 16
+
+
+class RebuildEmbeddingsRequest(BaseModel):
+    database_url: Optional[str] = None
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    batch_size: int = 16
+    chunk_page_size: int = 500
+    reset: bool = False
+    reset_all: bool = False
 
 
 @app.get("/health")
@@ -76,6 +91,26 @@ def ingestion_summary(database_url: Optional[str] = None) -> dict[str, object]:
         return asdict(store.get_summary())
     finally:
         store.close()
+
+
+@app.post("/embeddings/rebuild")
+def rebuild_embeddings_endpoint(request: RebuildEmbeddingsRequest) -> dict[str, object]:
+    try:
+        result = rebuild_embeddings(
+            RebuildEmbeddingsOptions(
+                database_url=request.database_url or settings.database_url,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+                ollama_base_url=request.ollama_base_url,
+                batch_size=request.batch_size,
+                chunk_page_size=request.chunk_page_size,
+                reset=request.reset,
+                reset_all=request.reset_all,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
 
 
 @app.get("/books")
