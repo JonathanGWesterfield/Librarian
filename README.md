@@ -143,7 +143,7 @@ scripts/               Developer helper scripts
 ## Phase Plans
 
 - [Phase 1: EPUB Ingestion MVP](docs/phase-1-ingestor.md)
-- [FastAPI Endpoint Reference](docs/api-endpoints.md)
+- [API OpenAPI Contract](docs/api-endpoints.md)
 
 ## Roadmap
 
