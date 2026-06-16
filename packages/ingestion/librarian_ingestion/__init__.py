@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from librarian_ingestion.epub import ParsedBook
     from librarian_ingestion.ingest import IngestionOptions, IngestionResult
     from librarian_ingestion.scan import DiscoveredEpub, EpubSourceError
+    from librarian_ingestion.search import SearchOptions, SearchResponse, SearchResult
     from librarian_ingestion.storage import (
         BookRecord,
         ChunkRecord,
@@ -41,6 +42,9 @@ __all__ = [
     "ParsedBook",
     "RebuildEmbeddingsOptions",
     "RebuildEmbeddingsResult",
+    "SearchOptions",
+    "SearchResponse",
+    "SearchResult",
     "StoredBookRecord",
     "StoredEmbeddingRecord",
     "TextChunk",
@@ -54,6 +58,7 @@ __all__ = [
     "rebuild_embeddings",
     "run_ingestion",
     "scan_epub_files",
+    "search_chunks",
 ]
 
 
@@ -74,6 +79,21 @@ def __getattr__(name: str):
             "DiscoveredEpub": DiscoveredEpub,
             "EpubSourceError": EpubSourceError,
             "scan_epub_files": scan_epub_files,
+        }[name]
+
+    if name in {"SearchOptions", "SearchResponse", "SearchResult", "search_chunks"}:
+        from librarian_ingestion.search import (
+            SearchOptions,
+            SearchResponse,
+            SearchResult,
+            search_chunks,
+        )
+
+        return {
+            "SearchOptions": SearchOptions,
+            "SearchResponse": SearchResponse,
+            "SearchResult": SearchResult,
+            "search_chunks": search_chunks,
         }[name]
 
     if name in {"TextChunk", "chunk_text", "clean_text"}:

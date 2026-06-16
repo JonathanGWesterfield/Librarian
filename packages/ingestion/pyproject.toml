@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
   "beautifulsoup4>=4.12.0",
   "ebooklib>=0.18",
+  "numpy>=1.26.0",
   "pydantic>=2.10.0",
 ]
 
@@ -21,4 +22,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["librarian_ingestion"]
-

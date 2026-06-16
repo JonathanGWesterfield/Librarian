@@ -97,6 +97,22 @@ class StoredEmbeddingRecord:
 
 
 @dataclass(frozen=True)
+class SearchEmbeddingRecord:
+    chunk_id: str
+    book_id: str
+    relative_path: str
+    title: Optional[str]
+    authors: list[str]
+    publisher: Optional[str]
+    chunk_index: int
+    text: str
+    provider: str
+    model: str
+    dimensions: int
+    vector: list[float]
+
+
+@dataclass(frozen=True)
 class EmbeddingModelSummary:
     provider: str
     model: str
@@ -153,6 +169,11 @@ class IngestionStore(Protocol):
         ...
 
     def get_embedding_model_summaries(self) -> list[EmbeddingModelSummary]:
+        ...
+
+    def list_search_embeddings(
+        self, *, provider: str, model: str
+    ) -> list[SearchEmbeddingRecord]:
         ...
 
     def count_books(self) -> int:
@@ -499,6 +520,45 @@ class SQLiteIngestionStore:
             for row in rows
         ]
 
+    def list_search_embeddings(
+        self, *, provider: str, model: str
+    ) -> list[SearchEmbeddingRecord]:
+        # Only compare vectors produced by the same provider/model. Different
+        # embedding models do not share a meaningful vector space.
+        rows = self._connection.execute(
+            """
+            SELECT chunk_embeddings.chunk_id, chunks.book_id, books.relative_path,
+                   books.title, books.authors_json, books.publisher,
+                   chunks.chunk_index, chunks.text, chunk_embeddings.provider,
+                   chunk_embeddings.model, chunk_embeddings.dimensions,
+                   chunk_embeddings.vector_json
+            FROM chunk_embeddings
+            JOIN chunks ON chunks.id = chunk_embeddings.chunk_id
+            JOIN books ON books.id = chunks.book_id
+            WHERE chunk_embeddings.provider = ?
+              AND chunk_embeddings.model = ?
+            ORDER BY books.relative_path ASC, chunks.chunk_index ASC
+            """,
+            (provider, model),
+        ).fetchall()
+        return [
+            SearchEmbeddingRecord(
+                chunk_id=row[0],
+                book_id=row[1],
+                relative_path=row[2],
+                title=row[3],
+                authors=_decode_authors(row[4]),
+                publisher=row[5],
+                chunk_index=row[6],
+                text=row[7],
+                provider=row[8],
+                model=row[9],
+                dimensions=row[10],
+                vector=_decode_vector(row[11]),
+            )
+            for row in rows
+        ]
+
     def count_books(self) -> int:
         return self._connection.execute("SELECT COUNT(*) FROM books").fetchone()[0]
 
@@ -627,19 +687,23 @@ def _decode_authors(authors_json: str) -> list[str]:
 
 
 def _decode_vector_sample(vector_json: str, sample_size: int = 5) -> list[float]:
+    return _decode_vector(vector_json)[:sample_size]
+
+
+def _decode_vector(vector_json: str) -> list[float]:
     try:
         vector = json.loads(vector_json)
     except json.JSONDecodeError:
         return []
     if not isinstance(vector, list):
         return []
-    sample: list[float] = []
-    for value in vector[:sample_size]:
+    decoded: list[float] = []
+    for value in vector:
         try:
-            sample.append(float(value))
+            decoded.append(float(value))
         except (TypeError, ValueError):
             continue
-    return sample
+    return decoded
 
 
 def _preview_text(text: str, max_length: int = 140) -> str:
