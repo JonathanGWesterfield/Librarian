@@ -1,6 +1,8 @@
 import json
+import os
 import sys
 import unittest
+from contextlib import contextmanager
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -102,6 +104,25 @@ class LibrarianCliTests(unittest.TestCase):
         self.assertAlmostEqual(search["results"][0]["score"], 1.0, places=6)
         self.assertIn("The clockwork garden woke at dawn.", search["results"][0]["text"])
 
+    def test_cli_resolves_books_dir_relative_to_repo_root_from_play_dir(self) -> None:
+        """Verify playground commands remain usable from inside scripts/play.
+        Developers often run `python3 librarian.py` from that folder, so a
+        repo-relative books path should still resolve to the project root.
+        """
+        with _pushd(REPO_ROOT / "scripts" / "play"):
+            result = self._run_json(
+                [
+                    "--database-url",
+                    self.database_url,
+                    "ingest",
+                    "--books-dir",
+                    "tests/fixtures/epubs",
+                ]
+            )
+
+        self.assertEqual(result["parsed"], 1)
+        self.assertEqual(result["total_chunks"], 1)
+
     def _seed_embedding(self) -> None:
         store = create_ingestion_store(self.database_url)
         store.initialize()
@@ -139,6 +160,16 @@ class _FakeQueryEmbedder:
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [[1.0, 0.0] for _text in texts]
+
+
+@contextmanager
+def _pushd(path: Path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 if __name__ == "__main__":
