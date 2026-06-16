@@ -1,0 +1,1010 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Librarian API",
+    "version": "0.1.0",
+    "description": "Local-first API for EPUB ingestion, local embedding maintenance, vector search, and library inspection."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Default local development server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Service readiness and identity endpoints."
+    },
+    {
+      "name": "ingestion",
+      "description": "EPUB ingestion and ingestion database inspection."
+    },
+    {
+      "name": "embeddings",
+      "description": "Local embedding generation and maintenance."
+    },
+    {
+      "name": "retrieval",
+      "description": "Vector search over stored chunk embeddings."
+    },
+    {
+      "name": "library",
+      "description": "Read-only library record views."
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["health"],
+        "operationId": "getHealth",
+        "summary": "Get service health",
+        "responses": {
+          "200": {
+            "description": "The API process is responding.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "status": "ok",
+                      "books_dir": "/books",
+                      "host_books_dir": "./Epub-Books",
+                      "codex_broker_enabled": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "tags": ["health"],
+        "operationId": "getRoot",
+        "summary": "Get API identity",
+        "responses": {
+          "200": {
+            "description": "A small API identity payload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RootResponse"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "name": "Librarian",
+                      "message": "Local-first EPUB RAG workspace is ready."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ingestion/run": {
+      "post": {
+        "tags": ["ingestion"],
+        "operationId": "runIngestion",
+        "summary": "Run EPUB ingestion",
+        "description": "Scans EPUB files, parses text, chunks books, stores book and chunk rows, and optionally generates embeddings for newly ingested chunks.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestionRunRequest"
+              },
+              "examples": {
+                "ingestOnly": {
+                  "summary": "Ingest EPUBs without embeddings",
+                  "value": {
+                    "books_dir": "/books",
+                    "database_url": "sqlite:///data/librarian.db",
+                    "list_epubs": true
+                  }
+                },
+                "ingestAndEmbed": {
+                  "summary": "Ingest and embed with Ollama",
+                  "value": {
+                    "books_dir": "/books",
+                    "database_url": "sqlite:///data/librarian.db",
+                    "force": false,
+                    "embed_chunks": true,
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "ollama_base_url": "http://host.docker.internal:11434",
+                    "embedding_batch_size": 16
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ingestion run summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/ingestion/summary": {
+      "get": {
+        "tags": ["ingestion"],
+        "operationId": "getIngestionSummary",
+        "summary": "Get ingestion database summary",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DatabaseUrl"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counts and status totals for the ingestion database.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/embeddings/rebuild": {
+      "post": {
+        "tags": ["embeddings"],
+        "operationId": "rebuildEmbeddings",
+        "summary": "Rebuild stored chunk embeddings",
+        "description": "Regenerates embeddings from existing chunk rows without deleting books, chunks, or raw text.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RebuildEmbeddingsRequest"
+              },
+              "examples": {
+                "currentModel": {
+                  "summary": "Rebuild selected model",
+                  "value": {
+                    "database_url": "sqlite:///data/librarian.db",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "reset": true
+                  }
+                },
+                "benchmarkModel": {
+                  "summary": "Clear all embeddings before benchmarking a model",
+                  "value": {
+                    "database_url": "sqlite:///data/librarian.db",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "nomic-embed-text",
+                    "ollama_base_url": "http://host.docker.internal:11434",
+                    "batch_size": 8,
+                    "chunk_page_size": 250,
+                    "reset_all": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Embedding rebuild summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebuildEmbeddingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/embeddings/query": {
+      "post": {
+        "tags": ["embeddings"],
+        "operationId": "embedQuery",
+        "summary": "Embed a user query",
+        "description": "Creates an embedding vector for direct inspection or for clients that need query vectors separately from search.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbedQueryRequest"
+              },
+              "examples": {
+                "ollama": {
+                  "summary": "Embed with Ollama",
+                  "value": {
+                    "query": "books about memory and identity",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm"
+                  }
+                },
+                "noop": {
+                  "summary": "Shape test with no-op provider",
+                  "value": {
+                    "query": "clockwork gardens",
+                    "embedding_provider": "noop"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query embedding vector and metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbedQueryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "tags": ["retrieval"],
+        "operationId": "searchChunks",
+        "summary": "Search stored chunk embeddings",
+        "description": "Embeds a user query, loads stored chunk embeddings for the same provider/model, scores them with cosine similarity, and returns ranked chunks with book metadata.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              },
+              "examples": {
+                "default": {
+                  "summary": "Search with the default local model",
+                  "value": {
+                    "query": "what does the author say about memory?",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "limit": 5
+                  }
+                },
+                "explicitDatabase": {
+                  "summary": "Search an explicit local database",
+                  "value": {
+                    "query": "fantasy books with political intrigue",
+                    "database_url": "sqlite:///data/librarian.db",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "ollama_base_url": "http://host.docker.internal:11434",
+                    "limit": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked chunk matches.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/books": {
+      "get": {
+        "tags": ["library"],
+        "operationId": "listBooks",
+        "summary": "List stored books",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by book ingestion status, such as ingested, duplicate, or failed."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1,
+              "maximum": 500
+            },
+            "description": "Maximum books to return."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0
+            },
+            "description": "Books to skip."
+          },
+          {
+            "$ref": "#/components/parameters/DatabaseUrl"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stored book records with ingestion status and chunk counts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BookRecord"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "DatabaseUrl": {
+        "name": "database_url",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "sqlite:///data/librarian.db"
+        },
+        "description": "Storage URL to inspect or operate on. Defaults to LIBRARIAN_DATABASE_URL."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid input, unsupported provider/database URL, missing EPUB source, or local embedding service failure.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Request body or query parameters failed FastAPI/Pydantic validation.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ValidationErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status", "books_dir", "host_books_dir", "codex_broker_enabled"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "books_dir": {
+            "type": "string",
+            "example": "/books"
+          },
+          "host_books_dir": {
+            "type": "string",
+            "example": "./Epub-Books"
+          },
+          "codex_broker_enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RootResponse": {
+        "type": "object",
+        "required": ["name", "message"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Librarian"
+          },
+          "message": {
+            "type": "string",
+            "example": "Local-first EPUB RAG workspace is ready."
+          }
+        }
+      },
+      "IngestionRunRequest": {
+        "type": "object",
+        "properties": {
+          "books_dir": {
+            "type": ["string", "null"],
+            "description": "EPUB source directory. Defaults to LIBRARIAN_BOOKS_DIR."
+          },
+          "database_url": {
+            "type": ["string", "null"],
+            "description": "Storage URL. Defaults to LIBRARIAN_DATABASE_URL.",
+            "example": "sqlite:///data/librarian.db"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "Re-parse unchanged EPUB files."
+          },
+          "list_epubs": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include discovered EPUB metadata in the response."
+          },
+          "embed_chunks": {
+            "type": "boolean",
+            "default": false,
+            "description": "Generate embeddings for chunks created during this ingestion run."
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"],
+            "example": "http://host.docker.internal:11434"
+          },
+          "embedding_batch_size": {
+            "type": "integer",
+            "default": 16,
+            "minimum": 1
+          }
+        }
+      },
+      "IngestionRunResponse": {
+        "type": "object",
+        "required": [
+          "books_dir",
+          "database_url",
+          "embedding_provider",
+          "embedding_model",
+          "found",
+          "parsed",
+          "skipped_unchanged",
+          "skipped_duplicates",
+          "failed",
+          "stored_chunks",
+          "stored_embeddings",
+          "total_books",
+          "total_chunks",
+          "total_embeddings",
+          "books",
+          "discovered"
+        ],
+        "properties": {
+          "books_dir": {
+            "type": "string"
+          },
+          "database_url": {
+            "type": "string"
+          },
+          "embedding_provider": {
+            "type": "string"
+          },
+          "embedding_model": {
+            "type": "string"
+          },
+          "found": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parsed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_unchanged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_duplicates": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stored_chunks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stored_embeddings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_chunks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_embeddings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "books": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BookIngestionResult"
+            }
+          },
+          "discovered": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredEpub"
+            }
+          }
+        }
+      },
+      "BookIngestionResult": {
+        "type": "object",
+        "required": ["relative_path", "file_hash", "status", "chunk_count", "message"],
+        "properties": {
+          "relative_path": {
+            "type": "string"
+          },
+          "file_hash": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "example": "ingested"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "message": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "DiscoveredEpub": {
+        "type": "object",
+        "required": ["path", "relative_path", "size_bytes", "sha256"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestionSummary": {
+        "type": "object",
+        "required": ["total_books", "total_chunks", "total_embeddings", "status_counts"],
+        "properties": {
+          "total_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_chunks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_embeddings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status_counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "RebuildEmbeddingsRequest": {
+        "type": "object",
+        "properties": {
+          "database_url": {
+            "type": ["string", "null"],
+            "example": "sqlite:///data/librarian.db"
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          },
+          "batch_size": {
+            "type": "integer",
+            "default": 16,
+            "minimum": 1
+          },
+          "chunk_page_size": {
+            "type": "integer",
+            "default": 500,
+            "minimum": 1
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false
+          },
+          "reset_all": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "RebuildEmbeddingsResponse": {
+        "type": "object",
+        "required": [
+          "database_url",
+          "embedding_provider",
+          "embedding_model",
+          "chunks_seen",
+          "embeddings_deleted",
+          "embeddings_stored",
+          "total_embeddings"
+        ],
+        "properties": {
+          "database_url": {
+            "type": "string"
+          },
+          "embedding_provider": {
+            "type": "string"
+          },
+          "embedding_model": {
+            "type": "string"
+          },
+          "chunks_seen": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "embeddings_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "embeddings_stored": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_embeddings": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "EmbedQueryRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "User search/query text. Must not be empty."
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          }
+        }
+      },
+      "EmbedQueryResponse": {
+        "type": "object",
+        "required": ["query", "embedding_provider", "embedding_model", "dimensions", "vector"],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "embedding_provider": {
+            "type": "string"
+          },
+          "embedding_model": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "vector": {
+            "$ref": "#/components/schemas/Vector"
+          }
+        }
+      },
+      "SearchRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "User search/query text. Must not be empty."
+          },
+          "database_url": {
+            "type": ["string", "null"],
+            "example": "sqlite:///data/librarian.db"
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "minimum": 1
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "required": [
+          "query",
+          "embedding_provider",
+          "embedding_model",
+          "dimensions",
+          "candidate_count",
+          "results"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "embedding_provider": {
+            "type": "string"
+          },
+          "embedding_model": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "candidate_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            }
+          }
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "required": [
+          "score",
+          "chunk_id",
+          "book_id",
+          "relative_path",
+          "title",
+          "authors",
+          "publisher",
+          "chunk_index",
+          "text",
+          "embedding_provider",
+          "embedding_model",
+          "dimensions"
+        ],
+        "properties": {
+          "score": {
+            "type": "number",
+            "format": "float"
+          },
+          "chunk_id": {
+            "type": "string"
+          },
+          "book_id": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publisher": {
+            "type": ["string", "null"]
+          },
+          "chunk_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "embedding_provider": {
+            "type": "string"
+          },
+          "embedding_model": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "BookRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "relative_path",
+          "title",
+          "authors",
+          "publisher",
+          "status",
+          "error_message",
+          "chunk_count"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publisher": {
+            "type": ["string", "null"]
+          },
+          "status": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": ["string", "null"]
+          },
+          "chunk_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Vector": {
+        "type": "array",
+        "items": {
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+          "detail": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  }
+}
