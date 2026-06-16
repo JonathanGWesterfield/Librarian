@@ -335,6 +335,13 @@ The startup script opens Docker Desktop when needed, starts native Ollama when
 it is not already running, pulls the configured embedding model, then runs
 `docker compose up -d`.
 
+On macOS, Docker can be provided either by Docker Desktop or by Homebrew's
+Docker CLI plus a runtime such as Colima. If Homebrew installs Docker Compose
+as a CLI plugin, `scripts/start_local.sh` will add
+`/opt/homebrew/lib/docker/cli-plugins` to `~/.docker/config.json` when needed.
+If Docker Desktop is not installed, the script will try `colima start` when the
+`colima` command is available.
+
 To rebuild embeddings without deleting raw book text or chunks:
 
 ```bash
