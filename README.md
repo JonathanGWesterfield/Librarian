@@ -131,7 +131,7 @@ storage or ingestion infrastructure.
 ```text
 apps/api/              FastAPI application surface
 apps/codex_broker/     Host-side Codex CLI wrapper service
-packages/ingestion/    Local Python packages:
+packages/              Local Python packages:
   librarian_config      Shared environment/default resolution
   librarian_storage     SQLite storage adapter and storage records
   librarian_ingestion   EPUB parsing, chunking, and ingestion workflow
@@ -149,6 +149,7 @@ scripts/               Developer helper scripts
 
 - [Phase 1: EPUB Ingestion MVP](docs/phase-1-ingestor.md)
 - [API OpenAPI Contract](docs/api-endpoints.md)
+- [Evaluation Strategy](docs/evaluation-strategy.md)
 
 ## Roadmap
 
