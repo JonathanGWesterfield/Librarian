@@ -18,7 +18,7 @@ if str(INGESTION_PACKAGE) not in sys.path:
     sys.path.insert(0, str(INGESTION_PACKAGE))
 
 from librarian_ingestion.chat import ChatOptions, answer_question
-from librarian_ingestion.config import (
+from librarian_config import (
     DATABASE_URL_ENV,
     EMBEDDING_MODEL_ENV,
     EMBEDDING_PROVIDER_ENV,

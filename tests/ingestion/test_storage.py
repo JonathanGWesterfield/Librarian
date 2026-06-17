@@ -11,7 +11,7 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
 from librarian_ingestion.chunk import chunk_text
-from librarian_ingestion.config import (
+from librarian_config import (
     resolve_embedding_model,
     resolve_embedding_provider,
     resolve_ollama_base_url,
