@@ -1,0 +1,44 @@
+{
+  "benchmark": {
+    "name": "deterministic-answer-quality-smoke",
+    "description": "Small deterministic answer-quality benchmark used to validate answer scoring and report rendering.",
+    "mode": "static_answers",
+    "generated_at": "1970-01-01T00:00:00+00:00"
+  },
+  "cases": [
+    {
+      "id": "war-grounded-answer",
+      "question": "How brutal and terrible is war?",
+      "expected_terms": ["fear", "death", "trauma"],
+      "answer": "The retrieved passages frame war through fear, death, and trauma among soldiers [S1].",
+      "sources": [
+        {
+          "source_id": "S1",
+          "relative_path": "All Quiet on the Western Front.epub",
+          "text": "The soldiers live with fear, death, and trauma at the front."
+        }
+      ]
+    },
+    {
+      "id": "weak-uncited-answer",
+      "question": "What does the source say about the clockwork garden?",
+      "expected_terms": ["clockwork", "garden"],
+      "answer": "It is about a clockwork garden, but the answer gives no citation.",
+      "sources": [
+        {
+          "source_id": "S1",
+          "relative_path": "sample.epub",
+          "text": "The clockwork garden woke at dawn."
+        }
+      ]
+    },
+    {
+      "id": "insufficient-evidence-refusal",
+      "question": "What does this source say about quantum gardens?",
+      "expected_terms": [],
+      "should_refuse": true,
+      "answer": "The local library context is insufficient to answer that question.",
+      "sources": []
+    }
+  ]
+}

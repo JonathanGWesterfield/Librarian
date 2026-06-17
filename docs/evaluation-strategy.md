@@ -210,3 +210,11 @@ committing the books or hand-labeling exact chunks. Live retrieval report
 generation uses this corpus against an ingested local database. Individual
 cases can later be upgraded from book-level labels to chunk-level labels as we
 inspect retrieved passages.
+
+The first answer-quality benchmark lives at
+`tests/fixtures/evaluation/answer_quality_benchmark.json`. It is deterministic
+and heuristic-based: it checks expected concepts, source citation validity,
+whether cited sources support covered concepts, and whether insufficient
+evidence answers refuse correctly. This is not a replacement for human review
+or an LLM-as-judge pass, but it gives us a stable first regression signal for
+generated answers.

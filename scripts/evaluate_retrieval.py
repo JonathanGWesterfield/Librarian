@@ -16,6 +16,12 @@ from librarian_evaluation.reporting import (
     build_retrieval_report_document,
     render_evaluation_markdown,
 )
+from librarian_evaluation.answer import (
+    AnswerCandidate,
+    AnswerEvaluationCase,
+    AnswerSource,
+    evaluate_answer_cases,
+)
 from librarian_evaluation.retrieval import (
     RetrievalEvaluationCase,
     RetrievalResult,
@@ -30,6 +36,9 @@ DEFAULT_LIVE_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-live-retrieval-report.js
 DEFAULT_LIVE_MARKDOWN_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-live-report.md"
 DEFAULT_GOLDEN_CORPUS_PATH = (
     REPO_ROOT / "tests/fixtures/evaluation/golden_retrieval_corpus.json"
+)
+DEFAULT_ANSWER_BENCHMARK_PATH = (
+    REPO_ROOT / "tests/fixtures/evaluation/answer_quality_benchmark.json"
 )
 
 
@@ -65,6 +74,12 @@ def main() -> int:
         type=Path,
         default=DEFAULT_GOLDEN_CORPUS_PATH,
         help="Path to the real-library golden corpus JSON file.",
+    )
+    parser.add_argument(
+        "--answer-benchmark",
+        type=Path,
+        default=DEFAULT_ANSWER_BENCHMARK_PATH,
+        help="Path to the deterministic answer-quality benchmark JSON file.",
     )
     parser.add_argument(
         "--github-summary",
@@ -112,6 +127,7 @@ def main() -> int:
             args.markdown_output = DEFAULT_LIVE_MARKDOWN_OUTPUT_PATH
         document = generate_live_report_document(
             args.golden_corpus,
+            answer_benchmark_path=args.answer_benchmark,
             database_url=args.database_url,
             embedding_provider=args.embedding_provider,
             embedding_model=args.embedding_model,
@@ -119,7 +135,10 @@ def main() -> int:
             limit=args.limit,
         )
     else:
-        document = generate_report_document(args.benchmark)
+        document = generate_report_document(
+            args.benchmark,
+            answer_benchmark_path=args.answer_benchmark,
+        )
     golden_corpus = _load_optional_json(args.golden_corpus)
     rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
     rendered_markdown = render_evaluation_markdown(
@@ -158,7 +177,11 @@ def main() -> int:
     return 0
 
 
-def generate_report_document(benchmark_path: Path) -> dict[str, Any]:
+def generate_report_document(
+    benchmark_path: Path,
+    *,
+    answer_benchmark_path: Path | None = None,
+) -> dict[str, Any]:
     benchmark_data = json.loads(benchmark_path.read_text(encoding="utf-8"))
     cases = [_case_from_json(case) for case in benchmark_data["cases"]]
     ranked_results_by_case = {
@@ -176,6 +199,7 @@ def generate_report_document(benchmark_path: Path) -> dict[str, Any]:
         report,
         benchmark=benchmark,
         primary_k=benchmark_data.get("primary_k"),
+        answer_quality=_answer_report_from_path(answer_benchmark_path),
     )
     return document.to_dict()
 
@@ -183,6 +207,7 @@ def generate_report_document(benchmark_path: Path) -> dict[str, Any]:
 def generate_live_report_document(
     corpus_path: Path,
     *,
+    answer_benchmark_path: Path | None = None,
     database_url: str | None = None,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
@@ -225,6 +250,7 @@ def generate_live_report_document(
             database_url=database_url,
             limit=limit,
         ),
+        answer_quality=_answer_report_from_path(answer_benchmark_path),
     )
     return document.to_dict()
 
@@ -248,6 +274,44 @@ def _result_from_json(data: dict[str, Any]) -> RetrievalResult:
         score=data.get("score"),
         title=data.get("title"),
         text=data.get("text"),
+    )
+
+
+def _answer_report_from_path(path: Path | None):
+    if path is None or not path.exists():
+        return None
+    benchmark_data = json.loads(path.read_text(encoding="utf-8"))
+    cases = [_answer_case_from_json(case) for case in benchmark_data["cases"]]
+    candidates = {
+        case["id"]: _answer_candidate_from_json(case)
+        for case in benchmark_data["cases"]
+    }
+    generated_at = benchmark_data.get("benchmark", {}).get("generated_at")
+    return evaluate_answer_cases(cases, candidates, generated_at=generated_at)
+
+
+def _answer_case_from_json(data: dict[str, Any]) -> AnswerEvaluationCase:
+    return AnswerEvaluationCase(
+        id=data["id"],
+        question=data["question"],
+        expected_terms=set(data.get("expected_terms", [])),
+        required_citations=data.get("required_citations", True),
+        should_refuse=data.get("should_refuse", False),
+        notes=data.get("notes"),
+    )
+
+
+def _answer_candidate_from_json(data: dict[str, Any]) -> AnswerCandidate:
+    return AnswerCandidate(
+        answer=data.get("answer", ""),
+        sources=[
+            AnswerSource(
+                source_id=source["source_id"],
+                text=source["text"],
+                relative_path=source.get("relative_path"),
+            )
+            for source in data.get("sources", [])
+        ],
     )
 
 
