@@ -19,7 +19,7 @@ from librarian_config import (
     sqlite_path_from_url,
 )
 from librarian_ingestion.epub import parse_epub
-from librarian_ingestion.storage import (
+from librarian_storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,

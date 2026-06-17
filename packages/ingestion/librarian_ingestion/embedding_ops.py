@@ -6,7 +6,7 @@ from librarian_config import (
     resolve_database_url,
 )
 from librarian_ingestion.embeddings import create_configured_embedder
-from librarian_ingestion.storage import (
+from librarian_storage import (
     EmbeddingRecord,
     StoredChunkRecord,
     create_ingestion_store,

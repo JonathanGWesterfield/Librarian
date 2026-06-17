@@ -35,7 +35,7 @@ from librarian_ingestion.embedding_ops import (
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
 from librarian_ingestion.search import SearchOptions, search_chunks
-from librarian_ingestion.storage import create_ingestion_store
+from librarian_storage import create_ingestion_store
 
 
 def main(argv: list[str] | None = None) -> int:
