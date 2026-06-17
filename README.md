@@ -131,7 +131,12 @@ storage or ingestion infrastructure.
 ```text
 apps/api/              FastAPI application surface
 apps/codex_broker/     Host-side Codex CLI wrapper service
-packages/ingestion/    EPUB parsing and chunking package
+packages/ingestion/    Local Python packages:
+  librarian_config      Shared environment/default resolution
+  librarian_storage     SQLite storage adapter and storage records
+  librarian_ingestion   EPUB parsing, chunking, and ingestion workflow
+  librarian_search      Query embedding and vector search
+  librarian_chat        Grounded answer orchestration and generation providers
 books/                 Optional local EPUB input folder, ignored by Git
 Epub-Books/            Local test EPUB folder, ignored by Git
 data/                  Local runtime data, ignored by Git
