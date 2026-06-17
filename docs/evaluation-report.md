@@ -16,12 +16,12 @@
 | Live embedding evaluation | Not measured in this smoke report |
 | Embedding provider | Not available until live retrieval is run |
 | Embedding model | Not available until live retrieval is run |
+| Benchmark mode | `static_ranked_results` |
 | What this section should answer | Whether embedding model changes improve retrieval quality |
 
-This section is intentionally a placeholder until the report runner is wired
-to execute live search against the local SQLite database. Once live
-retrieval runs, this section should list provider, model, dimensions,
-embedding count, and retrieval deltas by model.
+This smoke report does not call the local database. Run
+`python3 scripts/evaluate_retrieval.py --live` to populate this
+section with live embedding and search metadata.
 
 ## Golden Corpus
 
@@ -33,11 +33,11 @@ embedding count, and retrieval deltas by model.
 | Query cases | `20` |
 | Expected book labels | `31` |
 | Primary K | `10` |
+| Used by active report | `False` |
 
 The golden corpus is the real-library benchmark. It is currently
-book-level and is not yet the source of the committed smoke report.
-Once live retrieval is wired in, this section should become the main
-retrieval quality signal.
+book-level. In live mode, each query is run through search and scored
+against these expected EPUB filenames.
 
 ### Golden Corpus Cases
 

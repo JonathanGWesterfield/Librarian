@@ -188,10 +188,25 @@ python3 scripts/evaluate_retrieval.py
 CI runs `python3 scripts/evaluate_retrieval.py --check` so pull requests fail
 when the committed report is stale.
 
+Live golden-corpus reports are generated locally from the ingested SQLite
+database and live query embeddings. They are written separately so CI can keep
+using the deterministic smoke report:
+
+```bash
+python3 scripts/evaluate_retrieval.py --live \
+  --database-url sqlite:///data/librarian.db \
+  --embedding-provider ollama \
+  --embedding-model all-minilm
+```
+
+The live machine-readable report is written to
+`docs/evaluation-live-retrieval-report.json`; the live human-readable report is
+written to `docs/evaluation-live-report.md`.
+
 The first real-library benchmark lives at
 `tests/fixtures/evaluation/golden_retrieval_corpus.json`. It is book-level on
 purpose: each case names expected EPUB filenames from the local library without
-committing the books or hand-labeling exact chunks. Once live retrieval report
-generation is wired to an ingested local database, this corpus should become the
-main quality benchmark. Individual cases can later be upgraded from book-level
-labels to chunk-level labels as we inspect retrieved passages.
+committing the books or hand-labeling exact chunks. Live retrieval report
+generation uses this corpus against an ingested local database. Individual
+cases can later be upgraded from book-level labels to chunk-level labels as we
+inspect retrieved passages.

@@ -15,14 +15,18 @@ class RetrievalReportDocument:
     benchmark: dict[str, Any]
     summary: dict[str, Any]
     retrieval: RetrievalEvaluationReport
+    run: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        document = {
             "report_type": self.report_type,
             "benchmark": self.benchmark,
             "summary": self.summary,
             "retrieval": self.retrieval.to_dict(),
         }
+        if self.run is not None:
+            document["run"] = self.run
+        return document
 
 
 def build_retrieval_report_document(
@@ -30,6 +34,7 @@ def build_retrieval_report_document(
     *,
     benchmark: dict[str, Any] | None = None,
     primary_k: int | None = None,
+    run: dict[str, Any] | None = None,
 ) -> RetrievalReportDocument:
     selected_k = primary_k or max(report.k_values)
     if selected_k not in report.k_values:
@@ -41,6 +46,7 @@ def build_retrieval_report_document(
         benchmark=benchmark or {},
         summary=summary,
         retrieval=report,
+        run=run,
     )
 
 
@@ -52,6 +58,7 @@ def render_evaluation_markdown(
     retrieval = document["retrieval"]
     summary = document["summary"]
     benchmark = document.get("benchmark", {})
+    run = document.get("run", {})
     golden_corpus = golden_corpus or {}
     lines = [
         "# Librarian Evaluation Report",
@@ -65,24 +72,10 @@ def render_evaluation_markdown(
         f"- Active benchmark: `{benchmark.get('name', 'unknown')}`",
         f"- Benchmark mode: `{benchmark.get('mode', 'unknown')}`",
         "",
-        "## Embeddings",
-        "",
-        "| Metric | Value |",
-        "| --- | --- |",
-        "| Live embedding evaluation | Not measured in this smoke report |",
-        "| Embedding provider | Not available until live retrieval is run |",
-        "| Embedding model | Not available until live retrieval is run |",
-        "| What this section should answer | Whether embedding model changes improve retrieval quality |",
-        "",
-        "This section is intentionally a placeholder until the report runner is wired",
-        "to execute live search against the local SQLite database. Once live",
-        "retrieval runs, this section should list provider, model, dimensions,",
-        "embedding count, and retrieval deltas by model.",
-        "",
-        "## Golden Corpus",
-        "",
     ]
-    lines.extend(_render_golden_corpus_section(golden_corpus))
+    lines.extend(_render_embedding_section(run, benchmark))
+    lines.extend(["", "## Golden Corpus", ""])
+    lines.extend(_render_golden_corpus_section(golden_corpus, benchmark))
     lines.extend(
         [
             "",
@@ -251,7 +244,47 @@ def _percent(value: float) -> str:
     return f"{value:.0%}"
 
 
-def _render_golden_corpus_section(golden_corpus: dict[str, Any]) -> list[str]:
+def _render_embedding_section(
+    run: dict[str, Any],
+    benchmark: dict[str, Any],
+) -> list[str]:
+    if run.get("mode") == "live_search":
+        return [
+            "## Embeddings",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            "| Live embedding evaluation | Measured through live retrieval |",
+            f"| Embedding provider | `{run.get('embedding_provider', 'unknown')}` |",
+            f"| Embedding model | `{run.get('embedding_model', 'unknown')}` |",
+            f"| Embedding dimensions | `{run.get('embedding_dimensions', 'unknown')}` |",
+            f"| Search limit per query | `{run.get('limit', 'unknown')}` |",
+            f"| Total candidates scored | `{run.get('total_candidates_scored', 'unknown')}` |",
+            "",
+            "This section does not judge embedding quality directly. It measures",
+            "embedding impact through retrieval outcomes against the golden corpus.",
+        ]
+    return [
+        "## Embeddings",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        "| Live embedding evaluation | Not measured in this smoke report |",
+        "| Embedding provider | Not available until live retrieval is run |",
+        "| Embedding model | Not available until live retrieval is run |",
+        f"| Benchmark mode | `{benchmark.get('mode', 'unknown')}` |",
+        "| What this section should answer | Whether embedding model changes improve retrieval quality |",
+        "",
+        "This smoke report does not call the local database. Run",
+        "`python3 scripts/evaluate_retrieval.py --live` to populate this",
+        "section with live embedding and search metadata.",
+    ]
+
+
+def _render_golden_corpus_section(
+    golden_corpus: dict[str, Any],
+    active_benchmark: dict[str, Any],
+) -> list[str]:
     if not golden_corpus:
         return [
             "Golden corpus metadata was not provided to this report run.",
@@ -270,11 +303,11 @@ def _render_golden_corpus_section(golden_corpus: dict[str, Any]) -> list[str]:
         f"| Query cases | `{len(cases)}` |",
         f"| Expected book labels | `{expected_book_count}` |",
         f"| Primary K | `{golden_corpus.get('primary_k', 'unknown')}` |",
+        f"| Used by active report | `{active_benchmark.get('name') == benchmark.get('name')}` |",
         "",
         "The golden corpus is the real-library benchmark. It is currently",
-        "book-level and is not yet the source of the committed smoke report.",
-        "Once live retrieval is wired in, this section should become the main",
-        "retrieval quality signal.",
+        "book-level. In live mode, each query is run through search and scored",
+        "against these expected EPUB filenames.",
         "",
         "### Golden Corpus Cases",
         "",
