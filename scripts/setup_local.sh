@@ -98,7 +98,7 @@ ensure_python_env() {
   .venv/bin/python -m pip install \
     -e "apps/api[dev]" \
     -e "apps/codex_broker[dev]" \
-    -e "packages/ingestion[dev]"
+    -e "packages[dev]"
 }
 
 ensure_docker_runtime_guidance() {

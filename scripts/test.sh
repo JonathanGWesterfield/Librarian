@@ -40,7 +40,7 @@ while (($#)); do
   esac
 done
 
-export PYTHONPATH="${PWD}/packages/ingestion${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${PWD}/packages${PYTHONPATH:+:${PYTHONPATH}}"
 
 command=(python3 -m unittest)
 if [[ "${failfast}" == "true" ]]; then

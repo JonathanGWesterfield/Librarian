@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "play"))
-sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
+sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from librarian import main
 from librarian_storage.storage import EmbeddingRecord, create_ingestion_store

@@ -304,7 +304,7 @@ Database totals: 54 books, 4120 chunks, 4120 embeddings
 - `scripts/play/ingest_epubs.py`
 - `scripts/play/librarian.py`
 - `scripts/rebuild_embeddings.py`
-- Chunking utilities in `packages/ingestion`
+- Chunking utilities in `packages`
 - SQLite persistence under `data/librarian.db`
 - Config-based `LIBRARIAN_BOOKS_DIR` support
 - File hashing and unchanged-file skipping

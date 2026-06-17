@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "play"))
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
-sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
+sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from chat import main as chat_main
 from librarian import main as librarian_main

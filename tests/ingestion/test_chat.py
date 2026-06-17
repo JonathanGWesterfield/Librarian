@@ -3,8 +3,8 @@ import unittest
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
-INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
-sys.path.insert(0, str(INGESTION_PACKAGE))
+PACKAGES_DIR = REPO_ROOT / "packages"
+sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatOptions, answer_question
 from librarian_search.search import SearchResponse, SearchResult

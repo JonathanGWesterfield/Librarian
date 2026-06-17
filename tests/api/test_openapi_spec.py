@@ -5,7 +5,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
-sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
+sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 try:
     from librarian_api.main import app

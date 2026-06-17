@@ -16,9 +16,9 @@ from dataclasses import asdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
-if str(INGESTION_PACKAGE) not in sys.path:
-    sys.path.insert(0, str(INGESTION_PACKAGE))
+PACKAGES_DIR = REPO_ROOT / "packages"
+if str(PACKAGES_DIR) not in sys.path:
+    sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_config.config import (
     BOOKS_DIR_ENV,
