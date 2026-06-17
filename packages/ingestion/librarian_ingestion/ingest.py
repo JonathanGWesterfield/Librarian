@@ -13,7 +13,7 @@ from librarian_config import (
 from librarian_ingestion.embeddings import create_configured_embedder
 from librarian_ingestion.epub import parse_epub
 from librarian_ingestion.scan import DiscoveredEpub, scan_epub_files
-from librarian_ingestion.storage import (
+from librarian_storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,

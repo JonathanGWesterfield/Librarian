@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from librarian_ingestion.ingest import IngestionOptions, IngestionResult
     from librarian_ingestion.scan import DiscoveredEpub, EpubSourceError
     from librarian_ingestion.search import SearchOptions, SearchResponse, SearchResult
-    from librarian_ingestion.storage import (
+    from librarian_storage import (
         BookRecord,
         ChunkRecord,
         EmbeddingModelSummary,
@@ -211,7 +211,7 @@ def __getattr__(name: str):
         "StoredEmbeddingRecord",
         "create_ingestion_store",
     }:
-        from librarian_ingestion.storage import (
+        from librarian_storage import (
             BookRecord,
             ChunkRecord,
             EmbeddingModelSummary,

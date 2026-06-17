@@ -9,7 +9,7 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
 from librarian_ingestion.search import SearchOptions, search_chunks
-from librarian_ingestion.storage import (
+from librarian_storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,

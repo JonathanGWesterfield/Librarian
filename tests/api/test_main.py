@@ -9,7 +9,7 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
 
 from librarian_ingestion.chat import ChatResponse, ChatSource
-from librarian_ingestion.storage import (
+from librarian_storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,
