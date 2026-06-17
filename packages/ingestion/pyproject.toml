@@ -26,4 +26,5 @@ packages = [
   "librarian_config",
   "librarian_storage",
   "librarian_search",
+  "librarian_chat",
 ]

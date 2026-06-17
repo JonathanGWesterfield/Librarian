@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from librarian_api.config import settings
-from librarian_ingestion.chat import ChatOptions, answer_question
+from librarian_chat import ChatOptions, answer_question
 from librarian_ingestion.embedding_ops import (
     EmbedQueryOptions,
     RebuildEmbeddingsOptions,
