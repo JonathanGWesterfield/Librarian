@@ -289,6 +289,12 @@ Run checks used by pull requests:
 scripts/check.sh
 ```
 
+The test suite includes end-to-end coverage for both the CLI and FastAPI
+flows. Those tests ingest the fixture EPUB, rebuild embeddings, search, and ask
+a chat question against a temporary SQLite database with deterministic local
+model fakes, so repo cleanup should break tests before it breaks the product
+path.
+
 Run EPUB ingestion into the local SQLite database:
 
 ```bash
