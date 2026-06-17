@@ -177,8 +177,9 @@ This makes evaluation useful for engineering decisions. A change such as hybrid
 retrieval, a new embedding model, richer metadata, or a different generator
 should produce a comparable report rather than a vague impression.
 
-The current committed retrieval report lives at
-`docs/evaluation-retrieval-report.json`. Regenerate it with:
+The current committed retrieval reports live at
+`docs/evaluation-retrieval-report.json` for machine-readable output and
+`docs/evaluation-report.md` for human review. Regenerate both with:
 
 ```bash
 python3 scripts/evaluate_retrieval.py

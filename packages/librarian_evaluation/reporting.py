@@ -44,6 +44,81 @@ def build_retrieval_report_document(
     )
 
 
+def render_evaluation_markdown(
+    document: dict[str, Any],
+    *,
+    golden_corpus: dict[str, Any] | None = None,
+) -> str:
+    retrieval = document["retrieval"]
+    summary = document["summary"]
+    benchmark = document.get("benchmark", {})
+    golden_corpus = golden_corpus or {}
+    lines = [
+        "# Librarian Evaluation Report",
+        "",
+        "## Overview",
+        "",
+        summary["headline"],
+        "",
+        f"- Overall retrieval score: `{summary['overall_score']}`",
+        f"- Primary K: `{summary['primary_k']}`",
+        f"- Active benchmark: `{benchmark.get('name', 'unknown')}`",
+        f"- Benchmark mode: `{benchmark.get('mode', 'unknown')}`",
+        "",
+        "## Embeddings",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        "| Live embedding evaluation | Not measured in this smoke report |",
+        "| Embedding provider | Not available until live retrieval is run |",
+        "| Embedding model | Not available until live retrieval is run |",
+        "| What this section should answer | Whether embedding model changes improve retrieval quality |",
+        "",
+        "This section is intentionally a placeholder until the report runner is wired",
+        "to execute live search against the local SQLite database. Once live",
+        "retrieval runs, this section should list provider, model, dimensions,",
+        "embedding count, and retrieval deltas by model.",
+        "",
+        "## Golden Corpus",
+        "",
+    ]
+    lines.extend(_render_golden_corpus_section(golden_corpus))
+    lines.extend(
+        [
+            "",
+            "## Retrieval Metrics",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            f"| Case count | `{retrieval['aggregate']['case_count']}` |",
+            f"| Hit@{summary['primary_k']} | `{_decimal(summary['key_metrics']['hit_rate_at_k'])}` |",
+            f"| Precision@{summary['primary_k']} | `{_decimal(summary['key_metrics']['mean_precision_at_k'])}` |",
+            f"| Recall@{summary['primary_k']} | `{_decimal(summary['key_metrics']['mean_recall_at_k'])}` |",
+            f"| Mean reciprocal rank | `{_decimal(summary['key_metrics']['mean_reciprocal_rank'])}` |",
+            "",
+            "### Improvement Areas",
+            "",
+        ]
+    )
+    lines.extend([f"- {area}" for area in summary["improvement_areas"]])
+    lines.extend(["", "### Weakest Cases", ""])
+    lines.extend(_render_weakest_cases(summary["weakest_cases"], summary["primary_k"]))
+    lines.extend(["", "### Retrieval Cases", ""])
+    lines.extend(_render_case_table(retrieval["cases"], summary["primary_k"]))
+    lines.extend(
+        [
+            "",
+            "## Report Freshness",
+            "",
+            "GitHub Actions runs `scripts/check.sh`, which validates that the",
+            "committed JSON and Markdown reports match the current evaluation",
+            "fixture data.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _summarize_retrieval_report(
     report: RetrievalEvaluationReport,
     primary_k: int,
@@ -174,3 +249,88 @@ def _case_reason(case: RetrievalCaseMetrics, primary_k: int) -> str:
 
 def _percent(value: float) -> str:
     return f"{value:.0%}"
+
+
+def _render_golden_corpus_section(golden_corpus: dict[str, Any]) -> list[str]:
+    if not golden_corpus:
+        return [
+            "Golden corpus metadata was not provided to this report run.",
+        ]
+    benchmark = golden_corpus.get("benchmark", {})
+    cases = golden_corpus.get("cases", [])
+    expected_book_count = sum(
+        len(case.get("relevant_relative_paths", [])) for case in cases
+    )
+    lines = [
+        "| Metric | Value |",
+        "| --- | --- |",
+        f"| Corpus name | `{benchmark.get('name', 'unknown')}` |",
+        f"| Corpus mode | `{benchmark.get('mode', 'unknown')}` |",
+        f"| Label granularity | `{golden_corpus.get('label_granularity', 'unknown')}` |",
+        f"| Query cases | `{len(cases)}` |",
+        f"| Expected book labels | `{expected_book_count}` |",
+        f"| Primary K | `{golden_corpus.get('primary_k', 'unknown')}` |",
+        "",
+        "The golden corpus is the real-library benchmark. It is currently",
+        "book-level and is not yet the source of the committed smoke report.",
+        "Once live retrieval is wired in, this section should become the main",
+        "retrieval quality signal.",
+        "",
+        "### Golden Corpus Cases",
+        "",
+        "| Case | Expected Books |",
+        "| --- | ---: |",
+    ]
+    for case in cases:
+        lines.append(
+            f"| `{case['id']}` | `{len(case.get('relevant_relative_paths', []))}` |"
+        )
+    return lines
+
+
+def _render_weakest_cases(cases: list[dict[str, Any]], primary_k: int) -> list[str]:
+    if not cases:
+        return ["No weak cases detected."]
+    lines = [
+        f"| Case | Hit@{primary_k} | Recall@{primary_k} | MRR | Reason |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
+    for case in cases:
+        lines.append(
+            "| "
+            f"`{case['case_id']}` | "
+            f"`{case['hit_at_k']}` | "
+            f"`{_decimal(case['recall_at_k'])}` | "
+            f"`{_decimal(case['reciprocal_rank'])}` | "
+            f"{case['reason']} |"
+        )
+    return lines
+
+
+def _render_case_table(cases: list[dict[str, Any]], primary_k: int) -> list[str]:
+    lines = [
+        f"| Case | Results | Relevant Results | Hit@{primary_k} | Precision@{primary_k} | Recall@{primary_k} | MRR |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for case in cases:
+        lines.append(
+            "| "
+            f"`{case['case_id']}` | "
+            f"`{case['result_count']}` | "
+            f"`{case['relevant_result_count']}` | "
+            f"`{_metric_at_k(case['hit_at_k'], primary_k)}` | "
+            f"`{_decimal(_metric_at_k(case['precision_at_k'], primary_k))}` | "
+            f"`{_decimal(_metric_at_k(case['recall_at_k'], primary_k))}` | "
+            f"`{_decimal(case['reciprocal_rank'])}` |"
+        )
+    return lines
+
+
+def _decimal(value: float) -> str:
+    return f"{value:.4f}"
+
+
+def _metric_at_k(metrics: dict[Any, Any], k: int) -> Any:
+    if k in metrics:
+        return metrics[k]
+    return metrics[str(k)]
