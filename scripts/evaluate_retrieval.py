@@ -12,7 +12,10 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_evaluation.reporting import build_retrieval_report_document
+from librarian_evaluation.reporting import (
+    build_retrieval_report_document,
+    render_evaluation_markdown,
+)
 from librarian_evaluation.retrieval import (
     RetrievalEvaluationCase,
     RetrievalResult,
@@ -21,6 +24,10 @@ from librarian_evaluation.retrieval import (
 
 DEFAULT_BENCHMARK_PATH = REPO_ROOT / "tests/fixtures/evaluation/retrieval_benchmark.json"
 DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-retrieval-report.json"
+DEFAULT_MARKDOWN_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-report.md"
+DEFAULT_GOLDEN_CORPUS_PATH = (
+    REPO_ROOT / "tests/fixtures/evaluation/golden_retrieval_corpus.json"
+)
 
 
 def main() -> int:
@@ -40,6 +47,24 @@ def main() -> int:
         help="Path to write the generated JSON report.",
     )
     parser.add_argument(
+        "--markdown-output",
+        type=Path,
+        default=DEFAULT_MARKDOWN_OUTPUT_PATH,
+        help="Path to write the generated human-readable Markdown report.",
+    )
+    parser.add_argument(
+        "--golden-corpus",
+        type=Path,
+        default=DEFAULT_GOLDEN_CORPUS_PATH,
+        help="Path to the real-library golden corpus JSON file.",
+    )
+    parser.add_argument(
+        "--github-summary",
+        type=Path,
+        default=None,
+        help="Optional path, usually GITHUB_STEP_SUMMARY, to append Markdown output.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Fail if the output file does not match the generated report.",
@@ -47,24 +72,41 @@ def main() -> int:
     args = parser.parse_args()
 
     document = generate_report_document(args.benchmark)
+    golden_corpus = _load_optional_json(args.golden_corpus)
     rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
+    rendered_markdown = render_evaluation_markdown(
+        document,
+        golden_corpus=golden_corpus,
+    )
 
     if args.check:
-        if not args.output.exists():
-            print(f"Report is missing: {args.output}", file=sys.stderr)
+        if _report_is_stale(
+            args.output,
+            rendered,
+            regenerate_hint=f"run scripts/evaluate_retrieval.py --output {args.output}",
+        ):
             return 1
-        current = args.output.read_text(encoding="utf-8")
-        if current != rendered:
-            print(
-                f"Report is stale: run scripts/evaluate_retrieval.py --output {args.output}",
-                file=sys.stderr,
-            )
+        if _report_is_stale(
+            args.markdown_output,
+            rendered_markdown,
+            regenerate_hint=(
+                "run scripts/evaluate_retrieval.py "
+                f"--markdown-output {args.markdown_output}"
+            ),
+        ):
             return 1
+        if args.github_summary:
+            _append_summary(args.github_summary, rendered_markdown)
         return 0
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(rendered, encoding="utf-8")
+    args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
+    args.markdown_output.write_text(rendered_markdown, encoding="utf-8")
+    if args.github_summary:
+        _append_summary(args.github_summary, rendered_markdown)
     print(f"Wrote retrieval evaluation report to {args.output}")
+    print(f"Wrote human-readable evaluation report to {args.markdown_output}")
     return 0
 
 
@@ -110,6 +152,29 @@ def _result_from_json(data: dict[str, Any]) -> RetrievalResult:
         title=data.get("title"),
         text=data.get("text"),
     )
+
+
+def _load_optional_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _report_is_stale(path: Path, expected: str, *, regenerate_hint: str) -> bool:
+    if not path.exists():
+        print(f"Report is missing: {path}", file=sys.stderr)
+        return True
+    current = path.read_text(encoding="utf-8")
+    if current != expected:
+        print(f"Report is stale: {regenerate_hint}", file=sys.stderr)
+        return True
+    return False
+
+
+def _append_summary(path: Path, markdown: str) -> None:
+    with path.open("a", encoding="utf-8") as summary:
+        summary.write(markdown)
+        summary.write("\n")
 
 
 if __name__ == "__main__":

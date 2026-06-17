@@ -23,3 +23,14 @@ jobs:
 
       - name: Run checks
         run: scripts/check.sh
+
+      - name: Publish evaluation summary
+        run: python scripts/evaluate_retrieval.py --check --github-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evaluation reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-reports
+          path: |
+            docs/evaluation-retrieval-report.json
+            docs/evaluation-report.md
