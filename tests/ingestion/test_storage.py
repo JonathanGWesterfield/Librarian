@@ -11,7 +11,7 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
 from librarian_ingestion.chunk import chunk_text
-from librarian_config import (
+from librarian_config.config import (
     resolve_embedding_model,
     resolve_embedding_provider,
     resolve_ollama_base_url,
@@ -19,7 +19,7 @@ from librarian_config import (
     sqlite_path_from_url,
 )
 from librarian_ingestion.epub import parse_epub
-from librarian_storage import (
+from librarian_storage.storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,

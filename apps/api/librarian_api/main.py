@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from librarian_api.config import settings
-from librarian_chat import ChatOptions, answer_question
+from librarian_chat.chat import ChatOptions, answer_question
 from librarian_ingestion.embedding_ops import (
     EmbedQueryOptions,
     RebuildEmbeddingsOptions,
@@ -16,8 +16,8 @@ from librarian_ingestion.embedding_ops import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
-from librarian_search import SearchOptions, search_chunks
-from librarian_storage import create_ingestion_store
+from librarian_search.search import SearchOptions, search_chunks
+from librarian_storage.storage import create_ingestion_store
 
 app = FastAPI(title="Librarian", version="0.1.0")
 

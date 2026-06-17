@@ -17,8 +17,8 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 if str(INGESTION_PACKAGE) not in sys.path:
     sys.path.insert(0, str(INGESTION_PACKAGE))
 
-from librarian_chat import ChatOptions, answer_question
-from librarian_config import (
+from librarian_chat.chat import ChatOptions, answer_question
+from librarian_config.config import (
     DATABASE_URL_ENV,
     EMBEDDING_MODEL_ENV,
     EMBEDDING_PROVIDER_ENV,

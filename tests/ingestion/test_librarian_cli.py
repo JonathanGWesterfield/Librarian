@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts" / "play"))
 sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
 
 from librarian import main
-from librarian_storage import EmbeddingRecord, create_ingestion_store
+from librarian_storage.storage import EmbeddingRecord, create_ingestion_store
 
 
 class LibrarianCliTests(unittest.TestCase):

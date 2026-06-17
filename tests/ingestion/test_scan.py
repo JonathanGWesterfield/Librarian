@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
-from librarian_config import resolve_books_dir
+from librarian_config.config import resolve_books_dir
 from librarian_ingestion.scan import EpubSourceError, hash_file, scan_epub_files
 
 

@@ -15,7 +15,7 @@ from librarian_ingestion.embedding_ops import (
     embed_query,
     rebuild_embeddings,
 )
-from librarian_storage import (
+from librarian_storage.storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,

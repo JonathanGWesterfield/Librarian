@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from librarian_config import (
+from librarian_config.config import (
     resolve_database_url,
 )
 from librarian_ingestion.embeddings import create_configured_embedder
-from librarian_storage import (
+from librarian_storage.storage import (
     EmbeddingRecord,
     StoredChunkRecord,
     create_ingestion_store,

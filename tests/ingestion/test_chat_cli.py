@@ -10,7 +10,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
 
 from chat import main
-from librarian_chat import ChatResponse, ChatSource
+from librarian_chat.chat import ChatResponse, ChatSource
 
 
 class ChatCliTests(unittest.TestCase):

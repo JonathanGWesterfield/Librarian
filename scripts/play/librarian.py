@@ -20,7 +20,7 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 if str(INGESTION_PACKAGE) not in sys.path:
     sys.path.insert(0, str(INGESTION_PACKAGE))
 
-from librarian_config import (
+from librarian_config.config import (
     BOOKS_DIR_ENV,
     DATABASE_URL_ENV,
     EMBEDDING_MODEL_ENV,
@@ -34,8 +34,8 @@ from librarian_ingestion.embedding_ops import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
-from librarian_search import SearchOptions, search_chunks
-from librarian_storage import create_ingestion_store
+from librarian_search.search import SearchOptions, search_chunks
+from librarian_storage.storage import create_ingestion_store
 
 
 def main(argv: list[str] | None = None) -> int:
