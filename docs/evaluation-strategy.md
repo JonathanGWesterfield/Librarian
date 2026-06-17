@@ -186,3 +186,11 @@ python3 scripts/evaluate_retrieval.py
 
 CI runs `python3 scripts/evaluate_retrieval.py --check` so pull requests fail
 when the committed report is stale.
+
+The first real-library benchmark lives at
+`tests/fixtures/evaluation/golden_retrieval_corpus.json`. It is book-level on
+purpose: each case names expected EPUB filenames from the local library without
+committing the books or hand-labeling exact chunks. Once live retrieval report
+generation is wired to an ingested local database, this corpus should become the
+main quality benchmark. Individual cases can later be upgraded from book-level
+labels to chunk-level labels as we inspect retrieved passages.

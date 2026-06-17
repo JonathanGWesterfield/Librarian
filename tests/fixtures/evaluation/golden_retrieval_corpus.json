@@ -1,0 +1,185 @@
+{
+  "benchmark": {
+    "name": "golden-library-retrieval",
+    "description": "Curated book-level retrieval benchmark for Jonathan's local EPUB library. Expected evidence is labeled by relative EPUB filename so the benchmark can score live retrieval without committing book files.",
+    "mode": "live_search_expected_books",
+    "generated_at": "1970-01-01T00:00:00+00:00",
+    "corpus_source": "local Epub-Books directory, filenames only"
+  },
+  "k_values": [1, 3, 5, 10],
+  "primary_k": 10,
+  "label_granularity": "book",
+  "cases": [
+    {
+      "id": "war-brutality-all-quiet",
+      "query": "How brutal and terrible is war?",
+      "notes": "Broad thematic war query. All Quiet should be a strong match because it centers on front-line trauma, fear, death, and disillusionment.",
+      "relevant_relative_paths": [
+        "All Quiet on the Western Front - Erich Maria Remarque.epub"
+      ]
+    },
+    {
+      "id": "epic-fall-rebellion-paradise-lost",
+      "query": "Which book explores Satan's rebellion, the fall of humanity, temptation, and divine justice?",
+      "notes": "Canonical subject query for Paradise Lost.",
+      "relevant_relative_paths": [
+        "Paradise Lost - John Milton.epub"
+      ]
+    },
+    {
+      "id": "psychohistory-foundation",
+      "query": "Which books are about psychohistory, the collapse of a galactic empire, and a plan to shorten a dark age?",
+      "notes": "Foundation-specific query. Multiple Asimov/Foundation files may be relevant.",
+      "relevant_relative_paths": [
+        "Forward the Foundation - Isaac Asimov.epub"
+      ]
+    },
+    {
+      "id": "robotics-three-laws-asimov",
+      "query": "Which books explore robots, artificial intelligence, and the Three Laws of Robotics?",
+      "notes": "Asimov robot corpus query with several expected matches.",
+      "relevant_relative_paths": [
+        "Complete Robot - Isaac Asimov.epub",
+        "Alle Robotergeschichten - Asimov, Isaac.epub",
+        "The Naked Sun - Isaac Asimov.epub",
+        "[Roboter und Foundation 05] _ Die nackte S - Asimov, Isaac.epub"
+      ]
+    },
+    {
+      "id": "machine-learning-systems",
+      "query": "I want a practical book about designing production machine learning systems, data pipelines, model deployment, and ML engineering tradeoffs.",
+      "notes": "Technical recommendation query for the ML engineering book.",
+      "relevant_relative_paths": [
+        "Designing Machine Learning Systems - Chip Huyen.epub"
+      ]
+    },
+    {
+      "id": "cyberpunk-ai-neuromancer",
+      "query": "Find a cyberpunk novel about hackers, cyberspace, artificial intelligence, and corporate power.",
+      "notes": "Genre and concept query for Neuromancer.",
+      "relevant_relative_paths": [
+        "Neuromancer - William Gibson.epub"
+      ]
+    },
+    {
+      "id": "dune-politics-religion-ecology",
+      "query": "Which science fiction books deal with desert planets, empire, religion, ecology, spice, and political power?",
+      "notes": "Dune-world query. Both Dune sequel files should be plausible evidence.",
+      "relevant_relative_paths": [
+        "Children of Dune - Herbert, Frank.epub",
+        "God Emperor of Dune - Frank Herbert.epub"
+      ]
+    },
+    {
+      "id": "wizard-school-earthsea",
+      "query": "I want a fantasy book about a young wizard, magic, names, shadows, and learning responsibility.",
+      "notes": "Earthsea query focused on Ged's coming-of-age arc.",
+      "relevant_relative_paths": [
+        "Earthsea #01 - A Wizard of Earthsea - Ursula K. Le Guin.epub"
+      ]
+    },
+    {
+      "id": "gender-society-left-hand",
+      "query": "Which novel explores gender, society, diplomacy, and an icy alien world?",
+      "notes": "Subject query for The Left Hand of Darkness.",
+      "relevant_relative_paths": [
+        "The Left Hand of Darkness - Ursula Le Guin.epub"
+      ]
+    },
+    {
+      "id": "theocratic-dystopia-handmaids-tale",
+      "query": "Find a dystopian novel about theocracy, reproductive control, gender oppression, and resistance.",
+      "notes": "Subject query for The Handmaid's Tale.",
+      "relevant_relative_paths": [
+        "The Handmaid's Tale - Margaret Atwood.epub"
+      ]
+    },
+    {
+      "id": "witcher-monsters-destiny",
+      "query": "I want fantasy stories about a monster hunter, destiny, Ciri, Geralt, and political conflict.",
+      "notes": "Witcher corpus query with several expected matches.",
+      "relevant_relative_paths": [
+        "The Last Wish_ Introducing the Witcher - Andrzej Sapkowski.epub",
+        "Blood of Elves - Andrzej Sapkowski.epub",
+        "The Time of Contempt - Andrzej Sapkowski.epub",
+        "Baptism of Fire - Sapkowski, Andrzej.epub",
+        "Sapkowski, Andrzej - Witcher 04 - The Towe - Sapkowski, Andrzej.epub",
+        "Sapkowski, Andrzej - Witcher 05 - The Lady - Sapkowski, Andrzej.epub",
+        "The Tower of Swallows -- Sapkowski, Andrze - Unknown.epub"
+      ]
+    },
+    {
+      "id": "negotiation-tactical-empathy",
+      "query": "Which book teaches negotiation tactics like tactical empathy, mirroring, labeling, and calibrated questions?",
+      "notes": "Practical nonfiction query for Never Split the Difference.",
+      "relevant_relative_paths": [
+        "Never Split the Difference_ Negotiating As - Voss, Chris.epub"
+      ]
+    },
+    {
+      "id": "political-power-prince",
+      "query": "Which classic political book gives advice about rulers, power, fear, fortune, and maintaining a state?",
+      "notes": "Subject query for The Prince.",
+      "relevant_relative_paths": [
+        "The Prince - Niccolo Machiavelli.epub"
+      ]
+    },
+    {
+      "id": "justice-ideal-state-republic",
+      "query": "Which philosophical work discusses justice, the ideal city, philosopher kings, education, and the allegory of the cave?",
+      "notes": "Subject query for Plato's Republic.",
+      "relevant_relative_paths": [
+        "The Republic - Plato.epub"
+      ]
+    },
+    {
+      "id": "spiritual-despair-kierkegaard",
+      "query": "Which book is about despair, the self, sin, faith, and sickness of the spirit?",
+      "notes": "Subject query for Kierkegaard's The Sickness Unto Death.",
+      "relevant_relative_paths": [
+        "The Sickness Unto Death - Soren Kierkegaard.epub"
+      ]
+    },
+    {
+      "id": "beauty-portrait-moral-corruption",
+      "query": "Find the novel about beauty, youth, a portrait, decadence, and moral corruption.",
+      "notes": "Subject query for The Picture of Dorian Gray.",
+      "relevant_relative_paths": [
+        "The Picture of Dorian Gray - Oscar Wilde.epub"
+      ]
+    },
+    {
+      "id": "japanese-feudal-politics-shogun",
+      "query": "I want a historical novel about feudal Japan, samurai politics, shipwrecked Europeans, and cultural translation.",
+      "notes": "Recommendation query for Shogun.",
+      "relevant_relative_paths": [
+        "Shogun - James Clavell.epub"
+      ]
+    },
+    {
+      "id": "motorcycle-maintenance-quality",
+      "query": "Which book combines motorcycle travel, philosophy, quality, technology, and a father-son journey?",
+      "notes": "Subject query for Zen and the Art of Motorcycle Maintenance.",
+      "relevant_relative_paths": [
+        "Zen and the art of motorcycle maintenance - Robert Pirsig.epub"
+      ]
+    },
+    {
+      "id": "survival-wilderness-dog",
+      "query": "Find a classic adventure story about a dog, the wilderness, survival, and the pull of primitive instinct.",
+      "notes": "Subject query for The Call of the Wild.",
+      "relevant_relative_paths": [
+        "The call of the wild - Jack London.epub"
+      ]
+    },
+    {
+      "id": "cambodia-khmer-rouge",
+      "query": "Which books cover Cambodia, the Khmer Rouge, Pol Pot, genocide, and survival under terror?",
+      "notes": "History/memoir query with two expected matches.",
+      "relevant_relative_paths": [
+        "First They Killed My Father - Loung Ung.epub",
+        "Pol Pot - Philip Short.epub"
+      ]
+    }
+  ]
+}
