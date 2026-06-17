@@ -21,10 +21,13 @@ from librarian_evaluation.retrieval import (
     RetrievalResult,
     evaluate_retrieval_cases,
 )
+from librarian_search.search import SearchOptions, SearchResponse, search_chunks
 
 DEFAULT_BENCHMARK_PATH = REPO_ROOT / "tests/fixtures/evaluation/retrieval_benchmark.json"
 DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-retrieval-report.json"
 DEFAULT_MARKDOWN_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-report.md"
+DEFAULT_LIVE_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-live-retrieval-report.json"
+DEFAULT_LIVE_MARKDOWN_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-live-report.md"
 DEFAULT_GOLDEN_CORPUS_PATH = (
     REPO_ROOT / "tests/fixtures/evaluation/golden_retrieval_corpus.json"
 )
@@ -33,6 +36,11 @@ DEFAULT_GOLDEN_CORPUS_PATH = (
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Generate Librarian retrieval evaluation reports."
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Run the golden corpus through live search against the local database.",
     )
     parser.add_argument(
         "--benchmark",
@@ -65,13 +73,53 @@ def main() -> int:
         help="Optional path, usually GITHUB_STEP_SUMMARY, to append Markdown output.",
     )
     parser.add_argument(
+        "--database-url",
+        default=None,
+        help="Database URL for live retrieval. Defaults to Librarian config.",
+    )
+    parser.add_argument(
+        "--embedding-provider",
+        default=None,
+        help="Embedding provider for live query embeddings.",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Embedding model for live query embeddings.",
+    )
+    parser.add_argument(
+        "--ollama-base-url",
+        default=None,
+        help="Ollama base URL for live query embeddings.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum live search results to score per golden corpus query.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Fail if the output file does not match the generated report.",
     )
     args = parser.parse_args()
 
-    document = generate_report_document(args.benchmark)
+    if args.live:
+        if args.output == DEFAULT_OUTPUT_PATH:
+            args.output = DEFAULT_LIVE_OUTPUT_PATH
+        if args.markdown_output == DEFAULT_MARKDOWN_OUTPUT_PATH:
+            args.markdown_output = DEFAULT_LIVE_MARKDOWN_OUTPUT_PATH
+        document = generate_live_report_document(
+            args.golden_corpus,
+            database_url=args.database_url,
+            embedding_provider=args.embedding_provider,
+            embedding_model=args.embedding_model,
+            ollama_base_url=args.ollama_base_url,
+            limit=args.limit,
+        )
+    else:
+        document = generate_report_document(args.benchmark)
     golden_corpus = _load_optional_json(args.golden_corpus)
     rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
     rendered_markdown = render_evaluation_markdown(
@@ -132,6 +180,55 @@ def generate_report_document(benchmark_path: Path) -> dict[str, Any]:
     return document.to_dict()
 
 
+def generate_live_report_document(
+    corpus_path: Path,
+    *,
+    database_url: str | None = None,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    ollama_base_url: str | None = None,
+    limit: int = 10,
+    search_fn=search_chunks,
+) -> dict[str, Any]:
+    corpus_data = json.loads(corpus_path.read_text(encoding="utf-8"))
+    cases = [_case_from_json(case) for case in corpus_data["cases"]]
+    ranked_results_by_case: dict[str, list] = {}
+    responses: list[SearchResponse] = []
+
+    for case in cases:
+        response = search_fn(
+            SearchOptions(
+                query=case.query,
+                database_url=database_url,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                ollama_base_url=ollama_base_url,
+                limit=limit,
+            )
+        )
+        responses.append(response)
+        ranked_results_by_case[case.id] = response.results
+
+    benchmark = dict(corpus_data.get("benchmark", {}))
+    benchmark["mode"] = "live_search"
+    report = evaluate_retrieval_cases(
+        cases,
+        ranked_results_by_case,
+        k_values=corpus_data.get("k_values"),
+    )
+    document = build_retrieval_report_document(
+        report,
+        benchmark=benchmark,
+        primary_k=corpus_data.get("primary_k"),
+        run=_live_run_metadata(
+            responses,
+            database_url=database_url,
+            limit=limit,
+        ),
+    )
+    return document.to_dict()
+
+
 def _case_from_json(data: dict[str, Any]) -> RetrievalEvaluationCase:
     return RetrievalEvaluationCase(
         id=data["id"],
@@ -175,6 +272,29 @@ def _append_summary(path: Path, markdown: str) -> None:
     with path.open("a", encoding="utf-8") as summary:
         summary.write(markdown)
         summary.write("\n")
+
+
+def _live_run_metadata(
+    responses: list[SearchResponse],
+    *,
+    database_url: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    first_response = responses[0] if responses else None
+    return {
+        "mode": "live_search",
+        "database_url": database_url or "configured default",
+        "embedding_provider": (
+            first_response.embedding_provider if first_response else "unknown"
+        ),
+        "embedding_model": first_response.embedding_model if first_response else "unknown",
+        "embedding_dimensions": first_response.dimensions if first_response else "unknown",
+        "limit": limit,
+        "query_count": len(responses),
+        "total_candidates_scored": sum(
+            response.candidate_count for response in responses
+        ),
+    }
 
 
 if __name__ == "__main__":
