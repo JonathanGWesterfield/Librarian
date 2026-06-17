@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
 
+from librarian_ingestion.chat import ChatResponse, ChatSource
 from librarian_ingestion.storage import (
     BookRecord,
     ChunkRecord,
@@ -154,6 +155,55 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["chunk_id"], "api-book:0")
         self.assertAlmostEqual(payload["results"][0]["score"], 1.0, places=6)
         self.assertIn("clockwork garden", payload["results"][0]["text"])
+
+    def test_chat_endpoint_returns_answer_with_sources(self) -> None:
+        """Verify desktop clients can request grounded answer synthesis.
+        The route should expose the chat service response shape while letting
+        the package layer handle retrieval and local generation details.
+        """
+        fake_response = ChatResponse(
+            question="How brutal is war?",
+            answer="War is presented as terrifying and dehumanizing. [S1]",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="ollama",
+            generation_model="llama3.2:3b",
+            retrieval_limit=20,
+            candidate_count=3,
+            sources=[
+                ChatSource(
+                    source_id="S1",
+                    score=0.9,
+                    chunk_id="api-book:0",
+                    book_id="api-book",
+                    relative_path="api-sample.epub",
+                    title="API Sample Book",
+                    authors=["Test Author"],
+                    chunk_index=0,
+                    text="The front is terrifying.",
+                )
+            ],
+        )
+        with patch("librarian_api.main.answer_question", return_value=fake_response):
+            response = self.client.post(
+                "/chat",
+                json={
+                    "question": "How brutal is war?",
+                    "database_url": self.database_url,
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "generation_provider": "ollama",
+                    "generation_model": "llama3.2:3b",
+                    "retrieval_limit": 20,
+                },
+            )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["answer"], fake_response.answer)
+        self.assertEqual(payload["generation_model"], "llama3.2:3b")
+        self.assertEqual(payload["sources"][0]["source_id"], "S1")
 
     def _seed_search_fixture(self) -> None:
         book = BookRecord(

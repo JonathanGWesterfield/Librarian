@@ -29,6 +29,10 @@
       "description": "Vector search over stored chunk embeddings."
     },
     {
+      "name": "chat",
+      "description": "Grounded answer synthesis over retrieved chunks."
+    },
+    {
       "name": "library",
       "description": "Read-only library record views."
     }
@@ -336,6 +340,65 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/chat": {
+      "post": {
+        "tags": ["chat"],
+        "operationId": "answerQuestion",
+        "summary": "Answer a question from local books",
+        "description": "Retrieves relevant chunks, sends them to the configured local generator, and returns a grounded answer with source chunks.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              },
+              "examples": {
+                "ollama": {
+                  "summary": "Ask with Ollama retrieval and generation",
+                  "value": {
+                    "question": "How brutal and terrible is war?",
+                    "database_url": "sqlite:///data/librarian.db",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "generation_provider": "ollama",
+                    "generation_model": "llama3.2:3b",
+                    "ollama_base_url": "http://host.docker.internal:11434",
+                    "retrieval_limit": 30
+                  }
+                },
+                "dryRun": {
+                  "summary": "Exercise response shape without generation",
+                  "value": {
+                    "question": "What books discuss memory?",
+                    "embedding_provider": "noop",
+                    "generation_provider": "noop"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Grounded generated answer and the source chunks used as context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
                 }
               }
             }
@@ -930,6 +993,141 @@
           "dimensions": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": ["question"],
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "User question to answer from local source chunks."
+          },
+          "database_url": {
+            "type": ["string", "null"],
+            "example": "sqlite:///data/librarian.db"
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "generation_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "generation_model": {
+            "type": ["string", "null"],
+            "example": "llama3.2:3b"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          },
+          "retrieval_limit": {
+            "type": "integer",
+            "default": 30,
+            "minimum": 1
+          }
+        }
+      },
+      "ChatResponse": {
+        "type": "object",
+        "required": [
+          "question",
+          "answer",
+          "embedding_provider",
+          "embedding_model",
+          "generation_provider",
+          "generation_model",
+          "retrieval_limit",
+          "candidate_count",
+          "sources"
+        ],
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "embedding_provider": {
+            "type": "string"
+          },
+          "embedding_model": {
+            "type": "string"
+          },
+          "generation_provider": {
+            "type": "string"
+          },
+          "generation_model": {
+            "type": "string"
+          },
+          "retrieval_limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "candidate_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatSource"
+            }
+          }
+        }
+      },
+      "ChatSource": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "score",
+          "chunk_id",
+          "book_id",
+          "relative_path",
+          "title",
+          "authors",
+          "chunk_index",
+          "text"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "example": "S1"
+          },
+          "score": {
+            "type": "number",
+            "format": "float"
+          },
+          "chunk_id": {
+            "type": "string"
+          },
+          "book_id": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "chunk_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
           }
         }
       },
