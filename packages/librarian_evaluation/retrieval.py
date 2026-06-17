@@ -85,6 +85,7 @@ def evaluate_retrieval_cases(
     ranked_results_by_case: dict[str, list[RetrievalResult | RetrievalResultLike]],
     *,
     k_values: list[int] | None = None,
+    generated_at: str | None = None,
 ) -> RetrievalEvaluationReport:
     normalized_k_values = sorted(set(k_values or [1, 3, 5, 10]))
     case_metrics = [
@@ -96,7 +97,7 @@ def evaluate_retrieval_cases(
         for case in cases
     ]
     return RetrievalEvaluationReport(
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
         metric_type="retrieval",
         k_values=normalized_k_values,
         aggregate=_aggregate_case_metrics(case_metrics, normalized_k_values),

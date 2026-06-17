@@ -1,0 +1,76 @@
+{
+  "benchmark": {
+    "name": "deterministic-retrieval-smoke",
+    "description": "Small deterministic retrieval benchmark used to verify report generation and metric aggregation.",
+    "mode": "static_ranked_results",
+    "generated_at": "1970-01-01T00:00:00+00:00"
+  },
+  "k_values": [1, 3, 5],
+  "primary_k": 5,
+  "cases": [
+    {
+      "id": "war-brutality",
+      "query": "How brutal and terrible is war?",
+      "notes": "Broad thematic query where All Quiet should appear.",
+      "relevant_relative_paths": ["All Quiet on the Western Front.epub"],
+      "results": [
+        {
+          "chunk_id": "all-quiet:0",
+          "book_id": "all-quiet",
+          "relative_path": "All Quiet on the Western Front.epub",
+          "score": 0.91,
+          "title": "All Quiet on the Western Front",
+          "text": "The soldiers describe terror, injury, and exhaustion at the front."
+        },
+        {
+          "chunk_id": "other:0",
+          "book_id": "other",
+          "relative_path": "Other Book.epub",
+          "score": 0.76,
+          "title": "Other Book",
+          "text": "A loosely related passage."
+        }
+      ]
+    },
+    {
+      "id": "clockwork-garden",
+      "query": "clockwork gardens",
+      "notes": "Synthetic fixture query with one expected chunk.",
+      "relevant_chunk_ids": ["sample:0"],
+      "results": [
+        {
+          "chunk_id": "wrong:0",
+          "book_id": "wrong",
+          "relative_path": "wrong.epub",
+          "score": 0.83,
+          "title": "Wrong Book",
+          "text": "A non-relevant passage."
+        },
+        {
+          "chunk_id": "sample:0",
+          "book_id": "sample",
+          "relative_path": "sample.epub",
+          "score": 0.79,
+          "title": "Sample Book",
+          "text": "The clockwork garden woke at dawn."
+        }
+      ]
+    },
+    {
+      "id": "missing-evidence",
+      "query": "a query with no good retrieval result",
+      "notes": "This intentionally weak case proves the report highlights misses.",
+      "relevant_book_ids": ["target-book"],
+      "results": [
+        {
+          "chunk_id": "noise:0",
+          "book_id": "noise",
+          "relative_path": "noise.epub",
+          "score": 0.62,
+          "title": "Noise",
+          "text": "A non-relevant passage."
+        }
+      ]
+    }
+  ]
+}

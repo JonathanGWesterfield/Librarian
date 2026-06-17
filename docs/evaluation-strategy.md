@@ -176,3 +176,13 @@ The report should answer:
 This makes evaluation useful for engineering decisions. A change such as hybrid
 retrieval, a new embedding model, richer metadata, or a different generator
 should produce a comparable report rather than a vague impression.
+
+The current committed retrieval report lives at
+`docs/evaluation-retrieval-report.json`. Regenerate it with:
+
+```bash
+python3 scripts/evaluate_retrieval.py
+```
+
+CI runs `python3 scripts/evaluate_retrieval.py --check` so pull requests fail
+when the committed report is stale.
