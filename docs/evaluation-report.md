@@ -81,6 +81,27 @@ against these expected EPUB filenames.
 - Noise: fewer than half of the top 5 results are relevant on average; improve filtering or reranking.
 - Ranking: relevant evidence is not consistently near rank 1; reranking is likely the next useful lever.
 
+## Answer Quality
+
+| Metric | Value |
+| --- | ---: |
+| Case count | `3` |
+| Correctness | `1.0000` |
+| Completeness | `1.0000` |
+| Groundedness | `0.6667` |
+| Citation accuracy | `0.6667` |
+| Refusal quality | `1.0000` |
+| Usefulness | `0.7778` |
+| Overall answer score | `0.8519` |
+
+### Answer Quality Cases
+
+| Case | Overall | Correctness | Groundedness | Citation Accuracy | Findings |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `war-grounded-answer` | `1.0000` | `1.0000` | `1.0000` | `1.0000` | Case passed the deterministic answer-quality checks. |
+| `weak-uncited-answer` | `0.5556` | `1.0000` | `0.0000` | `0.0000` | Covered terms lack cited support: clockwork, garden.<br>Answer did not cite any sources. |
+| `insufficient-evidence-refusal` | `1.0000` | `1.0000` | `1.0000` | `1.0000` | Case passed the deterministic answer-quality checks. |
+
 ### Weakest Cases
 
 | Case | Hit@5 | Recall@5 | MRR | Reason |

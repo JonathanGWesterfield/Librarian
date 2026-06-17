@@ -1,4 +1,75 @@
 {
+  "answer_quality": {
+    "aggregate": {
+      "case_count": 3,
+      "mean_citation_accuracy": 0.6667,
+      "mean_completeness": 1.0,
+      "mean_correctness": 1.0,
+      "mean_groundedness": 0.6667,
+      "mean_overall_score": 0.8519,
+      "mean_refusal_quality": 1.0,
+      "mean_usefulness": 0.7778
+    },
+    "cases": [
+      {
+        "case_id": "war-grounded-answer",
+        "citation_accuracy": 1.0,
+        "cited_source_count": 1,
+        "completeness": 1.0,
+        "correctness": 1.0,
+        "covered_term_count": 3,
+        "expected_term_count": 3,
+        "findings": [
+          "Case passed the deterministic answer-quality checks."
+        ],
+        "groundedness": 1.0,
+        "invalid_citation_count": 0,
+        "overall_score": 1.0,
+        "question": "How brutal and terrible is war?",
+        "refusal_quality": 1.0,
+        "usefulness": 1.0
+      },
+      {
+        "case_id": "weak-uncited-answer",
+        "citation_accuracy": 0.0,
+        "cited_source_count": 0,
+        "completeness": 1.0,
+        "correctness": 1.0,
+        "covered_term_count": 2,
+        "expected_term_count": 2,
+        "findings": [
+          "Covered terms lack cited support: clockwork, garden.",
+          "Answer did not cite any sources."
+        ],
+        "groundedness": 0.0,
+        "invalid_citation_count": 0,
+        "overall_score": 0.5556,
+        "question": "What does the source say about the clockwork garden?",
+        "refusal_quality": 1.0,
+        "usefulness": 0.3333
+      },
+      {
+        "case_id": "insufficient-evidence-refusal",
+        "citation_accuracy": 1.0,
+        "cited_source_count": 0,
+        "completeness": 1.0,
+        "correctness": 1.0,
+        "covered_term_count": 0,
+        "expected_term_count": 0,
+        "findings": [
+          "Case passed the deterministic answer-quality checks."
+        ],
+        "groundedness": 1.0,
+        "invalid_citation_count": 0,
+        "overall_score": 1.0,
+        "question": "What does this source say about quantum gardens?",
+        "refusal_quality": 1.0,
+        "usefulness": 1.0
+      }
+    ],
+    "generated_at": "1970-01-01T00:00:00+00:00",
+    "metric_type": "answer_quality"
+  },
   "benchmark": {
     "description": "Small deterministic retrieval benchmark used to verify report generation and metric aggregation.",
     "generated_at": "1970-01-01T00:00:00+00:00",

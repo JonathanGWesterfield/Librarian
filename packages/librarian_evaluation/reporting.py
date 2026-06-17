@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from librarian_evaluation.answer import AnswerEvaluationReport
 from librarian_evaluation.retrieval import (
     RetrievalCaseMetrics,
     RetrievalEvaluationReport,
@@ -16,6 +17,7 @@ class RetrievalReportDocument:
     summary: dict[str, Any]
     retrieval: RetrievalEvaluationReport
     run: dict[str, Any] | None = None
+    answer_quality: AnswerEvaluationReport | None = None
 
     def to_dict(self) -> dict[str, Any]:
         document = {
@@ -26,6 +28,8 @@ class RetrievalReportDocument:
         }
         if self.run is not None:
             document["run"] = self.run
+        if self.answer_quality is not None:
+            document["answer_quality"] = self.answer_quality.to_dict()
         return document
 
 
@@ -35,6 +39,7 @@ def build_retrieval_report_document(
     benchmark: dict[str, Any] | None = None,
     primary_k: int | None = None,
     run: dict[str, Any] | None = None,
+    answer_quality: AnswerEvaluationReport | None = None,
 ) -> RetrievalReportDocument:
     selected_k = primary_k or max(report.k_values)
     if selected_k not in report.k_values:
@@ -47,6 +52,7 @@ def build_retrieval_report_document(
         summary=summary,
         retrieval=report,
         run=run,
+        answer_quality=answer_quality,
     )
 
 
@@ -59,6 +65,7 @@ def render_evaluation_markdown(
     summary = document["summary"]
     benchmark = document.get("benchmark", {})
     run = document.get("run", {})
+    answer_quality = document.get("answer_quality")
     golden_corpus = golden_corpus or {}
     lines = [
         "# Librarian Evaluation Report",
@@ -94,6 +101,8 @@ def render_evaluation_markdown(
         ]
     )
     lines.extend([f"- {area}" for area in summary["improvement_areas"]])
+    lines.extend(["", "## Answer Quality", ""])
+    lines.extend(_render_answer_quality_section(answer_quality))
     lines.extend(["", "### Weakest Cases", ""])
     lines.extend(_render_weakest_cases(summary["weakest_cases"], summary["primary_k"]))
     lines.extend(["", "### Retrieval Cases", ""])
@@ -317,6 +326,47 @@ def _render_golden_corpus_section(
     for case in cases:
         lines.append(
             f"| `{case['id']}` | `{len(case.get('relevant_relative_paths', []))}` |"
+        )
+    return lines
+
+
+def _render_answer_quality_section(answer_quality: dict[str, Any] | None) -> list[str]:
+    if not answer_quality:
+        return [
+            "Answer quality was not measured for this report.",
+            "",
+            "This section should track correctness, completeness, groundedness,",
+            "citation accuracy, usefulness, and refusal behavior.",
+        ]
+
+    aggregate = answer_quality["aggregate"]
+    lines = [
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| Case count | `{aggregate['case_count']}` |",
+        f"| Correctness | `{_decimal(aggregate['mean_correctness'])}` |",
+        f"| Completeness | `{_decimal(aggregate['mean_completeness'])}` |",
+        f"| Groundedness | `{_decimal(aggregate['mean_groundedness'])}` |",
+        f"| Citation accuracy | `{_decimal(aggregate['mean_citation_accuracy'])}` |",
+        f"| Refusal quality | `{_decimal(aggregate['mean_refusal_quality'])}` |",
+        f"| Usefulness | `{_decimal(aggregate['mean_usefulness'])}` |",
+        f"| Overall answer score | `{_decimal(aggregate['mean_overall_score'])}` |",
+        "",
+        "### Answer Quality Cases",
+        "",
+        "| Case | Overall | Correctness | Groundedness | Citation Accuracy | Findings |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for case in answer_quality["cases"]:
+        findings = "<br>".join(case["findings"])
+        lines.append(
+            "| "
+            f"`{case['case_id']}` | "
+            f"`{_decimal(case['overall_score'])}` | "
+            f"`{_decimal(case['correctness'])}` | "
+            f"`{_decimal(case['groundedness'])}` | "
+            f"`{_decimal(case['citation_accuracy'])}` | "
+            f"{findings} |"
         )
     return lines
 

@@ -6,6 +6,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
+from librarian_evaluation.answer import (
+    AnswerCandidate,
+    AnswerEvaluationCase,
+    AnswerSource,
+    evaluate_answer_cases,
+)
 from librarian_evaluation.reporting import (
     build_retrieval_report_document,
     render_evaluation_markdown,
@@ -104,6 +110,22 @@ class RetrievalReportingTests(unittest.TestCase):
             report,
             benchmark={"name": "unit-test", "mode": "static"},
             primary_k=1,
+            answer_quality=evaluate_answer_cases(
+                [
+                    AnswerEvaluationCase(
+                        id="answer",
+                        question="answer question",
+                        expected_terms={"grounded"},
+                    )
+                ],
+                {
+                    "answer": AnswerCandidate(
+                        answer="A grounded answer [S1].",
+                        sources=[AnswerSource(source_id="S1", text="grounded")],
+                    )
+                },
+                generated_at="1970-01-01T00:00:00+00:00",
+            ),
         ).to_dict()
 
         markdown = render_evaluation_markdown(
@@ -127,6 +149,7 @@ class RetrievalReportingTests(unittest.TestCase):
         self.assertIn("## Embeddings", markdown)
         self.assertIn("## Golden Corpus", markdown)
         self.assertIn("## Retrieval Metrics", markdown)
+        self.assertIn("## Answer Quality", markdown)
         self.assertIn("### Weakest Cases", markdown)
         self.assertIn("golden-library-retrieval", markdown)
 
