@@ -6,7 +6,7 @@ from librarian_ingestion.generation import (
     ChatMessage,
     create_configured_generator,
 )
-from librarian_ingestion.search import SearchOptions, SearchResult, search_chunks
+from librarian_search import SearchOptions, SearchResult, search_chunks
 
 
 @dataclass(frozen=True)
