@@ -156,3 +156,23 @@ Start with three tracks:
 
 Keep retrieval evaluation separate from answer evaluation. If an answer gets
 worse, we need to know whether retrieval failed, generation failed, or both.
+
+## North Star Report
+
+Every evaluation metric should eventually roll up into one report that can be
+read at a glance. The report should show overall quality, break down retrieval
+quality separately from answer quality, and highlight the weakest areas to
+improve next.
+
+The report should answer:
+
+- Are relevant books or chunks appearing in the top results?
+- Are the best results ranked near the top?
+- Are generated answers correct, grounded, complete, and cited?
+- Which benchmark cases regressed?
+- Which provider, model, chunker, and retrieval settings produced the run?
+- How much latency did the configuration add?
+
+This makes evaluation useful for engineering decisions. A change such as hybrid
+retrieval, a new embedding model, richer metadata, or a different generator
+should produce a comparable report rather than a vague impression.

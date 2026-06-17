@@ -137,6 +137,7 @@ packages/              Local Python packages:
   librarian_ingestion   EPUB parsing, chunking, and ingestion workflow
   librarian_search      Query embedding and vector search
   librarian_chat        Grounded answer orchestration and generation providers
+  librarian_evaluation  Retrieval and answer-quality evaluation utilities
 books/                 Optional local EPUB input folder, ignored by Git
 Epub-Books/            Local test EPUB folder, ignored by Git
 data/                  Local runtime data, ignored by Git
@@ -191,7 +192,20 @@ See the detailed implementation plan:
 - Require answers to cite retrieved passages.
 - Add refusal behavior when evidence is weak.
 
-### Phase 4: Better Book Intelligence
+### Phase 4: Evaluation and Quality Reports
+
+See the evaluation north star:
+[Evaluation Strategy](docs/evaluation-strategy.md).
+
+- Add a golden evaluation dataset format.
+- Add automatic retrieval evaluation metrics.
+- Add answer-quality evaluation rubrics.
+- Aggregate metrics into single run reports.
+- Track latency, model/provider settings, and Git commit metadata.
+- Use reports to compare chunkers, embedding models, retrieval strategies, and
+  generation providers.
+
+### Phase 5: Better Book Intelligence
 
 - Add author-level and book-level filtering.
 - Add recommendation-oriented queries.
@@ -199,7 +213,7 @@ See the detailed implementation plan:
 - Add chapter summaries generated only on demand.
 - Add saved searches or reading lists.
 
-### Phase 5: Hybrid Retrieval
+### Phase 6: Hybrid Retrieval
 
 - Add keyword/BM25 search.
 - Combine vector and lexical retrieval.
@@ -207,7 +221,7 @@ See the detailed implementation plan:
 - Improve exact phrase, name, and technical-term search.
 - Evaluate retrieval quality with a small benchmark set.
 
-### Phase 6: User Interface
+### Phase 7: User Interface
 
 - Add a simple web UI.
 - Support library browsing.
@@ -215,7 +229,7 @@ See the detailed implementation plan:
 - Show citations and source passages.
 - Support scoped chat over one book, one author, or the whole library.
 
-### Phase 7: Operational Polish
+### Phase 8: Operational Polish
 
 - Add one-command startup.
 - Add database migrations.
