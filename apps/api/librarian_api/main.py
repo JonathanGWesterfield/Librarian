@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from librarian_api.config import settings
+from librarian_ingestion.chat import ChatOptions, answer_question
 from librarian_ingestion.embedding_ops import (
     EmbedQueryOptions,
     RebuildEmbeddingsOptions,
@@ -58,6 +59,17 @@ class SearchRequest(BaseModel):
     embedding_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
     limit: int = 10
+
+
+class ChatRequest(BaseModel):
+    question: str
+    database_url: Optional[str] = None
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    generation_provider: Optional[str] = None
+    generation_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    retrieval_limit: int = 30
 
 
 @app.get("/health")
@@ -159,6 +171,26 @@ def search_endpoint(request: SearchRequest) -> dict[str, object]:
                 embedding_model=request.embedding_model,
                 ollama_base_url=request.ollama_base_url,
                 limit=request.limit,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.post("/chat")
+def chat_endpoint(request: ChatRequest) -> dict[str, object]:
+    try:
+        result = answer_question(
+            ChatOptions(
+                question=request.question,
+                database_url=request.database_url or settings.database_url,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+                generation_provider=request.generation_provider,
+                generation_model=request.generation_model,
+                ollama_base_url=request.ollama_base_url,
+                retrieval_limit=request.retrieval_limit,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:

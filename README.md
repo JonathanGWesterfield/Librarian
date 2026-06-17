@@ -179,8 +179,9 @@ See the detailed implementation plan:
 ### Phase 3: Retrieval-Augmented Answers
 
 - Build prompt assembly with citation metadata.
-- Add `/chat` or `/answer` endpoint.
-- Support local generation or Codex broker generation.
+- Add `/chat` endpoint.
+- Add a standalone chat CLI while the desktop frontend does not exist.
+- Support local generation through Ollama.
 - Require answers to cite retrieved passages.
 - Add refusal behavior when evidence is weak.
 
@@ -303,6 +304,7 @@ python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db boo
 python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db chunks --limit 3
 python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db embed --reset --embedding-provider ollama --embedding-model all-minilm
 python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db embeddings --limit 3
+python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db search "How brutal and terrible is war?" --embedding-provider ollama --embedding-model all-minilm --limit 10
 python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db state
 ```
 
@@ -313,6 +315,19 @@ endpoints or package services directly.
 The `ingest` step parses EPUB files and stores chunked raw text. The `embed`
 step reads those stored chunks and writes vectors into `chunk_embeddings`
 without deleting `books`, `chunks`, or raw text.
+
+For grounded answer synthesis, use the standalone chat CLI:
+
+```bash
+python3 scripts/chat.py \
+  --database-url sqlite:///data/librarian.db \
+  --embedding-provider ollama \
+  --embedding-model all-minilm \
+  --generation-provider ollama \
+  --generation-model llama3.2:3b \
+  --retrieval-limit 30 \
+  "How brutal and terrible is war?"
+```
 
 For automation or a future desktop shell, request JSON output:
 
@@ -331,6 +346,11 @@ POST /embeddings/rebuild   body: database_url, embedding_provider,
                             embedding_model, ollama_base_url, reset, reset_all
 POST /embeddings/query     body: query, embedding_provider, embedding_model,
                             ollama_base_url
+POST /search               body: query, database_url, embedding_provider,
+                            embedding_model, ollama_base_url, limit
+POST /chat                 body: question, database_url, embedding_provider,
+                            embedding_model, generation_provider,
+                            generation_model, ollama_base_url, retrieval_limit
 GET  /ingestion/summary    query: database_url
 GET  /books                query: database_url, status, limit, offset
 ```
