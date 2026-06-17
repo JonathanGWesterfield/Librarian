@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from librarian_ingestion.chunk import chunk_text
-from librarian_config import (
+from librarian_config.config import (
     resolve_books_dir,
     resolve_database_url,
     resolve_embedding_model,
@@ -13,7 +13,7 @@ from librarian_config import (
 from librarian_ingestion.embeddings import create_configured_embedder
 from librarian_ingestion.epub import parse_epub
 from librarian_ingestion.scan import DiscoveredEpub, scan_epub_files
-from librarian_storage import (
+from librarian_storage.storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,

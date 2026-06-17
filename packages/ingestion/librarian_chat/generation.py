@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib import error, request
 
-from librarian_config import (
+from librarian_config.config import (
     resolve_generation_model,
     resolve_generation_provider,
     resolve_ollama_base_url,

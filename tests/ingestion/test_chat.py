@@ -6,8 +6,8 @@ REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
 INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
-from librarian_chat import ChatOptions, answer_question
-from librarian_search import SearchResponse, SearchResult
+from librarian_chat.chat import ChatOptions, answer_question
+from librarian_search.search import SearchResponse, SearchResult
 
 
 class ChatTests(unittest.TestCase):
@@ -42,9 +42,9 @@ class ChatTests(unittest.TestCase):
         )
         generator = _FakeGenerator()
 
-        with patch("librarian_chat.search_chunks", return_value=fake_search):
+        with patch("librarian_chat.chat.search_chunks", return_value=fake_search):
             with patch(
-                "librarian_chat.create_configured_generator",
+                "librarian_chat.chat.create_configured_generator",
                 return_value=generator,
             ):
                 response = answer_question(
