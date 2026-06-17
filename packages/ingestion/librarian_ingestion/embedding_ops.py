@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from librarian_ingestion.config import (
+from librarian_config import (
     resolve_database_url,
 )
 from librarian_ingestion.embeddings import create_configured_embedder

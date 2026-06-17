@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from librarian_ingestion.chunk import chunk_text
-from librarian_ingestion.config import (
+from librarian_config import (
     resolve_books_dir,
     resolve_database_url,
     resolve_embedding_model,

@@ -20,7 +20,7 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 if str(INGESTION_PACKAGE) not in sys.path:
     sys.path.insert(0, str(INGESTION_PACKAGE))
 
-from librarian_ingestion.config import (
+from librarian_config import (
     BOOKS_DIR_ENV,
     DATABASE_URL_ENV,
     EMBEDDING_MODEL_ENV,

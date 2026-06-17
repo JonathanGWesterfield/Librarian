@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Protocol
 
-from librarian_ingestion.config import sqlite_path_from_url
+from librarian_config import sqlite_path_from_url
 
 
 @dataclass(frozen=True)

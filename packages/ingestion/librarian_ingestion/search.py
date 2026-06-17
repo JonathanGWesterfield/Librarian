@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 from librarian_ingestion.embedding_ops import EmbedQueryOptions, embed_query
-from librarian_ingestion.config import resolve_database_url
+from librarian_config import resolve_database_url
 from librarian_ingestion.storage import SearchEmbeddingRecord, create_ingestion_store
 
 
