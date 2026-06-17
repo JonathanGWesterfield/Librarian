@@ -7,7 +7,7 @@ REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
 INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
-from librarian_ingestion.generation import (
+from librarian_chat.generation import (
     ChatMessage,
     NoopGenerator,
     OllamaGenerator,

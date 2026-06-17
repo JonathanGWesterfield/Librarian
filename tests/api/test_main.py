@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages" / "ingestion"))
 
-from librarian_ingestion.chat import ChatResponse, ChatSource
+from librarian_chat import ChatResponse, ChatSource
 from librarian_storage import (
     BookRecord,
     ChunkRecord,

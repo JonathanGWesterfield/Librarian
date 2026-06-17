@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from librarian_ingestion.chat import ChatOptions, ChatResponse, ChatSource
+    from librarian_chat import ChatOptions, ChatResponse, ChatSource
     from librarian_ingestion.chunk import TextChunk
     from librarian_ingestion.embedding_ops import (
         EmbedQueryOptions,
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     )
     from librarian_ingestion.embeddings import Embedder, EmbeddingError
     from librarian_ingestion.epub import ParsedBook
-    from librarian_ingestion.generation import ChatMessage, GenerationError, Generator
+    from librarian_chat.generation import ChatMessage, GenerationError, Generator
     from librarian_ingestion.ingest import IngestionOptions, IngestionResult
     from librarian_ingestion.scan import DiscoveredEpub, EpubSourceError
     from librarian_search import SearchOptions, SearchResponse, SearchResult
@@ -108,7 +108,7 @@ def __getattr__(name: str):
         }[name]
 
     if name in {"ChatOptions", "ChatResponse", "ChatSource", "answer_question"}:
-        from librarian_ingestion.chat import (
+        from librarian_chat import (
             ChatOptions,
             ChatResponse,
             ChatSource,
@@ -138,7 +138,7 @@ def __getattr__(name: str):
         "create_configured_generator",
         "create_generator",
     }:
-        from librarian_ingestion.generation import (
+        from librarian_chat.generation import (
             ChatMessage,
             GenerationError,
             Generator,
