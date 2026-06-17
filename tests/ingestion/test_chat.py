@@ -7,7 +7,7 @@ INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
 sys.path.insert(0, str(INGESTION_PACKAGE))
 
 from librarian_ingestion.chat import ChatOptions, answer_question
-from librarian_ingestion.search import SearchResponse, SearchResult
+from librarian_search import SearchResponse, SearchResult
 
 
 class ChatTests(unittest.TestCase):

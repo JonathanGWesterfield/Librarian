@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from librarian_ingestion.generation import ChatMessage, GenerationError, Generator
     from librarian_ingestion.ingest import IngestionOptions, IngestionResult
     from librarian_ingestion.scan import DiscoveredEpub, EpubSourceError
-    from librarian_ingestion.search import SearchOptions, SearchResponse, SearchResult
+    from librarian_search import SearchOptions, SearchResponse, SearchResult
     from librarian_storage import (
         BookRecord,
         ChunkRecord,
@@ -93,7 +93,7 @@ def __getattr__(name: str):
         }[name]
 
     if name in {"SearchOptions", "SearchResponse", "SearchResult", "search_chunks"}:
-        from librarian_ingestion.search import (
+        from librarian_search import (
             SearchOptions,
             SearchResponse,
             SearchResult,
