@@ -13,8 +13,8 @@ from tests.ingestion.fixtures import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
-sys.path.insert(0, str(INGESTION_PACKAGE))
+PACKAGES_DIR = REPO_ROOT / "packages"
+sys.path.insert(0, str(PACKAGES_DIR))
 
 try:
     from librarian_ingestion.epub import parse_epub

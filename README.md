@@ -268,7 +268,7 @@ Install Python dependencies:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e "apps/api[dev]" -e "apps/codex_broker[dev]" -e "packages/ingestion[dev]"
+pip install -e "apps/api[dev]" -e "apps/codex_broker[dev]" -e "packages[dev]"
 ```
 
 Start the API:

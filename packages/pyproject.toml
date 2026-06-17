@@ -1,7 +1,7 @@
 [project]
-name = "librarian-ingestion"
+name = "librarian-packages"
 version = "0.1.0"
-description = "EPUB ingestion utilities for Librarian."
+description = "Local Python packages for Librarian."
 requires-python = ">=3.12"
 dependencies = [
   "beautifulsoup4>=4.12.0",

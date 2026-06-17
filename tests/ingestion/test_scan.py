@@ -7,8 +7,8 @@ from tempfile import TemporaryDirectory
 from tests.ingestion.fixtures import SAMPLE_EPUB, SAMPLE_EPUB_SHA256
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INGESTION_PACKAGE = REPO_ROOT / "packages" / "ingestion"
-sys.path.insert(0, str(INGESTION_PACKAGE))
+PACKAGES_DIR = REPO_ROOT / "packages"
+sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_config.config import resolve_books_dir
 from librarian_ingestion.scan import EpubSourceError, hash_file, scan_epub_files

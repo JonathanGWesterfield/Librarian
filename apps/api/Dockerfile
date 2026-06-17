@@ -3,11 +3,11 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
-COPY packages/ingestion/pyproject.toml packages/ingestion/pyproject.toml
+COPY packages/pyproject.toml packages/pyproject.toml
 COPY apps/api apps/api
-COPY packages/ingestion packages/ingestion
+COPY packages packages
 
-RUN pip install --no-cache-dir -e apps/api -e packages/ingestion
+RUN pip install --no-cache-dir -e apps/api -e packages
 
 EXPOSE 8000
 
