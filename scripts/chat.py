@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--generation-provider",
-        choices=["noop", "ollama"],
+        choices=["noop", "ollama", "codex"],
         help=f"Generation provider override instead of {GENERATION_PROVIDER_ENV}.",
     )
     parser.add_argument(

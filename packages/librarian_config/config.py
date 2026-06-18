@@ -11,6 +11,7 @@ EMBEDDING_MODEL_ENV = "LIBRARIAN_EMBEDDING_MODEL"
 GENERATION_PROVIDER_ENV = "LIBRARIAN_GENERATION_PROVIDER"
 GENERATION_MODEL_ENV = "LIBRARIAN_GENERATION_MODEL"
 OLLAMA_BASE_URL_ENV = "LIBRARIAN_OLLAMA_BASE_URL"
+CODEX_EXECUTABLE_ENV = "LIBRARIAN_CODEX_EXECUTABLE"
 DEFAULT_LOCAL_BOOKS_DIR = "Epub-Books"
 DEFAULT_CONTAINER_BOOKS_DIR = "/books"
 DEFAULT_DATABASE_URL = "sqlite:///data/librarian.db"
@@ -19,6 +20,7 @@ DEFAULT_EMBEDDING_MODEL = "all-minilm"
 DEFAULT_GENERATION_PROVIDER = "noop"
 DEFAULT_GENERATION_MODEL = "llama3.2:3b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_CODEX_EXECUTABLE = "codex"
 
 
 def resolve_books_dir(
@@ -113,6 +115,18 @@ def resolve_ollama_base_url(
 
     source_env = env if env is not None else os.environ
     return source_env.get(OLLAMA_BASE_URL_ENV, DEFAULT_OLLAMA_BASE_URL).rstrip("/")
+
+
+def resolve_codex_executable(
+    codex_executable: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    if codex_executable:
+        return codex_executable
+
+    source_env = env if env is not None else os.environ
+    return source_env.get(CODEX_EXECUTABLE_ENV, DEFAULT_CODEX_EXECUTABLE)
 
 
 def sqlite_path_from_url(database_url: str) -> Path:
