@@ -10,6 +10,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatResponse, ChatSource
+from librarian_evaluation.llm_judge import StaticJudge
 from librarian_search.search import SearchResponse, SearchResult
 
 SCRIPT_PATH = REPO_ROOT / "scripts/evaluate_retrieval.py"
@@ -194,6 +195,79 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         self.assertIn("comparison", compared)
         self.assertEqual(compared["comparison"]["improved_count"], 3)
         self.assertEqual(compared["comparison"]["unchanged_count"], 2)
+
+    def test_generate_report_document_can_attach_llm_judge_scores(self) -> None:
+        """Verify static answer benchmarks can be scored by an LLM judge.
+        The CLI uses this path when `--llm-judge` is enabled for deterministic
+        report generation, while tests use a static judge to avoid external
+        Codex or Ollama calls.
+        """
+        module = _load_script_module()
+        with TemporaryDirectory() as temp_dir:
+            benchmark_path = Path(temp_dir) / "retrieval.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "unit"},
+                        "k_values": [1],
+                        "primary_k": 1,
+                        "cases": [
+                            {
+                                "id": "retrieval",
+                                "query": "query",
+                                "relevant_chunk_ids": ["chunk:1"],
+                                "results": [
+                                    {
+                                        "chunk_id": "chunk:1",
+                                        "book_id": "book",
+                                        "relative_path": "book.epub",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            answer_path = Path(temp_dir) / "answers.json"
+            answer_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "answers"},
+                        "cases": [
+                            {
+                                "id": "answer",
+                                "question": "question",
+                                "answer": "answer",
+                                "sources": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            document = module.generate_report_document(
+                benchmark_path,
+                answer_benchmark_path=answer_path,
+                judge=StaticJudge(
+                    response=(
+                        '{"correctness": 0.8, "completeness": 0.8, '
+                        '"groundedness": 0.7, "citation_accuracy": 0.6, '
+                        '"refusal_quality": 1.0, "usefulness": 0.8, '
+                        '"overall_score": 0.78, "rationale": "Good enough."}'
+                    ),
+                    provider="codex",
+                    model="codex",
+                ),
+            )
+
+        self.assertIn("llm_judge", document)
+        self.assertEqual(document["llm_judge"]["provider"], "codex")
+        self.assertEqual(
+            document["llm_judge"]["aggregate"]["mean_overall_score"],
+            0.78,
+        )
 
 
 def _fake_search(_options) -> SearchResponse:

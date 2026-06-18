@@ -102,6 +102,13 @@ against these expected EPUB filenames.
 | `weak-uncited-answer` | `0.5556` | `1.0000` | `0.0000` | `0.0000` | Covered terms lack cited support: clockwork, garden.<br>Answer did not cite any sources. |
 | `insufficient-evidence-refusal` | `1.0000` | `1.0000` | `1.0000` | `1.0000` | Case passed the deterministic answer-quality checks. |
 
+## LLM Judge
+
+LLM-as-judge evaluation was not measured for this report.
+
+Run `python3 scripts/evaluate_retrieval.py --llm-judge` to score
+answer quality with Codex by default and Ollama as fallback.
+
 ### Weakest Cases
 
 | Case | Hit@5 | Recall@5 | MRR | Reason |

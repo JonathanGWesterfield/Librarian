@@ -16,6 +16,7 @@ from librarian_evaluation.reporting import (
     build_retrieval_report_document,
     render_evaluation_markdown,
 )
+from librarian_evaluation.llm_judge import StaticJudge, evaluate_answers_with_llm_judge
 from librarian_evaluation.retrieval import (
     RetrievalEvaluationCase,
     RetrievalResult,
@@ -150,6 +151,7 @@ class RetrievalReportingTests(unittest.TestCase):
         self.assertIn("## Golden Corpus", markdown)
         self.assertIn("## Retrieval Metrics", markdown)
         self.assertIn("## Answer Quality", markdown)
+        self.assertIn("## LLM Judge", markdown)
         self.assertIn("### Weakest Cases", markdown)
         self.assertIn("golden-library-retrieval", markdown)
 
@@ -254,6 +256,58 @@ class RetrievalReportingTests(unittest.TestCase):
         self.assertIn("## Run Comparison", markdown)
         self.assertIn("overall_score", markdown)
         self.assertIn("+0.1000", markdown)
+
+    def test_render_evaluation_markdown_contains_llm_judge_when_present(self) -> None:
+        """Verify LLM-as-judge scores render next to deterministic metrics.
+        The report should make the richer judge score visible without
+        replacing the deterministic answer-quality section.
+        """
+        report = evaluate_retrieval_cases(
+            [
+                RetrievalEvaluationCase(
+                    id="good",
+                    query="good query",
+                    relevant_chunk_ids={"good:0"},
+                )
+            ],
+            {
+                "good": [
+                    RetrievalResult(
+                        chunk_id="good:0",
+                        book_id="good",
+                        relative_path="good.epub",
+                    )
+                ]
+            },
+            k_values=[1],
+            generated_at="1970-01-01T00:00:00+00:00",
+        )
+        llm_judge = evaluate_answers_with_llm_judge(
+            [AnswerEvaluationCase(id="answer", question="answer question")],
+            {"answer": AnswerCandidate(answer="answer", sources=[])},
+            judge=StaticJudge(
+                response=(
+                    '{"correctness": 0.7, "completeness": 0.7, '
+                    '"groundedness": 0.6, "citation_accuracy": 0.5, '
+                    '"refusal_quality": 1.0, "usefulness": 0.7, '
+                    '"overall_score": 0.7, "rationale": "Reasonable answer."}'
+                ),
+                provider="codex",
+                model="codex",
+            ),
+        )
+        document = build_retrieval_report_document(
+            report,
+            benchmark={"name": "unit-test", "mode": "static"},
+            primary_k=1,
+            llm_judge=llm_judge,
+        ).to_dict()
+
+        markdown = render_evaluation_markdown(document)
+
+        self.assertIn("## LLM Judge", markdown)
+        self.assertIn("Reasonable answer.", markdown)
+        self.assertIn("Overall judge score", markdown)
 
 
 if __name__ == "__main__":

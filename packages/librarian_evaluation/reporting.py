@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from librarian_evaluation.answer import AnswerEvaluationReport
+from librarian_evaluation.llm_judge import LLMJudgeReport
 from librarian_evaluation.retrieval import (
     RetrievalCaseMetrics,
     RetrievalEvaluationReport,
@@ -18,6 +19,7 @@ class RetrievalReportDocument:
     retrieval: RetrievalEvaluationReport
     run: dict[str, Any] | None = None
     answer_quality: AnswerEvaluationReport | None = None
+    llm_judge: LLMJudgeReport | None = None
 
     def to_dict(self) -> dict[str, Any]:
         document = {
@@ -30,6 +32,8 @@ class RetrievalReportDocument:
             document["run"] = self.run
         if self.answer_quality is not None:
             document["answer_quality"] = self.answer_quality.to_dict()
+        if self.llm_judge is not None:
+            document["llm_judge"] = self.llm_judge.to_dict()
         return document
 
 
@@ -40,6 +44,7 @@ def build_retrieval_report_document(
     primary_k: int | None = None,
     run: dict[str, Any] | None = None,
     answer_quality: AnswerEvaluationReport | None = None,
+    llm_judge: LLMJudgeReport | None = None,
 ) -> RetrievalReportDocument:
     selected_k = primary_k or max(report.k_values)
     if selected_k not in report.k_values:
@@ -53,6 +58,7 @@ def build_retrieval_report_document(
         retrieval=report,
         run=run,
         answer_quality=answer_quality,
+        llm_judge=llm_judge,
     )
 
 
@@ -66,6 +72,7 @@ def render_evaluation_markdown(
     benchmark = document.get("benchmark", {})
     run = document.get("run", {})
     answer_quality = document.get("answer_quality")
+    llm_judge = document.get("llm_judge")
     golden_corpus = golden_corpus or {}
     lines = [
         "# Librarian Evaluation Report",
@@ -105,6 +112,8 @@ def render_evaluation_markdown(
     lines.extend([f"- {area}" for area in summary["improvement_areas"]])
     lines.extend(["", "## Answer Quality", ""])
     lines.extend(_render_answer_quality_section(answer_quality, run))
+    lines.extend(["", "## LLM Judge", ""])
+    lines.extend(_render_llm_judge_section(llm_judge))
     lines.extend(["", "### Weakest Cases", ""])
     lines.extend(_render_weakest_cases(summary["weakest_cases"], summary["primary_k"]))
     lines.extend(["", "### Retrieval Cases", ""])
@@ -469,6 +478,50 @@ def _render_comparison_section(comparison: dict[str, Any] | None) -> list[str]:
             "",
         ]
     )
+    return lines
+
+
+def _render_llm_judge_section(llm_judge: dict[str, Any] | None) -> list[str]:
+    if not llm_judge:
+        return [
+            "LLM-as-judge evaluation was not measured for this report.",
+            "",
+            "Run `python3 scripts/evaluate_retrieval.py --llm-judge` to score",
+            "answer quality with Codex by default and Ollama as fallback.",
+        ]
+
+    aggregate = llm_judge["aggregate"]
+    lines = [
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| Provider | `{llm_judge.get('provider', 'unknown')}` |",
+        f"| Model | `{llm_judge.get('model', 'unknown')}` |",
+        f"| Fallback provider | `{llm_judge.get('fallback_provider', 'none')}` |",
+        f"| Fallback used | `{llm_judge.get('fallback_used', False)}` |",
+        f"| Case count | `{aggregate['case_count']}` |",
+        f"| Correctness | `{_decimal(aggregate['mean_correctness'])}` |",
+        f"| Completeness | `{_decimal(aggregate['mean_completeness'])}` |",
+        f"| Groundedness | `{_decimal(aggregate['mean_groundedness'])}` |",
+        f"| Citation accuracy | `{_decimal(aggregate['mean_citation_accuracy'])}` |",
+        f"| Refusal quality | `{_decimal(aggregate['mean_refusal_quality'])}` |",
+        f"| Usefulness | `{_decimal(aggregate['mean_usefulness'])}` |",
+        f"| Overall judge score | `{_decimal(aggregate['mean_overall_score'])}` |",
+        "",
+        "### LLM Judge Cases",
+        "",
+        "| Case | Overall | Correctness | Groundedness | Citation Accuracy | Rationale |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for case in llm_judge["cases"]:
+        lines.append(
+            "| "
+            f"`{case['case_id']}` | "
+            f"`{_decimal(case['overall_score'])}` | "
+            f"`{_decimal(case['correctness'])}` | "
+            f"`{_decimal(case['groundedness'])}` | "
+            f"`{_decimal(case['citation_accuracy'])}` | "
+            f"{case.get('rationale', '')} |"
+        )
     return lines
 
 
