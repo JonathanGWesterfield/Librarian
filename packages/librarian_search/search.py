@@ -17,6 +17,9 @@ class SearchOptions:
     embedding_model: str | None = None
     ollama_base_url: str | None = None
     limit: int = 10
+    book_id: str | None = None
+    book_title: str | None = None
+    author: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,7 @@ class SearchResponse:
     dimensions: int
     candidate_count: int
     results: list[SearchResult]
+    filters: dict[str, str]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -54,6 +58,7 @@ class SearchResponse:
             "embedding_model": self.embedding_model,
             "dimensions": self.dimensions,
             "candidate_count": self.candidate_count,
+            "filters": self.filters,
             "results": [result.to_dict() for result in self.results],
         }
 
@@ -74,6 +79,7 @@ def search_chunks(options: SearchOptions) -> SearchResponse:
             embedding_model=query_embedding.embedding_model,
             dimensions=query_embedding.dimensions,
             candidate_count=0,
+            filters=_search_filters(options),
             results=[],
         )
 
@@ -86,6 +92,9 @@ def search_chunks(options: SearchOptions) -> SearchResponse:
         candidates = store.list_search_embeddings(
             provider=query_embedding.embedding_provider,
             model=query_embedding.embedding_model,
+            book_id=_clean_filter(options.book_id),
+            book_title=_clean_filter(options.book_title),
+            author=_clean_filter(options.author),
         )
     finally:
         store.close()
@@ -98,8 +107,25 @@ def search_chunks(options: SearchOptions) -> SearchResponse:
         embedding_model=query_embedding.embedding_model,
         dimensions=query_embedding.dimensions,
         candidate_count=len(scored),
+        filters=_search_filters(options),
         results=scored[:limit],
     )
+
+
+def _search_filters(options: SearchOptions) -> dict[str, str]:
+    filters = {
+        "book_id": _clean_filter(options.book_id),
+        "book_title": _clean_filter(options.book_title),
+        "author": _clean_filter(options.author),
+    }
+    return {key: value for key, value in filters.items() if value}
+
+
+def _clean_filter(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 def _score_candidates(

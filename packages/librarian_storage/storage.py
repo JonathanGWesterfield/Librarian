@@ -172,7 +172,13 @@ class IngestionStore(Protocol):
         ...
 
     def list_search_embeddings(
-        self, *, provider: str, model: str
+        self,
+        *,
+        provider: str,
+        model: str,
+        book_id: str | None = None,
+        book_title: str | None = None,
+        author: str | None = None,
     ) -> list[SearchEmbeddingRecord]:
         ...
 
@@ -521,12 +527,33 @@ class SQLiteIngestionStore:
         ]
 
     def list_search_embeddings(
-        self, *, provider: str, model: str
+        self,
+        *,
+        provider: str,
+        model: str,
+        book_id: str | None = None,
+        book_title: str | None = None,
+        author: str | None = None,
     ) -> list[SearchEmbeddingRecord]:
         # Only compare vectors produced by the same provider/model. Different
         # embedding models do not share a meaningful vector space.
+        where = [
+            "chunk_embeddings.provider = ?",
+            "chunk_embeddings.model = ?",
+        ]
+        parameters: list[object] = [provider, model]
+        if book_id:
+            where.append("books.id = ?")
+            parameters.append(book_id)
+        if book_title:
+            where.append("LOWER(COALESCE(books.title, '')) LIKE ?")
+            parameters.append(f"%{book_title.strip().casefold()}%")
+        if author:
+            where.append("LOWER(books.authors_json) LIKE ?")
+            parameters.append(f"%{author.strip().casefold()}%")
+
         rows = self._connection.execute(
-            """
+            f"""
             SELECT chunk_embeddings.chunk_id, chunks.book_id, books.relative_path,
                    books.title, books.authors_json, books.publisher,
                    chunks.chunk_index, chunks.text, chunk_embeddings.provider,
@@ -535,11 +562,10 @@ class SQLiteIngestionStore:
             FROM chunk_embeddings
             JOIN chunks ON chunks.id = chunk_embeddings.chunk_id
             JOIN books ON books.id = chunks.book_id
-            WHERE chunk_embeddings.provider = ?
-              AND chunk_embeddings.model = ?
+            WHERE {' AND '.join(where)}
             ORDER BY books.relative_path ASC, chunks.chunk_index ASC
             """,
-            (provider, model),
+            parameters,
         ).fetchall()
         return [
             SearchEmbeddingRecord(

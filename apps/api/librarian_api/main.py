@@ -59,6 +59,9 @@ class SearchRequest(BaseModel):
     embedding_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
     limit: int = 10
+    book_id: Optional[str] = None
+    book_title: Optional[str] = None
+    author: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -70,6 +73,9 @@ class ChatRequest(BaseModel):
     generation_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
     retrieval_limit: int = 30
+    book_id: Optional[str] = None
+    book_title: Optional[str] = None
+    author: Optional[str] = None
 
 
 @app.get("/health")
@@ -171,6 +177,9 @@ def search_endpoint(request: SearchRequest) -> dict[str, object]:
                 embedding_model=request.embedding_model,
                 ollama_base_url=request.ollama_base_url,
                 limit=request.limit,
+                book_id=request.book_id,
+                book_title=request.book_title,
+                author=request.author,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
@@ -191,6 +200,9 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
                 generation_model=request.generation_model,
                 ollama_base_url=request.ollama_base_url,
                 retrieval_limit=request.retrieval_limit,
+                book_id=request.book_id,
+                book_title=request.book_title,
+                author=request.author,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
