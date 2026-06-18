@@ -102,7 +102,7 @@ def render_evaluation_markdown(
     )
     lines.extend([f"- {area}" for area in summary["improvement_areas"]])
     lines.extend(["", "## Answer Quality", ""])
-    lines.extend(_render_answer_quality_section(answer_quality))
+    lines.extend(_render_answer_quality_section(answer_quality, run))
     lines.extend(["", "### Weakest Cases", ""])
     lines.extend(_render_weakest_cases(summary["weakest_cases"], summary["primary_k"]))
     lines.extend(["", "### Retrieval Cases", ""])
@@ -330,7 +330,10 @@ def _render_golden_corpus_section(
     return lines
 
 
-def _render_answer_quality_section(answer_quality: dict[str, Any] | None) -> list[str]:
+def _render_answer_quality_section(
+    answer_quality: dict[str, Any] | None,
+    run: dict[str, Any],
+) -> list[str]:
     if not answer_quality:
         return [
             "Answer quality was not measured for this report.",
@@ -340,7 +343,31 @@ def _render_answer_quality_section(answer_quality: dict[str, Any] | None) -> lis
         ]
 
     aggregate = answer_quality["aggregate"]
-    lines = [
+    lines: list[str] = []
+    answer_run = run.get("answer_quality", {})
+    if answer_run.get("mode") == "live_chat":
+        lines.extend(
+            [
+                "### Answer Generation",
+                "",
+                "| Metric | Value |",
+                "| --- | --- |",
+                "| Live answer evaluation | Measured through live chat |",
+                f"| Generation provider | `{answer_run.get('generation_provider', 'unknown')}` |",
+                f"| Generation model | `{answer_run.get('generation_model', 'unknown')}` |",
+                f"| Embedding provider | `{answer_run.get('embedding_provider', 'unknown')}` |",
+                f"| Embedding model | `{answer_run.get('embedding_model', 'unknown')}` |",
+                f"| Retrieval limit | `{answer_run.get('retrieval_limit', 'unknown')}` |",
+                f"| Questions evaluated | `{answer_run.get('question_count', 'unknown')}` |",
+                f"| Sources returned | `{answer_run.get('total_sources_returned', 'unknown')}` |",
+                "",
+                "### Answer Metrics",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
         "| Metric | Value |",
         "| --- | ---: |",
         f"| Case count | `{aggregate['case_count']}` |",
@@ -356,7 +383,8 @@ def _render_answer_quality_section(answer_quality: dict[str, Any] | None) -> lis
         "",
         "| Case | Overall | Correctness | Groundedness | Citation Accuracy | Findings |",
         "| --- | ---: | ---: | ---: | ---: | --- |",
-    ]
+        ]
+    )
     for case in answer_quality["cases"]:
         findings = "<br>".join(case["findings"])
         lines.append(

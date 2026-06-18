@@ -203,6 +203,24 @@ The live machine-readable report is written to
 `docs/evaluation-live-retrieval-report.json`; the live human-readable report is
 written to `docs/evaluation-live-report.md`.
 
+To include generated answer quality from the live chat stack, add
+`--live-answers` and generation settings:
+
+```bash
+python3 scripts/evaluate_retrieval.py --live --live-answers \
+  --database-url sqlite:///data/librarian.db \
+  --embedding-provider ollama \
+  --embedding-model all-minilm \
+  --generation-provider ollama \
+  --generation-model llama3.2:3b \
+  --retrieval-limit 30
+```
+
+The same live report files are updated. The Markdown report includes an
+`Answer Generation` section with the generation provider, generation model,
+retrieval limit, evaluated question count, and source count before the answer
+quality metrics.
+
 The first real-library benchmark lives at
 `tests/fixtures/evaluation/golden_retrieval_corpus.json`. It is book-level on
 purpose: each case names expected EPUB filenames from the local library without
@@ -218,3 +236,10 @@ whether cited sources support covered concepts, and whether insufficient
 evidence answers refuse correctly. This is not a replacement for human review
 or an LLM-as-judge pass, but it gives us a stable first regression signal for
 generated answers.
+
+The first live answer-quality corpus lives at
+`tests/fixtures/evaluation/golden_answer_quality_corpus.json`. It contains
+questions, expected concepts, citation expectations, and refusal expectations,
+but no generated answers. Live report generation sends those questions through
+the current retrieval and chat stack, then scores the generated answers against
+the same deterministic answer-quality rubric.
