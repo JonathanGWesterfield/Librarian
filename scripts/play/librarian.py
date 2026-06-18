@@ -154,6 +154,12 @@ def main(argv: list[str] | None = None) -> int:
         default=5,
         help="Maximum ranked chunks to show.",
     )
+    search_parser.add_argument("--book-id", help="Restrict search to one stored book id.")
+    search_parser.add_argument(
+        "--book-title",
+        help="Restrict search to matching book titles.",
+    )
+    search_parser.add_argument("--author", help="Restrict search to matching author names.")
     _add_json_flag(search_parser)
 
     args = parser.parse_args(argv)
@@ -222,6 +228,9 @@ def main(argv: list[str] | None = None) -> int:
                     embedding_model=args.embedding_model,
                     ollama_base_url=args.ollama_base_url,
                     limit=args.limit,
+                    book_id=args.book_id,
+                    book_title=args.book_title,
+                    author=args.author,
                 )
             )
             payload = result.to_dict()
@@ -382,6 +391,9 @@ def _print_search_response(payload: dict[str, object]) -> None:
         f"({payload['dimensions']} dimensions)"
     )
     print(f"Candidates scored: {payload['candidate_count']}")
+    filters = payload.get("filters")
+    if isinstance(filters, dict) and filters:
+        print(f"Filters: {filters}")
     print()
 
     results = payload["results"]

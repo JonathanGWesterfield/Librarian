@@ -63,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
         default=30,
         help="Number of retrieved chunks to pass into the answer prompt.",
     )
+    parser.add_argument("--book-id", help="Restrict retrieval to one stored book id.")
+    parser.add_argument("--book-title", help="Restrict retrieval to matching book titles.")
+    parser.add_argument("--author", help="Restrict retrieval to matching author names.")
     parser.add_argument(
         "--json",
         action="store_true",
@@ -107,6 +110,9 @@ def _ask_once(args: argparse.Namespace, question: str) -> int:
                 generation_model=args.generation_model,
                 ollama_base_url=args.ollama_base_url,
                 retrieval_limit=args.retrieval_limit,
+                book_id=args.book_id,
+                book_title=args.book_title,
+                author=args.author,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
