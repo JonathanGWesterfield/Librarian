@@ -62,6 +62,9 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         self.assertEqual(document["run"]["embedding_provider"], "ollama")
         self.assertEqual(document["run"]["embedding_model"], "all-minilm")
         self.assertEqual(document["run"]["embedding_dimensions"], 2)
+        self.assertIn("search_total_seconds", document["run"])
+        self.assertIn("search_mean_seconds", document["run"])
+        self.assertIn("search_max_seconds", document["run"])
         self.assertEqual(document["retrieval"]["aggregate"]["case_count"], 1)
         self.assertEqual(document["retrieval"]["aggregate"]["hit_rate_at_k"][1], 1.0)
         self.assertEqual(document["retrieval"]["aggregate"]["mean_recall_at_k"][2], 1.0)
@@ -142,6 +145,9 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         )
         self.assertEqual(document["run"]["answer_quality"]["retrieval_limit"], 3)
         self.assertEqual(document["run"]["answer_quality"]["total_sources_returned"], 1)
+        self.assertIn("answer_total_seconds", document["run"]["answer_quality"])
+        self.assertIn("answer_mean_seconds", document["run"]["answer_quality"])
+        self.assertIn("answer_max_seconds", document["run"]["answer_quality"])
 
 
 def _fake_search(_options) -> SearchResponse:
