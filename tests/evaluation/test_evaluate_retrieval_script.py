@@ -149,6 +149,52 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         self.assertIn("answer_mean_seconds", document["run"]["answer_quality"])
         self.assertIn("answer_max_seconds", document["run"]["answer_quality"])
 
+    def test_with_comparison_attaches_prior_report_deltas(self) -> None:
+        """Verify the script can attach a comparison to a previous report.
+        This is the behavior used by GitHub Actions to show PR reviewers how
+        the current evaluation report changed relative to the base branch.
+        """
+        module = _load_script_module()
+        with TemporaryDirectory() as temp_dir:
+            baseline_path = Path(temp_dir) / "baseline.json"
+            baseline_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "baseline"},
+                        "summary": {
+                            "primary_k": 5,
+                            "overall_score": 0.5,
+                            "key_metrics": {
+                                "hit_rate_at_k": 0.5,
+                                "mean_precision_at_k": 0.5,
+                                "mean_recall_at_k": 0.5,
+                                "mean_reciprocal_rank": 0.5,
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            current = {
+                "benchmark": {"name": "current"},
+                "summary": {
+                    "primary_k": 5,
+                    "overall_score": 0.75,
+                    "key_metrics": {
+                        "hit_rate_at_k": 0.5,
+                        "mean_precision_at_k": 0.5,
+                        "mean_recall_at_k": 0.75,
+                        "mean_reciprocal_rank": 0.75,
+                    },
+                },
+            }
+
+            compared = module._with_comparison(current, baseline_path)
+
+        self.assertIn("comparison", compared)
+        self.assertEqual(compared["comparison"]["improved_count"], 3)
+        self.assertEqual(compared["comparison"]["unchanged_count"], 2)
+
 
 def _fake_search(_options) -> SearchResponse:
     return SearchResponse(
