@@ -12,6 +12,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
+from librarian_chat.chat import ChatOptions, ChatResponse, answer_question
 from librarian_evaluation.reporting import (
     build_retrieval_report_document,
     render_evaluation_markdown,
@@ -39,6 +40,9 @@ DEFAULT_GOLDEN_CORPUS_PATH = (
 )
 DEFAULT_ANSWER_BENCHMARK_PATH = (
     REPO_ROOT / "tests/fixtures/evaluation/answer_quality_benchmark.json"
+)
+DEFAULT_GOLDEN_ANSWER_CORPUS_PATH = (
+    REPO_ROOT / "tests/fixtures/evaluation/golden_answer_quality_corpus.json"
 )
 
 
@@ -82,6 +86,17 @@ def main() -> int:
         help="Path to the deterministic answer-quality benchmark JSON file.",
     )
     parser.add_argument(
+        "--live-answers",
+        action="store_true",
+        help="Run the live chat stack against the answer-quality corpus.",
+    )
+    parser.add_argument(
+        "--answer-corpus",
+        type=Path,
+        default=DEFAULT_GOLDEN_ANSWER_CORPUS_PATH,
+        help="Path to the live answer-quality corpus JSON file.",
+    )
+    parser.add_argument(
         "--github-summary",
         type=Path,
         default=None,
@@ -108,10 +123,26 @@ def main() -> int:
         help="Ollama base URL for live query embeddings.",
     )
     parser.add_argument(
+        "--generation-provider",
+        default=None,
+        help="Generation provider for live answer-quality evaluation.",
+    )
+    parser.add_argument(
+        "--generation-model",
+        default=None,
+        help="Generation model for live answer-quality evaluation.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=10,
         help="Maximum live search results to score per golden corpus query.",
+    )
+    parser.add_argument(
+        "--retrieval-limit",
+        type=int,
+        default=30,
+        help="Maximum retrieved chunks sent to chat during live answer evaluation.",
     )
     parser.add_argument(
         "--check",
@@ -128,11 +159,16 @@ def main() -> int:
         document = generate_live_report_document(
             args.golden_corpus,
             answer_benchmark_path=args.answer_benchmark,
+            live_answer_corpus_path=args.answer_corpus,
+            live_answers=args.live_answers,
             database_url=args.database_url,
             embedding_provider=args.embedding_provider,
             embedding_model=args.embedding_model,
+            generation_provider=args.generation_provider,
+            generation_model=args.generation_model,
             ollama_base_url=args.ollama_base_url,
             limit=args.limit,
+            retrieval_limit=args.retrieval_limit,
         )
     else:
         document = generate_report_document(
@@ -208,12 +244,18 @@ def generate_live_report_document(
     corpus_path: Path,
     *,
     answer_benchmark_path: Path | None = None,
+    live_answer_corpus_path: Path | None = None,
+    live_answers: bool = False,
     database_url: str | None = None,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
+    generation_provider: str | None = None,
+    generation_model: str | None = None,
     ollama_base_url: str | None = None,
     limit: int = 10,
+    retrieval_limit: int = 30,
     search_fn=search_chunks,
+    answer_fn=answer_question,
 ) -> dict[str, Any]:
     corpus_data = json.loads(corpus_path.read_text(encoding="utf-8"))
     cases = [_case_from_json(case) for case in corpus_data["cases"]]
@@ -241,16 +283,32 @@ def generate_live_report_document(
         ranked_results_by_case,
         k_values=corpus_data.get("k_values"),
     )
+    run_metadata = _live_run_metadata(
+        responses,
+        database_url=database_url,
+        limit=limit,
+    )
+    answer_quality = _answer_report_from_path(answer_benchmark_path)
+    if live_answers:
+        answer_quality, answer_run_metadata = _live_answer_report_from_path(
+            live_answer_corpus_path,
+            database_url=database_url,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+            generation_provider=generation_provider,
+            generation_model=generation_model,
+            ollama_base_url=ollama_base_url,
+            retrieval_limit=retrieval_limit,
+            answer_fn=answer_fn,
+        )
+        run_metadata["answer_quality"] = answer_run_metadata
+
     document = build_retrieval_report_document(
         report,
         benchmark=benchmark,
         primary_k=corpus_data.get("primary_k"),
-        run=_live_run_metadata(
-            responses,
-            database_url=database_url,
-            limit=limit,
-        ),
-        answer_quality=_answer_report_from_path(answer_benchmark_path),
+        run=run_metadata,
+        answer_quality=answer_quality,
     )
     return document.to_dict()
 
@@ -288,6 +346,66 @@ def _answer_report_from_path(path: Path | None):
     }
     generated_at = benchmark_data.get("benchmark", {}).get("generated_at")
     return evaluate_answer_cases(cases, candidates, generated_at=generated_at)
+
+
+def _live_answer_report_from_path(
+    path: Path | None,
+    *,
+    database_url: str | None,
+    embedding_provider: str | None,
+    embedding_model: str | None,
+    generation_provider: str | None,
+    generation_model: str | None,
+    ollama_base_url: str | None,
+    retrieval_limit: int,
+    answer_fn=answer_question,
+):
+    if path is None or not path.exists():
+        raise FileNotFoundError(
+            "Live answer evaluation requires an answer corpus. "
+            f"Missing path: {path}"
+        )
+
+    corpus_data = json.loads(path.read_text(encoding="utf-8"))
+    cases = [_answer_case_from_json(case) for case in corpus_data["cases"]]
+    responses: list[ChatResponse] = []
+    candidates: dict[str, AnswerCandidate] = {}
+
+    for case in cases:
+        response = answer_fn(
+            ChatOptions(
+                question=case.question,
+                database_url=database_url,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                generation_provider=generation_provider,
+                generation_model=generation_model,
+                ollama_base_url=ollama_base_url,
+                retrieval_limit=retrieval_limit,
+            )
+        )
+        responses.append(response)
+        candidates[case.id] = AnswerCandidate(
+            answer=response.answer,
+            sources=[
+                AnswerSource(
+                    source_id=source.source_id,
+                    text=source.text,
+                    relative_path=source.relative_path,
+                )
+                for source in response.sources
+            ],
+        )
+
+    generated_at = corpus_data.get("benchmark", {}).get("generated_at")
+    return (
+        evaluate_answer_cases(cases, candidates, generated_at=generated_at),
+        _live_answer_run_metadata(
+            responses,
+            corpus_path=path,
+            retrieval_limit=retrieval_limit,
+        ),
+    )
 
 
 def _answer_case_from_json(data: dict[str, Any]) -> AnswerEvaluationCase:
@@ -358,6 +476,33 @@ def _live_run_metadata(
         "total_candidates_scored": sum(
             response.candidate_count for response in responses
         ),
+    }
+
+
+def _live_answer_run_metadata(
+    responses: list[ChatResponse],
+    *,
+    corpus_path: Path,
+    retrieval_limit: int,
+) -> dict[str, Any]:
+    first_response = responses[0] if responses else None
+    return {
+        "mode": "live_chat",
+        "corpus_path": str(corpus_path),
+        "embedding_provider": (
+            first_response.embedding_provider if first_response else "unknown"
+        ),
+        "embedding_model": first_response.embedding_model if first_response else "unknown",
+        "generation_provider": (
+            first_response.generation_provider if first_response else "unknown"
+        ),
+        "generation_model": first_response.generation_model if first_response else "unknown",
+        "retrieval_limit": retrieval_limit,
+        "question_count": len(responses),
+        "total_candidates_scored": sum(
+            response.candidate_count for response in responses
+        ),
+        "total_sources_returned": sum(len(response.sources) for response in responses),
     }
 
 

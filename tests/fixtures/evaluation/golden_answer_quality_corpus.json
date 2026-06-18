@@ -1,0 +1,38 @@
+{
+  "benchmark": {
+    "name": "golden-answer-quality-corpus",
+    "description": "Real-library answer-quality corpus for scoring live chat answers generated from retrieved chunks.",
+    "mode": "live_chat_expected_terms"
+  },
+  "cases": [
+    {
+      "id": "all-quiet-war-brutality",
+      "question": "How brutal and terrible is war?",
+      "expected_terms": ["fear", "death", "trauma"],
+      "required_citations": true,
+      "notes": "A good answer should ground the theme of war brutality in retrieved passages, ideally from All Quiet on the Western Front."
+    },
+    {
+      "id": "paradise-lost-fall",
+      "question": "What does Paradise Lost say about rebellion and the fall?",
+      "expected_terms": ["rebellion", "temptation", "fall"],
+      "required_citations": true,
+      "notes": "A good answer should connect rebellion and temptation to the fall while citing retrieved evidence."
+    },
+    {
+      "id": "foundation-psychohistory",
+      "question": "How does Foundation describe psychohistory and historical prediction?",
+      "expected_terms": ["psychohistory", "prediction", "empire"],
+      "required_citations": true,
+      "notes": "A good answer should discuss psychohistory as a predictive discipline in the context of empire-level change."
+    },
+    {
+      "id": "insufficient-evidence-local-only",
+      "question": "What does my library say about the private vacation plans of a modern celebrity?",
+      "expected_terms": [],
+      "required_citations": false,
+      "should_refuse": true,
+      "notes": "A good answer should refuse or say the retrieved local evidence is insufficient."
+    }
+  ]
+}
