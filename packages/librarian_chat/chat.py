@@ -19,6 +19,9 @@ class ChatOptions:
     generation_model: str | None = None
     ollama_base_url: str | None = None
     retrieval_limit: int = 30
+    book_id: str | None = None
+    book_title: str | None = None
+    author: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,7 @@ class ChatResponse:
     generation_model: str
     retrieval_limit: int
     candidate_count: int
+    filters: dict[str, str]
     sources: list[ChatSource]
 
     def to_dict(self) -> dict[str, object]:
@@ -59,6 +63,7 @@ class ChatResponse:
             "generation_model": self.generation_model,
             "retrieval_limit": self.retrieval_limit,
             "candidate_count": self.candidate_count,
+            "filters": self.filters,
             "sources": [source.to_dict() for source in self.sources],
         }
 
@@ -77,6 +82,9 @@ def answer_question(options: ChatOptions) -> ChatResponse:
             embedding_model=options.embedding_model,
             ollama_base_url=options.ollama_base_url,
             limit=retrieval_limit,
+            book_id=options.book_id,
+            book_title=options.book_title,
+            author=options.author,
         )
     )
     sources = _to_sources(search_response.results)
@@ -97,6 +105,7 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         generation_model=generator.model,
         retrieval_limit=retrieval_limit,
         candidate_count=search_response.candidate_count,
+        filters=search_response.filters,
         sources=sources,
     )
 
