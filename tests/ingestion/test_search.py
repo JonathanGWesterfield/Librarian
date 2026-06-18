@@ -49,7 +49,7 @@ class SearchChunksTests(unittest.TestCase):
             )
 
         self.assertEqual(response.query, "clockwork garden")
-        self.assertEqual(response.candidate_count, 3)
+        self.assertEqual(response.candidate_count, 4)
         self.assertEqual(len(response.results), 2)
         self.assertEqual(response.results[0].chunk_id, "book-hash:0")
         self.assertAlmostEqual(response.results[0].score, 1.0, places=6)
@@ -76,11 +76,83 @@ class SearchChunksTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(response.candidate_count, 3)
+        self.assertEqual(response.candidate_count, 4)
         self.assertNotIn(
             "book-hash:bad",
             [result.chunk_id for result in response.results],
         )
+
+    def test_search_chunks_filters_by_author(self) -> None:
+        """Verify author filters restrict candidate embeddings before scoring.
+        This is the first Phase 5 scoped-retrieval behavior: callers can ask
+        search to only consider chunks from books whose author metadata matches
+        the requested author name.
+        """
+        with patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            response = search_chunks(
+                SearchOptions(
+                    query="clockwork garden",
+                    database_url=self.database_url,
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    author="Other Author",
+                    limit=10,
+                )
+            )
+
+        self.assertEqual(response.filters, {"author": "Other Author"})
+        self.assertEqual(response.candidate_count, 1)
+        self.assertEqual([result.book_id for result in response.results], ["other-book"])
+
+    def test_search_chunks_filters_by_book_title(self) -> None:
+        """Verify book title filters restrict candidate embeddings before scoring.
+        Title filtering gives the future UI and CLI a direct way to scope a
+        query to one book without relying on natural-language routing.
+        """
+        with patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            response = search_chunks(
+                SearchOptions(
+                    query="clockwork garden",
+                    database_url=self.database_url,
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    book_title="Other",
+                    limit=10,
+                )
+            )
+
+        self.assertEqual(response.filters, {"book_title": "Other"})
+        self.assertEqual(response.candidate_count, 1)
+        self.assertEqual(response.results[0].title, "Other Book")
+
+    def test_search_chunks_returns_no_candidates_when_filter_matches_no_books(self) -> None:
+        """Verify missing filters return an empty result set cleanly.
+        A bad author/title selection should not fall back to searching the
+        whole library, because that would produce surprising scoped answers.
+        """
+        with patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            response = search_chunks(
+                SearchOptions(
+                    query="clockwork garden",
+                    database_url=self.database_url,
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    author="Missing Author",
+                    limit=10,
+                )
+            )
+
+        self.assertEqual(response.candidate_count, 0)
+        self.assertEqual(response.results, [])
 
     def _seed_search_fixture(self) -> None:
         book = BookRecord(
@@ -166,6 +238,42 @@ class SearchChunksTests(unittest.TestCase):
         with SQLiteIngestionStore(self.database_path) as store:
             store.save_book_with_chunks(book, chunks)
             store.save_chunk_embeddings(embeddings)
+            store.save_book_with_chunks(
+                BookRecord(
+                    id="other-book",
+                    source_path="/books/other.epub",
+                    relative_path="other.epub",
+                    file_hash="other-book",
+                    size_bytes=100,
+                    title="Other Book",
+                    authors=["Other Author"],
+                    publisher="Fixture Press",
+                    status="ingested",
+                    ingested_at=utc_now(),
+                ),
+                [
+                    ChunkRecord(
+                        id="other-book:0",
+                        book_id="other-book",
+                        chunk_index=0,
+                        text="The clockwork garden appeared in another book.",
+                        character_count=48,
+                        token_estimate=10,
+                    )
+                ],
+            )
+            store.save_chunk_embeddings(
+                [
+                    EmbeddingRecord(
+                        id="other-book:0:ollama:all-minilm",
+                        chunk_id="other-book:0",
+                        provider="ollama",
+                        model="all-minilm",
+                        vector=[0.1, 0.9],
+                        dimensions=2,
+                    )
+                ]
+            )
 
 
 class _FakeQueryEmbedder:
