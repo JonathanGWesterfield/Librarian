@@ -20,7 +20,9 @@ from librarian_config.config import (
 )
 from librarian_ingestion.epub import parse_epub
 from librarian_storage.storage import (
+    BookSummaryRecord,
     BookRecord,
+    ChapterSummaryRecord,
     ChunkRecord,
     EmbeddingRecord,
     SQLiteIngestionStore,
@@ -262,6 +264,96 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(model, "all-minilm")
         self.assertEqual(dimensions, 3)
         self.assertEqual(vector_json, "[0.1, 0.2, 0.3]")
+
+    def test_summary_records_can_be_saved_reused_and_deleted(self) -> None:
+        """Verify generated summaries are scoped by book/provider/model/detail.
+        This lets us rebuild summaries when swapping Ollama and Codex without
+        deleting source chunks or embeddings.
+        """
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/forward.epub",
+            relative_path="forward.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        chunks = [
+            ChunkRecord(
+                id="book-1:0",
+                book_id="book-1",
+                chunk_index=0,
+                chapter_title="Part One",
+                text="Hari Seldon studies psychohistory.",
+                character_count=35,
+                token_estimate=8,
+            )
+        ]
+        chapter_summary = ChapterSummaryRecord(
+            id="chapter-summary-1",
+            book_id="book-1",
+            chapter_key="chapter-001",
+            chapter_title="Part One",
+            chunk_start_index=0,
+            chunk_end_index=0,
+            provider="codex",
+            model="codex",
+            detail="medium",
+            source_hash="abc",
+            summary="Seldon works on psychohistory.",
+        )
+        book_summary = BookSummaryRecord(
+            id="book-summary-1",
+            book_id="book-1",
+            provider="codex",
+            model="codex",
+            detail="medium",
+            source_hash="def",
+            summary="A book about Seldon and psychohistory.",
+            chapter_summary_count=1,
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, chunks)
+            store.save_chapter_summary(chapter_summary)
+            store.save_book_summary(book_summary)
+
+            stored_book = store.get_summary_book("book-1")
+            stored_chunks = store.list_book_summary_chunks("book-1")
+            stored_chapter = store.get_chapter_summary(
+                book_id="book-1",
+                chapter_key="chapter-001",
+                provider="codex",
+                model="codex",
+                detail="medium",
+            )
+            stored_summary = store.get_book_summary(
+                book_id="book-1",
+                provider="codex",
+                model="codex",
+                detail="medium",
+            )
+            deleted = store.delete_summaries(
+                book_id="book-1",
+                provider="codex",
+                model="codex",
+                detail="medium",
+            )
+
+        self.assertIsNotNone(stored_book)
+        assert stored_book is not None
+        self.assertEqual(stored_book.title, "Forward the Foundation")
+        self.assertEqual(stored_chunks[0].chapter_title, "Part One")
+        self.assertIsNotNone(stored_chapter)
+        assert stored_chapter is not None
+        self.assertEqual(stored_chapter.summary, "Seldon works on psychohistory.")
+        self.assertIsNotNone(stored_summary)
+        assert stored_summary is not None
+        self.assertEqual(stored_summary.chapter_summary_count, 1)
+        self.assertEqual(deleted, 2)
 
     def test_get_book_by_identity_finds_existing_book_metadata(self) -> None:
         """Verify the adapter can find an already ingested book by metadata.

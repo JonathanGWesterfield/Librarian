@@ -83,6 +83,56 @@ class StoredBookRecord:
 
 
 @dataclass(frozen=True)
+class StoredSummaryBookRecord:
+    id: str
+    relative_path: str
+    title: Optional[str]
+    authors: list[str]
+    publisher: Optional[str]
+    chunk_count: int
+
+
+@dataclass(frozen=True)
+class SummaryChunkRecord:
+    id: str
+    book_id: str
+    chunk_index: int
+    chapter_title: Optional[str]
+    text: str
+
+
+@dataclass(frozen=True)
+class ChapterSummaryRecord:
+    id: str
+    book_id: str
+    chapter_key: str
+    chapter_title: Optional[str]
+    chunk_start_index: int
+    chunk_end_index: int
+    provider: str
+    model: str
+    detail: str
+    source_hash: str
+    summary: str
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass(frozen=True)
+class BookSummaryRecord:
+    id: str
+    book_id: str
+    provider: str
+    model: str
+    detail: str
+    source_hash: str
+    summary: str
+    chapter_summary_count: int
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass(frozen=True)
 class StoredEmbeddingRecord:
     id: str
     chunk_id: str
@@ -197,6 +247,47 @@ class IngestionStore(Protocol):
     def list_books(
         self, *, status: str | None = None, limit: int = 100, offset: int = 0
     ) -> list[StoredBookRecord]:
+        ...
+
+    def get_summary_book(self, book_id: str) -> StoredSummaryBookRecord | None:
+        ...
+
+    def list_summary_books(self, *, limit: int = 500) -> list[StoredSummaryBookRecord]:
+        ...
+
+    def list_book_summary_chunks(self, book_id: str) -> list[SummaryChunkRecord]:
+        ...
+
+    def get_chapter_summary(
+        self,
+        *,
+        book_id: str,
+        chapter_key: str,
+        provider: str,
+        model: str,
+        detail: str,
+    ) -> ChapterSummaryRecord | None:
+        ...
+
+    def save_chapter_summary(self, summary: ChapterSummaryRecord) -> None:
+        ...
+
+    def get_book_summary(
+        self, *, book_id: str, provider: str, model: str, detail: str
+    ) -> BookSummaryRecord | None:
+        ...
+
+    def save_book_summary(self, summary: BookSummaryRecord) -> None:
+        ...
+
+    def delete_summaries(
+        self,
+        *,
+        book_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        detail: str | None = None,
+    ) -> int:
         ...
 
     def close(self) -> None:
@@ -649,6 +740,251 @@ class SQLiteIngestionStore:
             for row in rows
         ]
 
+    def get_summary_book(self, book_id: str) -> StoredSummaryBookRecord | None:
+        row = self._connection.execute(
+            """
+            SELECT books.id, books.relative_path, books.title, books.authors_json,
+                   books.publisher, COUNT(chunks.id) AS chunk_count
+            FROM books
+            LEFT JOIN chunks ON chunks.book_id = books.id
+            WHERE books.id = ?
+            GROUP BY books.id
+            """,
+            (book_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return StoredSummaryBookRecord(
+            id=row[0],
+            relative_path=row[1],
+            title=row[2],
+            authors=_decode_authors(row[3]),
+            publisher=row[4],
+            chunk_count=row[5],
+        )
+
+    def list_summary_books(self, *, limit: int = 500) -> list[StoredSummaryBookRecord]:
+        limit = max(1, min(limit, 1000))
+        rows = self._connection.execute(
+            """
+            SELECT books.id, books.relative_path, books.title, books.authors_json,
+                   books.publisher, COUNT(chunks.id) AS chunk_count
+            FROM books
+            LEFT JOIN chunks ON chunks.book_id = books.id
+            WHERE books.status = 'ingested'
+            GROUP BY books.id
+            ORDER BY COALESCE(books.title, books.relative_path) ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [
+            StoredSummaryBookRecord(
+                id=row[0],
+                relative_path=row[1],
+                title=row[2],
+                authors=_decode_authors(row[3]),
+                publisher=row[4],
+                chunk_count=row[5],
+            )
+            for row in rows
+        ]
+
+    def list_book_summary_chunks(self, book_id: str) -> list[SummaryChunkRecord]:
+        rows = self._connection.execute(
+            """
+            SELECT id, book_id, chunk_index, chapter_title, text
+            FROM chunks
+            WHERE book_id = ?
+            ORDER BY chunk_index ASC
+            """,
+            (book_id,),
+        ).fetchall()
+        return [
+            SummaryChunkRecord(
+                id=row[0],
+                book_id=row[1],
+                chunk_index=row[2],
+                chapter_title=row[3],
+                text=row[4],
+            )
+            for row in rows
+        ]
+
+    def get_chapter_summary(
+        self,
+        *,
+        book_id: str,
+        chapter_key: str,
+        provider: str,
+        model: str,
+        detail: str,
+    ) -> ChapterSummaryRecord | None:
+        row = self._connection.execute(
+            """
+            SELECT id, book_id, chapter_key, chapter_title, chunk_start_index,
+                   chunk_end_index, provider, model, detail, source_hash,
+                   summary, created_at, updated_at
+            FROM chapter_summaries
+            WHERE book_id = ?
+              AND chapter_key = ?
+              AND provider = ?
+              AND model = ?
+              AND detail = ?
+            """,
+            (book_id, chapter_key, provider, model, detail),
+        ).fetchone()
+        if row is None:
+            return None
+        return ChapterSummaryRecord(
+            id=row[0],
+            book_id=row[1],
+            chapter_key=row[2],
+            chapter_title=row[3],
+            chunk_start_index=row[4],
+            chunk_end_index=row[5],
+            provider=row[6],
+            model=row[7],
+            detail=row[8],
+            source_hash=row[9],
+            summary=row[10],
+            created_at=row[11],
+            updated_at=row[12],
+        )
+
+    def save_chapter_summary(self, summary: ChapterSummaryRecord) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO chapter_summaries (
+                    id, book_id, chapter_key, chapter_title, chunk_start_index,
+                    chunk_end_index, provider, model, detail, source_hash,
+                    summary, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(book_id, chapter_key, provider, model, detail)
+                DO UPDATE SET
+                    id = excluded.id,
+                    chapter_title = excluded.chapter_title,
+                    chunk_start_index = excluded.chunk_start_index,
+                    chunk_end_index = excluded.chunk_end_index,
+                    source_hash = excluded.source_hash,
+                    summary = excluded.summary,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    summary.id,
+                    summary.book_id,
+                    summary.chapter_key,
+                    summary.chapter_title,
+                    summary.chunk_start_index,
+                    summary.chunk_end_index,
+                    summary.provider,
+                    summary.model,
+                    summary.detail,
+                    summary.source_hash,
+                    summary.summary,
+                    summary.created_at,
+                    summary.updated_at,
+                ),
+            )
+
+    def get_book_summary(
+        self, *, book_id: str, provider: str, model: str, detail: str
+    ) -> BookSummaryRecord | None:
+        row = self._connection.execute(
+            """
+            SELECT id, book_id, provider, model, detail, source_hash, summary,
+                   chapter_summary_count, created_at, updated_at
+            FROM book_summaries
+            WHERE book_id = ?
+              AND provider = ?
+              AND model = ?
+              AND detail = ?
+            """,
+            (book_id, provider, model, detail),
+        ).fetchone()
+        if row is None:
+            return None
+        return BookSummaryRecord(
+            id=row[0],
+            book_id=row[1],
+            provider=row[2],
+            model=row[3],
+            detail=row[4],
+            source_hash=row[5],
+            summary=row[6],
+            chapter_summary_count=row[7],
+            created_at=row[8],
+            updated_at=row[9],
+        )
+
+    def save_book_summary(self, summary: BookSummaryRecord) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO book_summaries (
+                    id, book_id, provider, model, detail, source_hash, summary,
+                    chapter_summary_count, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(book_id, provider, model, detail)
+                DO UPDATE SET
+                    id = excluded.id,
+                    source_hash = excluded.source_hash,
+                    summary = excluded.summary,
+                    chapter_summary_count = excluded.chapter_summary_count,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    summary.id,
+                    summary.book_id,
+                    summary.provider,
+                    summary.model,
+                    summary.detail,
+                    summary.source_hash,
+                    summary.summary,
+                    summary.chapter_summary_count,
+                    summary.created_at,
+                    summary.updated_at,
+                ),
+            )
+
+    def delete_summaries(
+        self,
+        *,
+        book_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        detail: str | None = None,
+    ) -> int:
+        where: list[str] = []
+        parameters: list[object] = []
+        if book_id:
+            where.append("book_id = ?")
+            parameters.append(book_id)
+        if provider:
+            where.append("provider = ?")
+            parameters.append(provider)
+        if model:
+            where.append("model = ?")
+            parameters.append(model)
+        if detail:
+            where.append("detail = ?")
+            parameters.append(detail)
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+
+        with self._connection:
+            chapter_cursor = self._connection.execute(
+                f"DELETE FROM chapter_summaries{where_sql}",
+                parameters,
+            )
+            book_cursor = self._connection.execute(
+                f"DELETE FROM book_summaries{where_sql}",
+                parameters,
+            )
+        return chapter_cursor.rowcount + book_cursor.rowcount
+
     def close(self) -> None:
         if self.connection is not None:
             self.connection.close()
@@ -797,4 +1133,41 @@ CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_chunk_id
 ON chunk_embeddings(chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_provider_model
 ON chunk_embeddings(provider, model);
+
+CREATE TABLE IF NOT EXISTS chapter_summaries (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    chapter_key TEXT NOT NULL,
+    chapter_title TEXT,
+    chunk_start_index INTEGER NOT NULL,
+    chunk_end_index INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(book_id, chapter_key, provider, model, detail)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chapter_summaries_book_provider_model
+ON chapter_summaries(book_id, provider, model, detail);
+
+CREATE TABLE IF NOT EXISTS book_summaries (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    chapter_summary_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(book_id, provider, model, detail)
+);
+
+CREATE INDEX IF NOT EXISTS idx_book_summaries_book_provider_model
+ON book_summaries(book_id, provider, model, detail);
 """
