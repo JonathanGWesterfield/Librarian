@@ -80,6 +80,7 @@ def render_evaluation_markdown(
         f"- Benchmark mode: `{benchmark.get('mode', 'unknown')}`",
         "",
     ]
+    lines.extend(_render_run_metadata_section(run))
     lines.extend(_render_embedding_section(run, benchmark))
     lines.extend(["", "## Golden Corpus", ""])
     lines.extend(_render_golden_corpus_section(golden_corpus, benchmark))
@@ -269,6 +270,9 @@ def _render_embedding_section(
             f"| Embedding dimensions | `{run.get('embedding_dimensions', 'unknown')}` |",
             f"| Search limit per query | `{run.get('limit', 'unknown')}` |",
             f"| Total candidates scored | `{run.get('total_candidates_scored', 'unknown')}` |",
+            f"| Search total latency | `{_seconds(run.get('search_total_seconds', 'unknown'))}` |",
+            f"| Search mean latency | `{_seconds(run.get('search_mean_seconds', 'unknown'))}` |",
+            f"| Search max latency | `{_seconds(run.get('search_max_seconds', 'unknown'))}` |",
             "",
             "This section does not judge embedding quality directly. It measures",
             "embedding impact through retrieval outcomes against the golden corpus.",
@@ -360,6 +364,9 @@ def _render_answer_quality_section(
                 f"| Retrieval limit | `{answer_run.get('retrieval_limit', 'unknown')}` |",
                 f"| Questions evaluated | `{answer_run.get('question_count', 'unknown')}` |",
                 f"| Sources returned | `{answer_run.get('total_sources_returned', 'unknown')}` |",
+                f"| Answer total latency | `{_seconds(answer_run.get('answer_total_seconds', 'unknown'))}` |",
+                f"| Answer mean latency | `{_seconds(answer_run.get('answer_mean_seconds', 'unknown'))}` |",
+                f"| Answer max latency | `{_seconds(answer_run.get('answer_max_seconds', 'unknown'))}` |",
                 "",
                 "### Answer Metrics",
                 "",
@@ -396,6 +403,32 @@ def _render_answer_quality_section(
             f"`{_decimal(case['citation_accuracy'])}` | "
             f"{findings} |"
         )
+    return lines
+
+
+def _render_run_metadata_section(run: dict[str, Any]) -> list[str]:
+    execution = run.get("execution")
+    git = run.get("git")
+    if not execution and not git:
+        return []
+
+    lines = ["## Run Metadata", "", "| Metric | Value |", "| --- | --- |"]
+    if execution:
+        lines.extend(
+            [
+                f"| Started at | `{execution.get('started_at', 'unknown')}` |",
+                f"| Elapsed time | `{_seconds(execution.get('elapsed_seconds', 'unknown'))}` |",
+            ]
+        )
+    if git:
+        lines.extend(
+            [
+                f"| Git commit | `{git.get('short_commit', 'unknown')}` |",
+                f"| Git branch | `{git.get('branch', 'unknown')}` |",
+                f"| Git dirty | `{git.get('dirty', 'unknown')}` |",
+            ]
+        )
+    lines.append("")
     return lines
 
 
@@ -439,6 +472,12 @@ def _render_case_table(cases: list[dict[str, Any]], primary_k: int) -> list[str]
 
 def _decimal(value: float) -> str:
     return f"{value:.4f}"
+
+
+def _seconds(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.4f}s"
+    return str(value)
 
 
 def _metric_at_k(metrics: dict[Any, Any], k: int) -> Any:

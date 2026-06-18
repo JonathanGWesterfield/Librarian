@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +51,8 @@ DEFAULT_GOLDEN_ANSWER_CORPUS_PATH = (
 
 
 def main() -> int:
+    started_at = datetime.now(timezone.utc)
+    started_perf = time.perf_counter()
     parser = argparse.ArgumentParser(
         description="Generate Librarian retrieval evaluation reports."
     )
@@ -101,6 +107,14 @@ def main() -> int:
         type=Path,
         default=None,
         help="Optional path, usually GITHUB_STEP_SUMMARY, to append Markdown output.",
+    )
+    parser.add_argument(
+        "--record-run-metadata",
+        action="store_true",
+        help=(
+            "Include elapsed time and git metadata in written reports. "
+            "Live reports include this automatically."
+        ),
     )
     parser.add_argument(
         "--database-url",
@@ -175,10 +189,30 @@ def main() -> int:
             args.benchmark,
             answer_benchmark_path=args.answer_benchmark,
         )
+    should_record_run_metadata = args.live or args.record_run_metadata
+    output_document = (
+        _with_execution_metadata(document, started_at, started_perf)
+        if should_record_run_metadata
+        else document
+    )
+    summary_document = (
+        _with_execution_metadata(document, started_at, started_perf)
+        if args.github_summary
+        else output_document
+    )
     golden_corpus = _load_optional_json(args.golden_corpus)
     rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
     rendered_markdown = render_evaluation_markdown(
         document,
+        golden_corpus=golden_corpus,
+    )
+    output_rendered = json.dumps(output_document, indent=2, sort_keys=True) + "\n"
+    output_rendered_markdown = render_evaluation_markdown(
+        output_document,
+        golden_corpus=golden_corpus,
+    )
+    summary_markdown = render_evaluation_markdown(
+        summary_document,
         golden_corpus=golden_corpus,
     )
 
@@ -199,15 +233,15 @@ def main() -> int:
         ):
             return 1
         if args.github_summary:
-            _append_summary(args.github_summary, rendered_markdown)
+            _append_summary(args.github_summary, summary_markdown)
         return 0
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(rendered, encoding="utf-8")
+    args.output.write_text(output_rendered, encoding="utf-8")
     args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
-    args.markdown_output.write_text(rendered_markdown, encoding="utf-8")
+    args.markdown_output.write_text(output_rendered_markdown, encoding="utf-8")
     if args.github_summary:
-        _append_summary(args.github_summary, rendered_markdown)
+        _append_summary(args.github_summary, summary_markdown)
     print(f"Wrote retrieval evaluation report to {args.output}")
     print(f"Wrote human-readable evaluation report to {args.markdown_output}")
     return 0
@@ -261,8 +295,10 @@ def generate_live_report_document(
     cases = [_case_from_json(case) for case in corpus_data["cases"]]
     ranked_results_by_case: dict[str, list] = {}
     responses: list[SearchResponse] = []
+    search_latencies_seconds: list[float] = []
 
     for case in cases:
+        search_started = time.perf_counter()
         response = search_fn(
             SearchOptions(
                 query=case.query,
@@ -273,6 +309,7 @@ def generate_live_report_document(
                 limit=limit,
             )
         )
+        search_latencies_seconds.append(time.perf_counter() - search_started)
         responses.append(response)
         ranked_results_by_case[case.id] = response.results
 
@@ -287,6 +324,7 @@ def generate_live_report_document(
         responses,
         database_url=database_url,
         limit=limit,
+        search_latencies_seconds=search_latencies_seconds,
     )
     answer_quality = _answer_report_from_path(answer_benchmark_path)
     if live_answers:
@@ -370,8 +408,10 @@ def _live_answer_report_from_path(
     cases = [_answer_case_from_json(case) for case in corpus_data["cases"]]
     responses: list[ChatResponse] = []
     candidates: dict[str, AnswerCandidate] = {}
+    answer_latencies_seconds: list[float] = []
 
     for case in cases:
+        answer_started = time.perf_counter()
         response = answer_fn(
             ChatOptions(
                 question=case.question,
@@ -384,6 +424,7 @@ def _live_answer_report_from_path(
                 retrieval_limit=retrieval_limit,
             )
         )
+        answer_latencies_seconds.append(time.perf_counter() - answer_started)
         responses.append(response)
         candidates[case.id] = AnswerCandidate(
             answer=response.answer,
@@ -404,6 +445,7 @@ def _live_answer_report_from_path(
             responses,
             corpus_path=path,
             retrieval_limit=retrieval_limit,
+            answer_latencies_seconds=answer_latencies_seconds,
         ),
     )
 
@@ -461,6 +503,7 @@ def _live_run_metadata(
     *,
     database_url: str | None,
     limit: int,
+    search_latencies_seconds: list[float],
 ) -> dict[str, Any]:
     first_response = responses[0] if responses else None
     return {
@@ -476,6 +519,11 @@ def _live_run_metadata(
         "total_candidates_scored": sum(
             response.candidate_count for response in responses
         ),
+        "search_total_seconds": _rounded_seconds(sum(search_latencies_seconds)),
+        "search_mean_seconds": _mean_seconds(search_latencies_seconds),
+        "search_max_seconds": _rounded_seconds(
+            max(search_latencies_seconds, default=0.0)
+        ),
     }
 
 
@@ -484,6 +532,7 @@ def _live_answer_run_metadata(
     *,
     corpus_path: Path,
     retrieval_limit: int,
+    answer_latencies_seconds: list[float],
 ) -> dict[str, Any]:
     first_response = responses[0] if responses else None
     return {
@@ -503,7 +552,75 @@ def _live_answer_run_metadata(
             response.candidate_count for response in responses
         ),
         "total_sources_returned": sum(len(response.sources) for response in responses),
+        "answer_total_seconds": _rounded_seconds(sum(answer_latencies_seconds)),
+        "answer_mean_seconds": _mean_seconds(answer_latencies_seconds),
+        "answer_max_seconds": _rounded_seconds(
+            max(answer_latencies_seconds, default=0.0)
+        ),
     }
+
+
+def _with_execution_metadata(
+    document: dict[str, Any],
+    started_at: datetime,
+    started_perf: float,
+) -> dict[str, Any]:
+    enriched = copy.deepcopy(document)
+    run = dict(enriched.get("run", {}))
+    run["execution"] = {
+        "started_at": started_at.isoformat(),
+        "elapsed_seconds": _rounded_seconds(time.perf_counter() - started_perf),
+    }
+    run["git"] = _git_metadata()
+    enriched["run"] = run
+    return enriched
+
+
+def _git_metadata() -> dict[str, Any]:
+    return {
+        "commit": _git_output("rev-parse", "HEAD") or "unknown",
+        "short_commit": _git_output("rev-parse", "--short", "HEAD") or "unknown",
+        "branch": _git_output("branch", "--show-current") or "unknown",
+        "dirty": _git_dirty(),
+    }
+
+
+def _git_output(*args: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return completed.stdout.strip()
+
+
+def _git_dirty() -> bool | str:
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return bool(completed.stdout.strip())
+
+
+def _mean_seconds(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return _rounded_seconds(sum(values) / len(values))
+
+
+def _rounded_seconds(value: float) -> float:
+    return round(value, 4)
 
 
 if __name__ == "__main__":

@@ -153,6 +153,55 @@ class RetrievalReportingTests(unittest.TestCase):
         self.assertIn("### Weakest Cases", markdown)
         self.assertIn("golden-library-retrieval", markdown)
 
+    def test_render_evaluation_markdown_contains_run_metadata_when_present(self) -> None:
+        """Verify runtime and git metadata are readable in Markdown reports.
+        Dynamic run metadata is intentionally kept out of deterministic smoke
+        report comparisons, but live reports and GitHub summaries should show
+        elapsed time and the commit that produced the metrics.
+        """
+        report = evaluate_retrieval_cases(
+            [
+                RetrievalEvaluationCase(
+                    id="good",
+                    query="good query",
+                    relevant_chunk_ids={"good:0"},
+                )
+            ],
+            {
+                "good": [
+                    RetrievalResult(
+                        chunk_id="good:0",
+                        book_id="good",
+                        relative_path="good.epub",
+                    )
+                ]
+            },
+            k_values=[1],
+            generated_at="1970-01-01T00:00:00+00:00",
+        )
+        document = build_retrieval_report_document(
+            report,
+            benchmark={"name": "unit-test", "mode": "static"},
+            primary_k=1,
+            run={
+                "execution": {
+                    "started_at": "1970-01-01T00:00:00+00:00",
+                    "elapsed_seconds": 1.25,
+                },
+                "git": {
+                    "short_commit": "abc1234",
+                    "branch": "feature/test",
+                    "dirty": False,
+                },
+            },
+        ).to_dict()
+
+        markdown = render_evaluation_markdown(document)
+
+        self.assertIn("## Run Metadata", markdown)
+        self.assertIn("abc1234", markdown)
+        self.assertIn("1.2500s", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()

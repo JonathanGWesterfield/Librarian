@@ -188,6 +188,11 @@ python3 scripts/evaluate_retrieval.py
 CI runs `python3 scripts/evaluate_retrieval.py --check` so pull requests fail
 when the committed report is stale.
 
+GitHub Actions also appends the report to the PR Checks summary with dynamic
+run metadata. That summary includes elapsed time, git commit, branch, and dirty
+state. These fields are intentionally excluded from the committed smoke report
+files so the checked-in reports remain deterministic across commits.
+
 Live golden-corpus reports are generated locally from the ingested SQLite
 database and live query embeddings. They are written separately so CI can keep
 using the deterministic smoke report:
@@ -202,6 +207,10 @@ python3 scripts/evaluate_retrieval.py --live \
 The live machine-readable report is written to
 `docs/evaluation-live-retrieval-report.json`; the live human-readable report is
 written to `docs/evaluation-live-report.md`.
+
+Live reports include run metadata by default. The `Run Metadata` section records
+elapsed report time and git metadata, while the live embedding and answer
+sections include total, mean, and max latency for search and answer generation.
 
 To include generated answer quality from the live chat stack, add
 `--live-answers` and generation settings:
