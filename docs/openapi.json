@@ -318,6 +318,16 @@
                     "limit": 5
                   }
                 },
+                "authorFiltered": {
+                  "summary": "Search within books by one author",
+                  "value": {
+                    "query": "How brutal and terrible is war?",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "author": "Erich Maria Remarque",
+                    "limit": 10
+                  }
+                },
                 "explicitDatabase": {
                   "summary": "Search an explicit local database",
                   "value": {
@@ -377,6 +387,7 @@
                     "generation_provider": "ollama",
                     "generation_model": "llama3.2:3b",
                     "ollama_base_url": "http://host.docker.internal:11434",
+                    "book_title": "All Quiet on the Western Front",
                     "retrieval_limit": 30
                   }
                 },
@@ -896,6 +907,18 @@
             "type": "integer",
             "default": 10,
             "minimum": 1
+          },
+          "book_id": {
+            "type": ["string", "null"],
+            "description": "Restrict search to one exact stored book id."
+          },
+          "book_title": {
+            "type": ["string", "null"],
+            "description": "Restrict search to stored books whose title contains this text."
+          },
+          "author": {
+            "type": ["string", "null"],
+            "description": "Restrict search to stored books whose author metadata contains this text."
           }
         }
       },
@@ -907,6 +930,7 @@
           "embedding_model",
           "dimensions",
           "candidate_count",
+          "filters",
           "results"
         ],
         "properties": {
@@ -927,6 +951,9 @@
             "type": "integer",
             "minimum": 0
           },
+          "filters": {
+            "$ref": "#/components/schemas/SearchFilters"
+          },
           "results": {
             "type": "array",
             "items": {
@@ -934,6 +961,22 @@
             }
           }
         }
+      },
+      "SearchFilters": {
+        "type": "object",
+        "description": "Active metadata filters applied before vector scoring.",
+        "properties": {
+          "book_id": {
+            "type": "string"
+          },
+          "book_title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "SearchResult": {
         "type": "object",
@@ -1031,6 +1074,18 @@
             "type": "integer",
             "default": 30,
             "minimum": 1
+          },
+          "book_id": {
+            "type": ["string", "null"],
+            "description": "Restrict retrieval to one exact stored book id."
+          },
+          "book_title": {
+            "type": ["string", "null"],
+            "description": "Restrict retrieval to stored books whose title contains this text."
+          },
+          "author": {
+            "type": ["string", "null"],
+            "description": "Restrict retrieval to stored books whose author metadata contains this text."
           }
         }
       },
@@ -1045,6 +1100,7 @@
           "generation_model",
           "retrieval_limit",
           "candidate_count",
+          "filters",
           "sources"
         ],
         "properties": {
@@ -1073,6 +1129,9 @@
           "candidate_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "filters": {
+            "$ref": "#/components/schemas/SearchFilters"
           },
           "sources": {
             "type": "array",
