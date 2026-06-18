@@ -28,6 +28,7 @@ class ChatCliTests(unittest.TestCase):
             generation_model="llama3.2:3b",
             retrieval_limit=20,
             candidate_count=1,
+            filters={},
             sources=[
                 ChatSource(
                     source_id="S1",

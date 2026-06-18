@@ -277,6 +277,7 @@ def _fake_search(_options) -> SearchResponse:
         embedding_model="all-minilm",
         dimensions=2,
         candidate_count=12,
+        filters={},
         results=[
             SearchResult(
                 score=0.9,
@@ -306,6 +307,7 @@ def _fake_answer(options) -> ChatResponse:
         generation_model=options.generation_model or "deterministic",
         retrieval_limit=options.retrieval_limit,
         candidate_count=9,
+        filters={},
         sources=[
             ChatSource(
                 source_id="S1",

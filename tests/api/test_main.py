@@ -139,6 +139,7 @@ class IngestionApiTests(unittest.TestCase):
                     "database_url": self.database_url,
                     "embedding_provider": "ollama",
                     "embedding_model": "all-minilm",
+                    "author": "Test Author",
                     "limit": 2,
                 },
             )
@@ -151,6 +152,7 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["embedding_model"], "all-minilm")
         self.assertEqual(payload["dimensions"], 2)
         self.assertEqual(payload["candidate_count"], 3)
+        self.assertEqual(payload["filters"], {"author": "Test Author"})
         self.assertEqual(len(payload["results"]), 2)
         self.assertEqual(payload["results"][0]["chunk_id"], "api-book:0")
         self.assertAlmostEqual(payload["results"][0]["score"], 1.0, places=6)
@@ -170,6 +172,7 @@ class IngestionApiTests(unittest.TestCase):
             generation_model="llama3.2:3b",
             retrieval_limit=20,
             candidate_count=3,
+            filters={"book_title": "All Quiet"},
             sources=[
                 ChatSource(
                     source_id="S1",
@@ -195,6 +198,7 @@ class IngestionApiTests(unittest.TestCase):
                     "generation_provider": "ollama",
                     "generation_model": "llama3.2:3b",
                     "retrieval_limit": 20,
+                    "book_title": "All Quiet",
                 },
             )
 
@@ -203,6 +207,7 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["answer"], fake_response.answer)
         self.assertEqual(payload["generation_model"], "llama3.2:3b")
+        self.assertEqual(payload["filters"], {"book_title": "All Quiet"})
         self.assertEqual(payload["sources"][0]["source_id"], "S1")
 
     def _seed_search_fixture(self) -> None:
