@@ -110,6 +110,44 @@ class RetrievalEvaluationTests(unittest.TestCase):
         self.assertEqual(report.aggregate.mean_reciprocal_rank, 0.75)
         self.assertEqual(len(report.to_dict()["cases"]), 2)
 
+    def test_evaluate_retrieval_case_deduplicates_book_level_matches(self) -> None:
+        """Verify book-level labels are counted once across many chunks.
+        Live retrieval can return several chunks from the same expected EPUB.
+        Those are useful results, but recall must stay capped at 1.0 because
+        the benchmark label is one book, not every matching chunk in that book.
+        """
+        case = RetrievalEvaluationCase(
+            id="war-book-level",
+            query="How brutal and terrible is war?",
+            relevant_relative_paths={"All Quiet on the Western Front.epub"},
+        )
+        ranked_results = [
+            RetrievalResult(
+                chunk_id="all-quiet:1",
+                book_id="all-quiet",
+                relative_path="All Quiet on the Western Front.epub",
+            ),
+            RetrievalResult(
+                chunk_id="all-quiet:2",
+                book_id="all-quiet",
+                relative_path="All Quiet on the Western Front.epub",
+            ),
+            RetrievalResult(
+                chunk_id="all-quiet:3",
+                book_id="all-quiet",
+                relative_path="All Quiet on the Western Front.epub",
+            ),
+        ]
+
+        metrics = evaluate_retrieval_case(case, ranked_results, k_values=[1, 3])
+
+        self.assertEqual(metrics.expected_relevant_count, 1)
+        self.assertEqual(metrics.relevant_result_count, 1)
+        self.assertEqual(metrics.precision_at_k[1], 1.0)
+        self.assertEqual(metrics.precision_at_k[3], 1 / 3)
+        self.assertEqual(metrics.recall_at_k[1], 1.0)
+        self.assertEqual(metrics.recall_at_k[3], 1.0)
+
     def test_evaluate_retrieval_accepts_search_results(self) -> None:
         """Verify the evaluator can consume production search results.
         Search returns `SearchResult` objects today, so the evaluator accepts

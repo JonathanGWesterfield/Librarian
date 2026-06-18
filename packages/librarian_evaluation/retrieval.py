@@ -112,16 +112,16 @@ def evaluate_retrieval_case(
     k_values: list[int] | None = None,
 ) -> RetrievalCaseMetrics:
     normalized_k_values = sorted(set(k_values or [1, 3, 5, 10]))
-    relevance = [_is_relevant(case, result) for result in ranked_results]
+    matched_labels = [_matched_relevance_labels(case, result) for result in ranked_results]
+    relevance = [bool(labels) for labels in matched_labels]
     expected_relevant_count = _expected_relevant_count(case)
-    relevant_result_count = sum(1 for is_relevant in relevance if is_relevant)
+    relevant_result_count = len(_unique_matched_labels(matched_labels))
     hit_at_k: dict[int, bool] = {}
     precision_at_k: dict[int, float] = {}
     recall_at_k: dict[int, float] = {}
 
     for k in normalized_k_values:
-        top_k = relevance[:k]
-        top_k_relevant_count = sum(1 for is_relevant in top_k if is_relevant)
+        top_k_relevant_count = len(_unique_matched_labels(matched_labels[:k]))
         hit_at_k[k] = top_k_relevant_count > 0
         precision_at_k[k] = top_k_relevant_count / k
         recall_at_k[k] = (
@@ -177,22 +177,25 @@ def _aggregate_case_metrics(
     )
 
 
-def _is_relevant(
+def _matched_relevance_labels(
     case: RetrievalEvaluationCase,
     result: RetrievalResult | RetrievalResultLike,
-) -> bool:
-    return (
-        result.chunk_id in case.relevant_chunk_ids
-        or result.book_id in case.relevant_book_ids
-        or result.relative_path in case.relevant_relative_paths
-    )
+) -> set[str]:
+    labels: set[str] = set()
+    if result.chunk_id in case.relevant_chunk_ids:
+        labels.add(f"chunk:{result.chunk_id}")
+    if result.book_id in case.relevant_book_ids:
+        labels.add(f"book:{result.book_id}")
+    if result.relative_path in case.relevant_relative_paths:
+        labels.add(f"path:{result.relative_path}")
+    return labels
 
 
 def _expected_relevant_count(case: RetrievalEvaluationCase) -> int:
-    return max(
-        len(case.relevant_chunk_ids),
-        len(case.relevant_book_ids),
-        len(case.relevant_relative_paths),
+    return len(
+        {f"chunk:{chunk_id}" for chunk_id in case.relevant_chunk_ids}
+        | {f"book:{book_id}" for book_id in case.relevant_book_ids}
+        | {f"path:{relative_path}" for relative_path in case.relevant_relative_paths}
     )
 
 
@@ -201,3 +204,10 @@ def _reciprocal_rank(relevance: list[bool]) -> float:
         if is_relevant:
             return 1 / index
     return 0.0
+
+
+def _unique_matched_labels(labels_by_result: list[set[str]]) -> set[str]:
+    labels: set[str] = set()
+    for result_labels in labels_by_result:
+        labels.update(result_labels)
+    return labels
