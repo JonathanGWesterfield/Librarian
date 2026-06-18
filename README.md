@@ -152,6 +152,23 @@ scripts/               Developer helper scripts
 - [API OpenAPI Contract](docs/api-endpoints.md)
 - [Evaluation Strategy](docs/evaluation-strategy.md)
 
+## Current Status
+
+Librarian is currently in Phase 4: Evaluation and Quality Reports. The core
+local RAG loop is working end to end: EPUB ingestion, chunk storage, local
+embeddings through Ollama, SQLite-backed vector search, a FastAPI surface, and
+a standalone chat CLI.
+
+The current engineering focus is making quality measurable. The repo now has
+deterministic retrieval and answer-quality smoke reports for CI, plus optional
+live reports that run the golden corpus against an ingested local SQLite
+database. Live report generation can evaluate both retrieval quality and the
+answers produced by the current chat stack.
+
+The next roadmap pressure points are richer report metadata, latency tracking,
+larger golden-corpus coverage, and then retrieval improvements such as hybrid
+search or reranking.
+
 ## Roadmap
 
 ### Phase 0: Workspace Foundation
