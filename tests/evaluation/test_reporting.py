@@ -202,6 +202,59 @@ class RetrievalReportingTests(unittest.TestCase):
         self.assertIn("abc1234", markdown)
         self.assertIn("1.2500s", markdown)
 
+    def test_render_evaluation_markdown_contains_comparison_when_present(self) -> None:
+        """Verify before/after metric deltas render for PR review.
+        The comparison section is what makes run-over-run evaluation visible
+        without asking reviewers to diff JSON by hand.
+        """
+        report = evaluate_retrieval_cases(
+            [
+                RetrievalEvaluationCase(
+                    id="good",
+                    query="good query",
+                    relevant_chunk_ids={"good:0"},
+                )
+            ],
+            {
+                "good": [
+                    RetrievalResult(
+                        chunk_id="good:0",
+                        book_id="good",
+                        relative_path="good.epub",
+                    )
+                ]
+            },
+            k_values=[1],
+            generated_at="1970-01-01T00:00:00+00:00",
+        )
+        document = build_retrieval_report_document(
+            report,
+            benchmark={"name": "unit-test", "mode": "static"},
+            primary_k=1,
+        ).to_dict()
+        document["comparison"] = {
+            "baseline": "main",
+            "improved_count": 1,
+            "regressed_count": 0,
+            "unchanged_count": 0,
+            "metrics": [
+                {
+                    "section": "retrieval",
+                    "name": "overall_score",
+                    "current": 0.8,
+                    "baseline": 0.7,
+                    "delta": 0.1,
+                    "status": "improved",
+                }
+            ],
+        }
+
+        markdown = render_evaluation_markdown(document)
+
+        self.assertIn("## Run Comparison", markdown)
+        self.assertIn("overall_score", markdown)
+        self.assertIn("+0.1000", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()

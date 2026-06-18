@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -24,8 +26,13 @@ jobs:
       - name: Run checks
         run: scripts/check.sh
 
+      - name: Prepare base evaluation report
+        if: github.event_name == 'pull_request'
+        run: |
+          git show "origin/${{ github.base_ref }}:docs/evaluation-retrieval-report.json" > /tmp/librarian-base-evaluation-report.json || true
+
       - name: Publish evaluation summary
-        run: python scripts/evaluate_retrieval.py --check --github-summary "$GITHUB_STEP_SUMMARY"
+        run: python scripts/evaluate_retrieval.py --check --github-summary "$GITHUB_STEP_SUMMARY" --compare-to /tmp/librarian-base-evaluation-report.json
 
       - name: Upload evaluation reports
         uses: actions/upload-artifact@v4

@@ -193,6 +193,11 @@ run metadata. That summary includes elapsed time, git commit, branch, and dirty
 state. These fields are intentionally excluded from the committed smoke report
 files so the checked-in reports remain deterministic across commits.
 
+The PR Checks summary also compares the current generated report against the
+base branch's committed report. The comparison shows metric deltas for
+retrieval, answer quality, and available latency fields so reviewers can see
+whether a change improved, regressed, or left evaluation quality unchanged.
+
 Live golden-corpus reports are generated locally from the ingested SQLite
 database and live query embeddings. They are written separately so CI can keep
 using the deterministic smoke report:
@@ -211,6 +216,19 @@ written to `docs/evaluation-live-report.md`.
 Live reports include run metadata by default. The `Run Metadata` section records
 elapsed report time and git metadata, while the live embedding and answer
 sections include total, mean, and max latency for search and answer generation.
+
+Any report can be compared against a previous JSON report with `--compare-to`:
+
+```bash
+python3 scripts/evaluate_retrieval.py \
+  --compare-to docs/evaluation-retrieval-report.json \
+  --output /tmp/current-evaluation-report.json \
+  --markdown-output /tmp/current-evaluation-report.md
+```
+
+For live local experiments, point `--compare-to` at a previous live JSON report
+to compare embedding models, generation models, retrieval limits, or chunking
+changes over time.
 
 To include generated answer quality from the live chat stack, add
 `--live-answers` and generation settings:

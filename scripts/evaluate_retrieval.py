@@ -17,6 +17,7 @@ if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatOptions, ChatResponse, answer_question
+from librarian_evaluation.comparison import compare_report_documents
 from librarian_evaluation.reporting import (
     build_retrieval_report_document,
     render_evaluation_markdown,
@@ -117,6 +118,12 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--compare-to",
+        type=Path,
+        default=None,
+        help="Optional prior report JSON to compare against in written output.",
+    )
+    parser.add_argument(
         "--database-url",
         default=None,
         help="Database URL for live retrieval. Defaults to Librarian config.",
@@ -200,6 +207,8 @@ def main() -> int:
         if args.github_summary
         else output_document
     )
+    output_document = _with_comparison(output_document, args.compare_to)
+    summary_document = _with_comparison(summary_document, args.compare_to)
     golden_corpus = _load_optional_json(args.golden_corpus)
     rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
     rendered_markdown = render_evaluation_markdown(
@@ -479,6 +488,23 @@ def _load_optional_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _with_comparison(
+    document: dict[str, Any],
+    compare_to_path: Path | None,
+) -> dict[str, Any]:
+    if compare_to_path is None or not compare_to_path.exists():
+        return document
+
+    baseline = json.loads(compare_to_path.read_text(encoding="utf-8"))
+    enriched = copy.deepcopy(document)
+    enriched["comparison"] = compare_report_documents(
+        enriched,
+        baseline,
+        baseline_label=str(compare_to_path),
+    )
+    return enriched
 
 
 def _report_is_stale(path: Path, expected: str, *, regenerate_hint: str) -> bool:

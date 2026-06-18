@@ -81,6 +81,7 @@ def render_evaluation_markdown(
         "",
     ]
     lines.extend(_render_run_metadata_section(run))
+    lines.extend(_render_comparison_section(document.get("comparison")))
     lines.extend(_render_embedding_section(run, benchmark))
     lines.extend(["", "## Golden Corpus", ""])
     lines.extend(_render_golden_corpus_section(golden_corpus, benchmark))
@@ -432,6 +433,45 @@ def _render_run_metadata_section(run: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _render_comparison_section(comparison: dict[str, Any] | None) -> list[str]:
+    if not comparison:
+        return []
+
+    lines = [
+        "## Run Comparison",
+        "",
+        f"Compared against `{comparison.get('baseline', 'baseline')}`.",
+        "",
+        "| Section | Metric | Current | Baseline | Delta | Status |",
+        "| --- | --- | ---: | ---: | ---: | --- |",
+    ]
+    for metric in comparison.get("metrics", []):
+        lines.append(
+            "| "
+            f"`{metric['section']}` | "
+            f"`{metric['name']}` | "
+            f"`{_decimal(metric['current'])}` | "
+            f"`{_decimal(metric['baseline'])}` | "
+            f"`{_signed_decimal(metric['delta'])}` | "
+            f"`{metric['status']}` |"
+        )
+    if not comparison.get("metrics"):
+        lines.append("| `none` | No comparable metrics | `0.0000` | `0.0000` | `+0.0000` | `unchanged` |")
+
+    lines.extend(
+        [
+            "",
+            (
+                f"Summary: `{comparison.get('improved_count', 0)}` improved, "
+                f"`{comparison.get('regressed_count', 0)}` regressed, "
+                f"`{comparison.get('unchanged_count', 0)}` unchanged."
+            ),
+            "",
+        ]
+    )
+    return lines
+
+
 def _render_weakest_cases(cases: list[dict[str, Any]], primary_k: int) -> list[str]:
     if not cases:
         return ["No weak cases detected."]
@@ -472,6 +512,10 @@ def _render_case_table(cases: list[dict[str, Any]], primary_k: int) -> list[str]
 
 def _decimal(value: float) -> str:
     return f"{value:.4f}"
+
+
+def _signed_decimal(value: float) -> str:
+    return f"{value:+.4f}"
 
 
 def _seconds(value: Any) -> str:
