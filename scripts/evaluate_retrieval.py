@@ -18,6 +18,11 @@ if str(PACKAGES_DIR) not in sys.path:
 
 from librarian_chat.chat import ChatOptions, ChatResponse, answer_question
 from librarian_evaluation.comparison import compare_report_documents
+from librarian_evaluation.llm_judge import (
+    LLMJudge,
+    create_judge,
+    evaluate_answers_with_llm_judge,
+)
 from librarian_evaluation.reporting import (
     build_retrieval_report_document,
     render_evaluation_markdown,
@@ -124,6 +129,31 @@ def main() -> int:
         help="Optional prior report JSON to compare against in written output.",
     )
     parser.add_argument(
+        "--llm-judge",
+        action="store_true",
+        help="Score answer quality with an LLM judge. Defaults to Codex with Ollama fallback.",
+    )
+    parser.add_argument(
+        "--judge-provider",
+        default="codex",
+        help="LLM judge provider. Supported values: codex, ollama.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        default="codex",
+        help="LLM judge model name.",
+    )
+    parser.add_argument(
+        "--judge-fallback-provider",
+        default="ollama",
+        help="Fallback LLM judge provider. Use 'none' to disable fallback.",
+    )
+    parser.add_argument(
+        "--judge-fallback-model",
+        default=None,
+        help="Fallback LLM judge model. Defaults to --generation-model or llama3.2:3b.",
+    )
+    parser.add_argument(
         "--database-url",
         default=None,
         help="Database URL for live retrieval. Defaults to Librarian config.",
@@ -171,6 +201,18 @@ def main() -> int:
         help="Fail if the output file does not match the generated report.",
     )
     args = parser.parse_args()
+    judge = _create_optional_judge(
+        enabled=args.llm_judge,
+        provider=args.judge_provider,
+        model=args.judge_model,
+        ollama_base_url=args.ollama_base_url,
+    )
+    fallback_judge = _create_optional_fallback_judge(
+        enabled=args.llm_judge,
+        provider=args.judge_fallback_provider,
+        model=args.judge_fallback_model or args.generation_model or "llama3.2:3b",
+        ollama_base_url=args.ollama_base_url,
+    )
 
     if args.live:
         if args.output == DEFAULT_OUTPUT_PATH:
@@ -190,11 +232,15 @@ def main() -> int:
             ollama_base_url=args.ollama_base_url,
             limit=args.limit,
             retrieval_limit=args.retrieval_limit,
+            judge=judge,
+            fallback_judge=fallback_judge,
         )
     else:
         document = generate_report_document(
             args.benchmark,
             answer_benchmark_path=args.answer_benchmark,
+            judge=judge,
+            fallback_judge=fallback_judge,
         )
     should_record_run_metadata = args.live or args.record_run_metadata
     output_document = (
@@ -260,6 +306,8 @@ def generate_report_document(
     benchmark_path: Path,
     *,
     answer_benchmark_path: Path | None = None,
+    judge: LLMJudge | None = None,
+    fallback_judge: LLMJudge | None = None,
 ) -> dict[str, Any]:
     benchmark_data = json.loads(benchmark_path.read_text(encoding="utf-8"))
     cases = [_case_from_json(case) for case in benchmark_data["cases"]]
@@ -274,11 +322,18 @@ def generate_report_document(
         k_values=benchmark_data.get("k_values"),
         generated_at=benchmark.get("generated_at"),
     )
+    answer_quality = _answer_report_from_path(answer_benchmark_path)
+    llm_judge = _llm_judge_report_from_answer_benchmark(
+        answer_benchmark_path,
+        judge=judge,
+        fallback_judge=fallback_judge,
+    )
     document = build_retrieval_report_document(
         report,
         benchmark=benchmark,
         primary_k=benchmark_data.get("primary_k"),
-        answer_quality=_answer_report_from_path(answer_benchmark_path),
+        answer_quality=answer_quality,
+        llm_judge=llm_judge,
     )
     return document.to_dict()
 
@@ -299,6 +354,8 @@ def generate_live_report_document(
     retrieval_limit: int = 30,
     search_fn=search_chunks,
     answer_fn=answer_question,
+    judge: LLMJudge | None = None,
+    fallback_judge: LLMJudge | None = None,
 ) -> dict[str, Any]:
     corpus_data = json.loads(corpus_path.read_text(encoding="utf-8"))
     cases = [_case_from_json(case) for case in corpus_data["cases"]]
@@ -336,8 +393,18 @@ def generate_live_report_document(
         search_latencies_seconds=search_latencies_seconds,
     )
     answer_quality = _answer_report_from_path(answer_benchmark_path)
+    llm_judge = _llm_judge_report_from_answer_benchmark(
+        answer_benchmark_path,
+        judge=judge,
+        fallback_judge=fallback_judge,
+    )
     if live_answers:
-        answer_quality, answer_run_metadata = _live_answer_report_from_path(
+        (
+            answer_quality,
+            answer_run_metadata,
+            answer_cases,
+            answer_candidates,
+        ) = _live_answer_report_from_path(
             live_answer_corpus_path,
             database_url=database_url,
             embedding_provider=embedding_provider,
@@ -349,6 +416,13 @@ def generate_live_report_document(
             answer_fn=answer_fn,
         )
         run_metadata["answer_quality"] = answer_run_metadata
+        if judge is not None:
+            llm_judge = evaluate_answers_with_llm_judge(
+                answer_cases,
+                answer_candidates,
+                judge=judge,
+                fallback_judge=fallback_judge,
+            )
 
     document = build_retrieval_report_document(
         report,
@@ -356,6 +430,7 @@ def generate_live_report_document(
         primary_k=corpus_data.get("primary_k"),
         run=run_metadata,
         answer_quality=answer_quality,
+        llm_judge=llm_judge,
     )
     return document.to_dict()
 
@@ -385,14 +460,36 @@ def _result_from_json(data: dict[str, Any]) -> RetrievalResult:
 def _answer_report_from_path(path: Path | None):
     if path is None or not path.exists():
         return None
+    benchmark_data, cases, candidates = _answer_cases_and_candidates_from_path(path)
+    generated_at = benchmark_data.get("benchmark", {}).get("generated_at")
+    return evaluate_answer_cases(cases, candidates, generated_at=generated_at)
+
+
+def _llm_judge_report_from_answer_benchmark(
+    path: Path | None,
+    *,
+    judge: LLMJudge | None,
+    fallback_judge: LLMJudge | None,
+):
+    if judge is None or path is None or not path.exists():
+        return None
+    _, cases, candidates = _answer_cases_and_candidates_from_path(path)
+    return evaluate_answers_with_llm_judge(
+        cases,
+        candidates,
+        judge=judge,
+        fallback_judge=fallback_judge,
+    )
+
+
+def _answer_cases_and_candidates_from_path(path: Path):
     benchmark_data = json.loads(path.read_text(encoding="utf-8"))
     cases = [_answer_case_from_json(case) for case in benchmark_data["cases"]]
     candidates = {
         case["id"]: _answer_candidate_from_json(case)
         for case in benchmark_data["cases"]
     }
-    generated_at = benchmark_data.get("benchmark", {}).get("generated_at")
-    return evaluate_answer_cases(cases, candidates, generated_at=generated_at)
+    return benchmark_data, cases, candidates
 
 
 def _live_answer_report_from_path(
@@ -456,6 +553,8 @@ def _live_answer_report_from_path(
             retrieval_limit=retrieval_limit,
             answer_latencies_seconds=answer_latencies_seconds,
         ),
+        cases,
+        candidates,
     )
 
 
@@ -488,6 +587,38 @@ def _load_optional_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _create_optional_judge(
+    *,
+    enabled: bool,
+    provider: str,
+    model: str,
+    ollama_base_url: str | None,
+) -> LLMJudge | None:
+    if not enabled:
+        return None
+    return create_judge(
+        provider,
+        model=model,
+        ollama_base_url=ollama_base_url or "http://localhost:11434",
+    )
+
+
+def _create_optional_fallback_judge(
+    *,
+    enabled: bool,
+    provider: str,
+    model: str,
+    ollama_base_url: str | None,
+) -> LLMJudge | None:
+    if not enabled or provider.strip().casefold() == "none":
+        return None
+    return create_judge(
+        provider,
+        model=model,
+        ollama_base_url=ollama_base_url or "http://localhost:11434",
+    )
 
 
 def _with_comparison(

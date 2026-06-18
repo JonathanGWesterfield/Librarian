@@ -16,6 +16,7 @@ def compare_report_documents(
     metrics = []
     metrics.extend(_retrieval_metrics(current, baseline))
     metrics.extend(_answer_metrics(current, baseline))
+    metrics.extend(_llm_judge_metrics(current, baseline))
     metrics.extend(_latency_metrics(current, baseline))
     return {
         "baseline": baseline_label,
@@ -168,6 +169,39 @@ def _latency_metrics(
                 current_answer.get("answer_total_seconds"),
                 baseline_answer.get("answer_total_seconds"),
                 LOWER_IS_BETTER,
+            ),
+        ]
+    )
+
+
+def _llm_judge_metrics(
+    current: dict[str, Any],
+    baseline: dict[str, Any],
+) -> list[dict[str, Any]]:
+    current_aggregate = current.get("llm_judge", {}).get("aggregate", {})
+    baseline_aggregate = baseline.get("llm_judge", {}).get("aggregate", {})
+    return _metric_rows(
+        [
+            (
+                "llm_judge",
+                "overall_score",
+                current_aggregate.get("mean_overall_score"),
+                baseline_aggregate.get("mean_overall_score"),
+                HIGHER_IS_BETTER,
+            ),
+            (
+                "llm_judge",
+                "groundedness",
+                current_aggregate.get("mean_groundedness"),
+                baseline_aggregate.get("mean_groundedness"),
+                HIGHER_IS_BETTER,
+            ),
+            (
+                "llm_judge",
+                "citation_accuracy",
+                current_aggregate.get("mean_citation_accuracy"),
+                baseline_aggregate.get("mean_citation_accuracy"),
+                HIGHER_IS_BETTER,
             ),
         ]
     )

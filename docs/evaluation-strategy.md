@@ -115,6 +115,42 @@ Risks:
 For Librarian, prefer local evaluation first when possible, with Codex/OpenAI as
 an optional evaluator for higher-quality offline reports.
 
+Librarian now supports optional LLM-as-judge scoring in evaluation reports. It
+is disabled by default so CI remains deterministic and free of model calls. When
+enabled, Codex is the default judge because it is expected to be substantially
+stronger than the tiny local models that fit comfortably on the Mac Mini.
+Ollama is wired as the fallback judge so local-only runs still have a path when
+Codex is unavailable.
+
+```bash
+python3 scripts/evaluate_retrieval.py --llm-judge
+```
+
+For live answer-quality evaluation:
+
+```bash
+python3 scripts/evaluate_retrieval.py --live --live-answers --llm-judge \
+  --database-url sqlite:///data/librarian.db \
+  --embedding-provider ollama \
+  --embedding-model all-minilm \
+  --generation-provider ollama \
+  --generation-model llama3.2:3b
+```
+
+The default judge provider is `codex`. The default fallback provider is
+`ollama`, using the generation model unless `--judge-fallback-model` is passed:
+
+```bash
+python3 scripts/evaluate_retrieval.py --llm-judge \
+  --judge-provider codex \
+  --judge-fallback-provider ollama \
+  --judge-fallback-model llama3.2:3b
+```
+
+Use `--judge-fallback-provider none` to fail fast when Codex is unavailable.
+Use `--judge-provider ollama` when intentionally benchmarking local judge
+quality.
+
 ## Pairwise Evaluation
 
 Pairwise evaluation compares two system outputs for the same query:
@@ -263,6 +299,11 @@ whether cited sources support covered concepts, and whether insufficient
 evidence answers refuse correctly. This is not a replacement for human review
 or an LLM-as-judge pass, but it gives us a stable first regression signal for
 generated answers.
+
+When `--llm-judge` is enabled, the report adds a separate `LLM Judge` section.
+This does not replace deterministic answer-quality scoring; it adds a second
+opinion with richer judgment over correctness, completeness, groundedness,
+citations, refusal behavior, and usefulness.
 
 The first live answer-quality corpus lives at
 `tests/fixtures/evaluation/golden_answer_quality_corpus.json`. It contains
