@@ -255,9 +255,11 @@ def _tag_generation_messages(
             role="system",
             content=(
                 "You generate concise topic tags for a local book library. "
-                "Return only valid JSON. Do not include genre labels such as "
-                "fantasy, science fiction, literary fiction, horror, romance, "
-                "or nonfiction. Genre classification is handled separately."
+                "Complete the user's JSON object template by replacing only "
+                "the example values. Return the completed JSON object and "
+                "nothing else. Do not include genre labels such as fantasy, "
+                "science fiction, literary fiction, horror, romance, or "
+                "nonfiction. Genre classification is handled separately."
             ),
         ),
         ChatMessage(
@@ -267,13 +269,15 @@ def _tag_generation_messages(
                 f"Authors: {authors}\n"
                 f"Maximum tags: {max_tags}\n\n"
                 "Create topic/theme/concept tags that would help a reader find "
-                "this book by subject. Return this exact shape:\n"
+                "this book by subject. Fill in this JSON object template:\n"
                 "{\n"
                 '  "tags": [\n'
-                '    {"tag": "short tag", "confidence": 0.0, '
-                '"rationale": "brief reason"}\n'
+                '    {"tag": "<short topic tag>", "confidence": <0.0 to 1.0>, '
+                '"rationale": "<brief reason>"}\n'
                 "  ]\n"
-                "}\n\n"
+                "}\n"
+                "Return only the completed JSON object. Do not wrap it in "
+                "Markdown.\n\n"
                 f"Book summary:\n{summary}"
             ),
         ),
