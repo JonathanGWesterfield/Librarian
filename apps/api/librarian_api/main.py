@@ -18,6 +18,7 @@ from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
+from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
 
 app = FastAPI(title="Librarian", version="0.1.0")
 
@@ -76,6 +77,21 @@ class ChatRequest(BaseModel):
     book_id: Optional[str] = None
     book_title: Optional[str] = None
     author: Optional[str] = None
+
+
+class BookSummaryRequest(BaseModel):
+    database_url: Optional[str] = None
+    book_title: Optional[str] = None
+    author: Optional[str] = None
+    generation_provider: Optional[str] = None
+    generation_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    detail: str = "medium"
+    chunks_per_section: int = 8
+    max_section_chars: int = 12000
+    force_refresh: bool = False
+    reset: bool = False
+    include_chapter_summaries: bool = True
 
 
 @app.get("/health")
@@ -203,6 +219,33 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
                 book_id=request.book_id,
                 book_title=request.book_title,
                 author=request.author,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.post("/books/{book_id}/summary")
+def summarize_book_endpoint(
+    book_id: str, request: BookSummaryRequest
+) -> dict[str, object]:
+    try:
+        result = summarize_book(
+            SummarizeBookOptions(
+                database_url=request.database_url or settings.database_url,
+                book_id=book_id,
+                book_title=request.book_title,
+                author=request.author,
+                generation_provider=request.generation_provider,
+                generation_model=request.generation_model,
+                ollama_base_url=request.ollama_base_url,
+                detail=request.detail,
+                chunks_per_section=request.chunks_per_section,
+                max_section_chars=request.max_section_chars,
+                force_refresh=request.force_refresh,
+                reset=request.reset,
+                include_chapter_summaries=request.include_chapter_summaries,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
