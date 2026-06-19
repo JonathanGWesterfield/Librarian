@@ -4,6 +4,38 @@
 This is a temporary user-facing shell until a desktop frontend exists. It calls
 the same chat service as the FastAPI endpoint: retrieve source chunks, ask the
 configured local generator, and print the answer with sources.
+
+Use this script when you want to manually test the full retrieval-plus-generation
+path without starting a browser or desktop frontend. Run it after books have
+already been ingested and embeddings have already been generated.
+
+Examples:
+
+Ask one question and print a human-readable answer with sources:
+    python3 scripts/chat.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --embedding-provider ollama \\
+      --embedding-model all-minilm \\
+      --generation-provider codex \\
+      "How brutal and terrible is war?"
+
+Restrict retrieval to one book title:
+    python3 scripts/chat.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --book-title "All Quiet on the Western Front" \\
+      "How does the author describe fear?"
+
+Start an interactive prompt:
+    python3 scripts/chat.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --generation-provider ollama \\
+      --generation-model llama3.2:3b
+
+Return machine-readable JSON for automation:
+    python3 scripts/chat.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --json \\
+      "What books discuss empire?"
 """
 from __future__ import annotations
 

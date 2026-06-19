@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# Stop the local Librarian development stack.
+#
+# This script stops Docker Compose services and, when explicitly requested, also
+# stops native Ollama or the Colima Docker runtime. By default it leaves Ollama
+# and the Docker runtime running so other local projects are not disrupted.
+#
+# Examples:
+#   scripts/stop_local.sh
+#   scripts/stop_local.sh --ollama
+#   scripts/stop_local.sh --docker-runtime
+#   scripts/stop_local.sh --ollama --docker-runtime
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

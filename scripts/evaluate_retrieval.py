@@ -1,4 +1,43 @@
 #!/usr/bin/env python3
+"""Generate Librarian retrieval and answer-quality evaluation reports.
+
+This script is the main evaluation runner for CI and local benchmarking. It can
+run deterministic fixture-based checks, live retrieval against the local SQLite
+database, live answer generation through the current chat stack, optional
+LLM-as-judge scoring, and run-over-run comparison metadata. It writes both
+machine-readable JSON and human-readable Markdown reports.
+
+Use this when you want to measure whether retrieval or answer changes are
+actually improving quality. The default mode is safe for CI because it runs
+against checked-in smoke fixtures. Live modes require an ingested local database
+and, for non-noop providers, the corresponding local services.
+
+Examples:
+
+Run the deterministic CI-style report and fail if thresholds are missed:
+    python3 scripts/evaluate_retrieval.py --check
+
+Generate deterministic JSON and Markdown reports:
+    python3 scripts/evaluate_retrieval.py \\
+      --output docs/evaluation-retrieval-report.json \\
+      --markdown-output docs/evaluation-report.md
+
+Run live retrieval against the local SQLite database:
+    python3 scripts/evaluate_retrieval.py \\
+      --live \\
+      --database-url sqlite:///data/librarian.db \\
+      --embedding-provider ollama \\
+      --embedding-model all-minilm
+
+Run live answer evaluation with Codex as the generator and LLM judge:
+    python3 scripts/evaluate_retrieval.py \\
+      --live \\
+      --live-answers \\
+      --llm-judge \\
+      --database-url sqlite:///data/librarian.db \\
+      --generation-provider codex \\
+      --generation-model codex
+"""
 from __future__ import annotations
 
 import argparse

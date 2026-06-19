@@ -1,4 +1,40 @@
 #!/usr/bin/env python3
+"""Rebuild stored chunk embeddings without deleting books or raw text.
+
+This script operates on chunks that already exist in the Librarian SQLite
+database. It is useful when benchmarking embedding models, changing providers,
+or repairing missing vectors after ingestion. It can delete embeddings for one
+provider/model pair or clear all embeddings before regenerating the selected
+provider/model.
+
+Use this after the local embedding provider is available. For Ollama, run
+`scripts/start_local.sh` first so the model service is reachable.
+
+Examples:
+
+Build missing embeddings with the configured defaults:
+    python3 scripts/rebuild_embeddings.py \\
+      --database-url sqlite:///data/librarian.db
+
+Reset and rebuild one Ollama embedding model:
+    python3 scripts/rebuild_embeddings.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --embedding-provider ollama \\
+      --embedding-model all-minilm \\
+      --reset
+
+Clear all stored embeddings before benchmarking a different model:
+    python3 scripts/rebuild_embeddings.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --embedding-provider ollama \\
+      --embedding-model nomic-embed-text \\
+      --reset-all
+
+Return machine-readable JSON for automation:
+    python3 scripts/rebuild_embeddings.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --json
+"""
 from __future__ import annotations
 
 import argparse
