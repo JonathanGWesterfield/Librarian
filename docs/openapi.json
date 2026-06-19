@@ -33,6 +33,10 @@
       "description": "Grounded answer synthesis over retrieved chunks."
     },
     {
+      "name": "summaries",
+      "description": "On-demand chapter and book summarization workflows."
+    },
+    {
       "name": "library",
       "description": "Read-only library record views."
     }
@@ -410,6 +414,77 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/books/{book_id}/summary": {
+      "post": {
+        "tags": ["summaries"],
+        "operationId": "summarizeBook",
+        "summary": "Summarize one ingested book",
+        "description": "Generates or reuses chapter-level summaries, then synthesizes a book-level summary. Summaries are generated on demand and can be reset for provider/model benchmarking.",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact stored book id to summarize."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookSummaryRequest"
+              },
+              "examples": {
+                "codex": {
+                  "summary": "Summarize with Codex",
+                  "value": {
+                    "database_url": "sqlite:///data/librarian.db",
+                    "generation_provider": "codex",
+                    "generation_model": "codex",
+                    "detail": "medium",
+                    "reset": false
+                  }
+                },
+                "ollamaRebuild": {
+                  "summary": "Reset and rebuild with Ollama",
+                  "value": {
+                    "database_url": "sqlite:///data/librarian.db",
+                    "generation_provider": "ollama",
+                    "generation_model": "llama3.2:3b",
+                    "detail": "medium",
+                    "reset": true,
+                    "chunks_per_section": 8,
+                    "max_section_chars": 12000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated or cached book summary with optional chapter summaries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookSummaryResponse"
                 }
               }
             }
@@ -1039,6 +1114,169 @@
           }
         }
       },
+      "BookSummaryRequest": {
+        "type": "object",
+        "properties": {
+          "database_url": {
+            "type": ["string", "null"],
+            "example": "sqlite:///data/librarian.db"
+          },
+          "book_title": {
+            "type": ["string", "null"],
+            "description": "Optional title filter used for validation/logging when selecting a book."
+          },
+          "author": {
+            "type": ["string", "null"],
+            "description": "Optional author filter used for validation/logging when selecting a book."
+          },
+          "generation_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", "codex", null]
+          },
+          "generation_model": {
+            "type": ["string", "null"],
+            "example": "codex"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          },
+          "detail": {
+            "type": "string",
+            "enum": ["short", "medium", "detailed"],
+            "default": "medium"
+          },
+          "chunks_per_section": {
+            "type": "integer",
+            "default": 8,
+            "minimum": 1
+          },
+          "max_section_chars": {
+            "type": "integer",
+            "default": 12000,
+            "minimum": 1000,
+            "description": "Maximum source characters to send in one section summary prompt."
+          },
+          "force_refresh": {
+            "type": "boolean",
+            "default": false
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false,
+            "description": "Delete matching summaries before regenerating them."
+          },
+          "include_chapter_summaries": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "BookSummaryResponse": {
+        "type": "object",
+        "required": [
+          "book_id",
+          "title",
+          "authors",
+          "provider",
+          "model",
+          "detail",
+          "summary",
+          "source_hash",
+          "chapter_summary_count",
+          "cached_chapter_summaries",
+          "generated_chapter_summaries",
+          "deleted_summaries",
+          "chapter_summaries"
+        ],
+        "properties": {
+          "book_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "source_hash": {
+            "type": "string"
+          },
+          "chapter_summary_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cached_chapter_summaries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "generated_chapter_summaries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deleted_summaries": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "chapter_summaries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChapterSummary"
+            }
+          }
+        }
+      },
+      "ChapterSummary": {
+        "type": "object",
+        "required": [
+          "chapter_key",
+          "chapter_title",
+          "chunk_start_index",
+          "chunk_end_index",
+          "summary",
+          "source_hash",
+          "cached"
+        ],
+        "properties": {
+          "chapter_key": {
+            "type": "string"
+          },
+          "chapter_title": {
+            "type": ["string", "null"]
+          },
+          "chunk_start_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "chunk_end_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "string"
+          },
+          "source_hash": {
+            "type": "string"
+          },
+          "cached": {
+            "type": "boolean"
+          }
+        }
+      },
       "ChatRequest": {
         "type": "object",
         "required": ["question"],
@@ -1061,7 +1299,7 @@
           },
           "generation_provider": {
             "type": ["string", "null"],
-            "enum": ["noop", "ollama", null]
+            "enum": ["noop", "ollama", "codex", null]
           },
           "generation_model": {
             "type": ["string", "null"],
