@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# Run the Librarian Python unit test suite.
+#
+# This is the fast local test runner for day-to-day iteration. It sets
+# PYTHONPATH to include the repo packages directory and then runs unittest
+# discovery, or a specific unittest module if one is provided.
+#
+# Examples:
+#   scripts/test.sh
+#   scripts/test.sh --verbose
+#   scripts/test.sh tests.ingestion.test_scan
+#   scripts/test.sh --failfast tests.ingestion.test_epub
 set -euo pipefail
 
 usage() {

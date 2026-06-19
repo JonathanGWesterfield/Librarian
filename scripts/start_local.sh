@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# Start the local Librarian development stack.
+#
+# This script starts Docker or Colima when possible, starts native Ollama,
+# ensures the configured embedding/generation models are pulled, and starts the
+# Docker Compose services. It is the normal first command before using the API,
+# chat CLI, playground CLI, or live evaluation commands.
+#
+# Examples:
+#   scripts/start_local.sh
+#   LIBRARIAN_EMBEDDING_MODEL=all-minilm scripts/start_local.sh
+#   LIBRARIAN_GENERATION_MODEL=llama3.2:3b scripts/start_local.sh
+#   LIBRARIAN_PULL_GENERATION_MODEL=false scripts/start_local.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

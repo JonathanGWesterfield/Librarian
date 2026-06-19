@@ -6,6 +6,38 @@ commands for ingesting EPUBs, previewing books/chunks, rebuilding embeddings,
 running local search, and inspecting database state. Product code should call
 the package services or FastAPI endpoints rather than shelling out to this
 script.
+
+Use this when you want a tactile view of the local pipeline while building or
+debugging: ingest, inspect database counts, list books/chunks/embeddings, rebuild
+vectors, and run retrieval searches from one CLI.
+
+Examples:
+
+Show database state:
+    python3 scripts/play/librarian.py \\
+      --database-url sqlite:///data/librarian.db \\
+      state
+
+Ingest EPUBs from a local source directory:
+    python3 scripts/play/librarian.py \\
+      --database-url sqlite:///data/librarian.db \\
+      ingest \\
+      --books-dir ./Epub-Books
+
+Rebuild embeddings after changing the embedding model:
+    python3 scripts/play/librarian.py \\
+      --database-url sqlite:///data/librarian.db \\
+      embed \\
+      --embedding-provider ollama \\
+      --embedding-model all-minilm \\
+      --reset
+
+Search within one author or book:
+    python3 scripts/play/librarian.py \\
+      --database-url sqlite:///data/librarian.db \\
+      search "How brutal and terrible is war?" \\
+      --author "Erich Maria Remarque" \\
+      --limit 10
 """
 from __future__ import annotations
 

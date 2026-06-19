@@ -1,9 +1,42 @@
 #!/usr/bin/env python3
-"""Narrow CLI wrapper for the canonical EPUB ingestion workflow.
+"""Playground wrapper for the canonical EPUB ingestion workflow.
 
-This script exists for direct local/batch ingestion. It delegates the real
-parse/chunk/store behavior to librarian_ingestion.ingest.run_ingestion, which
-is also used by API and playground entrypoints.
+This script exists for direct local and batch ingestion while developing the
+ingestion pipeline. It delegates the real parse/chunk/store behavior to
+librarian_ingestion.ingest.run_ingestion, which is also used by API and other
+entrypoints. It is kept under scripts/play because it is a developer convenience
+tool rather than the intended product surface.
+
+Use this when you want to quickly scan EPUBs, populate the local SQLite
+database, optionally generate embeddings during ingestion, or inspect ingestion
+summary output without calling FastAPI.
+
+Examples:
+
+Ingest EPUBs from the configured source directory:
+    python3 scripts/play/ingest_epubs.py \\
+      --database-url sqlite:///data/librarian.db
+
+Ingest EPUBs from an explicit local directory and include discovered files:
+    python3 scripts/play/ingest_epubs.py \\
+      --books-dir ./Epub-Books \\
+      --database-url sqlite:///data/librarian.db \\
+      --list
+
+Force re-parse unchanged EPUBs and generate Ollama embeddings:
+    python3 scripts/play/ingest_epubs.py \\
+      --books-dir ./Epub-Books \\
+      --database-url sqlite:///data/librarian.db \\
+      --force \\
+      --embed \\
+      --embedding-provider ollama \\
+      --embedding-model all-minilm
+
+Return machine-readable JSON for inspection:
+    python3 scripts/play/ingest_epubs.py \\
+      --books-dir ./Epub-Books \\
+      --database-url sqlite:///data/librarian.db \\
+      --json
 """
 from __future__ import annotations
 

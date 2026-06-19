@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# Prepare a local Librarian development environment.
+#
+# This script checks required system tools, optionally installs Homebrew-managed
+# CLI dependencies, creates the repo virtual environment, and installs the API,
+# broker, and package projects in editable mode. It does not ingest books or
+# start services; use scripts/start_local.sh after setup completes.
+#
+# Examples:
+#   scripts/setup_local.sh
+#   scripts/setup_local.sh --install-system-deps
+#   PYTHON_BIN=/opt/homebrew/bin/python3 scripts/setup_local.sh
+#   scripts/setup_local.sh && scripts/start_local.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
