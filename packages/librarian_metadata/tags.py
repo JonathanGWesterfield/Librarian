@@ -37,6 +37,28 @@ class GenerateBookTagsOptions:
 
 
 @dataclass(frozen=True)
+class ListBookTagsOptions:
+    database_url: str | None = None
+    book_id: str | None = None
+    book_title: str | None = None
+    author: str | None = None
+    tag_type: str | None = None
+    source: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
+@dataclass(frozen=True)
+class DeleteBookTagsOptions:
+    database_url: str | None = None
+    book_id: str | None = None
+    book_title: str | None = None
+    author: str | None = None
+    tag_type: str | None = TAG_TYPE_TOPIC
+    source: str | None = TAG_SOURCE_LLM
+
+
+@dataclass(frozen=True)
 class GeneratedBookTag:
     tag: str
     confidence: float | None
@@ -201,6 +223,56 @@ def generate_book_tags(options: GenerateBookTagsOptions) -> BookTagGenerationRes
         store.close()
 
 
+def list_book_tags(options: ListBookTagsOptions) -> list[StoredBookTagRecord]:
+    database_url = resolve_database_url(options.database_url)
+    provider = _clean_filter(options.provider)
+    model = _clean_filter(options.model)
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        book_id = _resolve_optional_book_id(
+            store,
+            book_id=options.book_id,
+            book_title=options.book_title,
+            author=options.author,
+        )
+        tags = store.list_book_tags(
+            book_id=book_id,
+            tag_type=options.tag_type,
+            source=options.source,
+        )
+        return [
+            tag
+            for tag in tags
+            if (provider is None or tag.provider == provider)
+            and (model is None or tag.model == model)
+        ]
+    finally:
+        store.close()
+
+
+def delete_book_tags(options: DeleteBookTagsOptions) -> int:
+    database_url = resolve_database_url(options.database_url)
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        book_id = _resolve_optional_book_id(
+            store,
+            book_id=options.book_id,
+            book_title=options.book_title,
+            author=options.author,
+        )
+        if book_id is None:
+            raise ValueError("deleting book tags requires --book-id or --book-title")
+        return store.delete_book_tags(
+            book_id=book_id,
+            tag_type=options.tag_type,
+            source=options.source,
+        )
+    finally:
+        store.close()
+
+
 def _resolve_single_book(
     store,
     *,
@@ -240,6 +312,23 @@ def _resolve_single_book(
             f"{len(matches)} books: {titles}"
         )
     return matches[0]
+
+
+def _resolve_optional_book_id(
+    store,
+    *,
+    book_id: str | None,
+    book_title: str | None,
+    author: str | None,
+) -> str | None:
+    if book_id or book_title or author:
+        return _resolve_single_book(
+            store,
+            book_id=book_id,
+            book_title=book_title,
+            author=author,
+        ).id
+    return None
 
 
 def _tag_generation_messages(
