@@ -140,13 +140,16 @@ def create_generator(
     provider: str,
     *,
     model: str,
-    ollama_base_url: str,
+    ollama_base_url: str | None = None,
 ) -> Generator:
     normalized = provider.strip().casefold()
     if normalized == "noop":
         return NoopGenerator()
     if normalized == "ollama":
-        return OllamaGenerator(model=model, base_url=ollama_base_url)
+        return OllamaGenerator(
+            model=model,
+            base_url=resolve_ollama_base_url(ollama_base_url),
+        )
     if normalized == "codex":
         return CodexGenerator(
             model=model or "codex",
@@ -166,11 +169,10 @@ def create_configured_generator(
         resolved_model = "codex"
     else:
         resolved_model = resolve_generation_model(model)
-    resolved_ollama_base_url = resolve_ollama_base_url(ollama_base_url)
     return create_generator(
         resolved_provider,
         model=resolved_model,
-        ollama_base_url=resolved_ollama_base_url,
+        ollama_base_url=ollama_base_url,
     )
 
 
