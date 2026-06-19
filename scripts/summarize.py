@@ -1,5 +1,58 @@
 #!/usr/bin/env python3
-"""Generate on-demand book summaries from stored Librarian chunks."""
+"""Developer CLI for on-demand book and chapter summarization.
+
+This script is intentionally a narrow, single-book tool. It does not ingest EPUBs
+and it does not scan a directory of books. Instead, it reads chunks that already
+exist in the configured Librarian SQLite database, generates or reuses cached
+chapter summaries, and then synthesizes a book-level summary.
+
+Use this when you want to manually inspect summary quality, rebuild summaries
+with a different generation provider/model, or clear cached summaries before a
+benchmark. Batch summarization can be composed by running this script once per
+book, including in parallel, while keeping this command easy to debug.
+
+Examples:
+
+Generate a human-readable Codex summary for one ingested book:
+    python3 scripts/summarize.py \\
+      --database-url sqlite:///data/librarian.db \\
+      book \\
+      --book-title "Forward the Foundation" \\
+      --author "Isaac Asimov" \\
+      --generation-provider codex \\
+      --generation-model codex \\
+      --detail medium
+
+Return machine-readable JSON for automation or inspection:
+    python3 scripts/summarize.py \\
+      --database-url sqlite:///data/librarian.db \\
+      book \\
+      --book-title "Forward the Foundation" \\
+      --author "Isaac Asimov" \\
+      --generation-provider codex \\
+      --json
+
+Reset and rebuild summaries with an Ollama model:
+    python3 scripts/summarize.py \\
+      --database-url sqlite:///data/librarian.db \\
+      book \\
+      --book-title "Forward the Foundation" \\
+      --author "Isaac Asimov" \\
+      --generation-provider ollama \\
+      --generation-model llama3.2:3b \\
+      --detail medium \\
+      --reset
+
+Delete cached summaries for a provider/model/detail combination:
+    python3 scripts/summarize.py \\
+      --database-url sqlite:///data/librarian.db \\
+      delete \\
+      --book-title "Forward the Foundation" \\
+      --author "Isaac Asimov" \\
+      --generation-provider codex \\
+      --generation-model codex \\
+      --detail medium
+"""
 from __future__ import annotations
 
 import argparse
