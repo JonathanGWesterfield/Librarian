@@ -52,7 +52,6 @@ class GenerationProviderTests(unittest.TestCase):
         generator = create_generator(
             "codex",
             model="codex",
-            ollama_base_url="http://localhost:11434",
         )
 
         self.assertIsInstance(generator, CodexGenerator)
