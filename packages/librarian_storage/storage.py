@@ -133,6 +133,36 @@ class BookSummaryRecord:
 
 
 @dataclass(frozen=True)
+class BookTagRecord:
+    id: str
+    book_id: str
+    tag: str
+    tag_type: str
+    source: str
+    confidence: float | None = None
+    provider: str | None = None
+    model: str | None = None
+    rationale: str | None = None
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass(frozen=True)
+class StoredBookTagRecord:
+    id: str
+    book_id: str
+    tag: str
+    tag_type: str
+    source: str
+    confidence: float | None
+    provider: str | None
+    model: str | None
+    rationale: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class StoredEmbeddingRecord:
     id: str
     chunk_id: str
@@ -290,6 +320,27 @@ class IngestionStore(Protocol):
     ) -> int:
         ...
 
+    def save_book_tags(self, tags: list[BookTagRecord]) -> None:
+        ...
+
+    def list_book_tags(
+        self,
+        *,
+        book_id: str | None = None,
+        tag_type: str | None = None,
+        source: str | None = None,
+    ) -> list[StoredBookTagRecord]:
+        ...
+
+    def delete_book_tags(
+        self,
+        *,
+        book_id: str | None = None,
+        tag_type: str | None = None,
+        source: str | None = None,
+    ) -> int:
+        ...
+
     def close(self) -> None:
         ...
 
@@ -403,6 +454,15 @@ class SQLiteIngestionStore:
             if existing and existing.id != book.id:
                 self._connection.execute(
                     "DELETE FROM chunks WHERE book_id = ?", (existing.id,)
+                )
+                self._connection.execute(
+                    "DELETE FROM chapter_summaries WHERE book_id = ?", (existing.id,)
+                )
+                self._connection.execute(
+                    "DELETE FROM book_summaries WHERE book_id = ?", (existing.id,)
+                )
+                self._connection.execute(
+                    "DELETE FROM book_tags WHERE book_id = ?", (existing.id,)
                 )
 
             self._connection.execute(
@@ -985,6 +1045,119 @@ class SQLiteIngestionStore:
             )
         return chapter_cursor.rowcount + book_cursor.rowcount
 
+    def save_book_tags(self, tags: list[BookTagRecord]) -> None:
+        if not tags:
+            return
+
+        with self._connection:
+            self._connection.executemany(
+                """
+                INSERT INTO book_tags (
+                    id, book_id, tag, tag_key, tag_type, source, confidence,
+                    provider, model, rationale, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(book_id, tag_type, tag_key, source, provider, model)
+                DO UPDATE SET
+                    id = excluded.id,
+                    tag = excluded.tag,
+                    confidence = excluded.confidence,
+                    rationale = excluded.rationale,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        tag.id,
+                        tag.book_id,
+                        tag.tag.strip(),
+                        _book_tag_key(tag.tag),
+                        tag.tag_type.strip().casefold(),
+                        tag.source.strip().casefold(),
+                        tag.confidence,
+                        _empty_if_none(tag.provider),
+                        _empty_if_none(tag.model),
+                        tag.rationale,
+                        tag.created_at,
+                        tag.updated_at,
+                    )
+                    for tag in tags
+                ],
+            )
+
+    def list_book_tags(
+        self,
+        *,
+        book_id: str | None = None,
+        tag_type: str | None = None,
+        source: str | None = None,
+    ) -> list[StoredBookTagRecord]:
+        where: list[str] = []
+        parameters: list[object] = []
+        if book_id:
+            where.append("book_id = ?")
+            parameters.append(book_id)
+        if tag_type:
+            where.append("tag_type = ?")
+            parameters.append(tag_type.strip().casefold())
+        if source:
+            where.append("source = ?")
+            parameters.append(source.strip().casefold())
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+        rows = self._connection.execute(
+            f"""
+            SELECT id, book_id, tag, tag_type, source, confidence, provider,
+                   model, rationale, created_at, updated_at
+            FROM book_tags
+            {where_sql}
+            ORDER BY book_id ASC, tag_type ASC, tag_key ASC, source ASC,
+                     provider ASC, model ASC
+            """,
+            parameters,
+        ).fetchall()
+        return [
+            StoredBookTagRecord(
+                id=row[0],
+                book_id=row[1],
+                tag=row[2],
+                tag_type=row[3],
+                source=row[4],
+                confidence=row[5],
+                provider=_none_if_empty(row[6]),
+                model=_none_if_empty(row[7]),
+                rationale=row[8],
+                created_at=row[9],
+                updated_at=row[10],
+            )
+            for row in rows
+        ]
+
+    def delete_book_tags(
+        self,
+        *,
+        book_id: str | None = None,
+        tag_type: str | None = None,
+        source: str | None = None,
+    ) -> int:
+        where: list[str] = []
+        parameters: list[object] = []
+        if book_id:
+            where.append("book_id = ?")
+            parameters.append(book_id)
+        if tag_type:
+            where.append("tag_type = ?")
+            parameters.append(tag_type.strip().casefold())
+        if source:
+            where.append("source = ?")
+            parameters.append(source.strip().casefold())
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+
+        with self._connection:
+            cursor = self._connection.execute(
+                f"DELETE FROM book_tags{where_sql}", parameters
+            )
+        return cursor.rowcount
+
     def close(self) -> None:
         if self.connection is not None:
             self.connection.close()
@@ -1036,6 +1209,21 @@ def normalize_metadata_value(value: Optional[str]) -> str | None:
         return None
     normalized = re.sub(r"\s+", " ", value).strip().casefold()
     return normalized or None
+
+
+def _book_tag_key(tag: str) -> str:
+    normalized = normalize_metadata_value(tag)
+    if not normalized:
+        raise ValueError("book tag must not be empty")
+    return normalized
+
+
+def _empty_if_none(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _none_if_empty(value: str) -> str | None:
+    return value or None
 
 
 def _decode_authors(authors_json: str) -> list[str]:
@@ -1170,4 +1358,26 @@ CREATE TABLE IF NOT EXISTS book_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_book_summaries_book_provider_model
 ON book_summaries(book_id, provider, model, detail);
+
+CREATE TABLE IF NOT EXISTS book_tags (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    tag TEXT NOT NULL,
+    tag_key TEXT NOT NULL,
+    tag_type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    confidence REAL,
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    rationale TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(book_id, tag_type, tag_key, source, provider, model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_book_tags_book_type
+ON book_tags(book_id, tag_type);
+
+CREATE INDEX IF NOT EXISTS idx_book_tags_type_key
+ON book_tags(tag_type, tag_key);
 """
