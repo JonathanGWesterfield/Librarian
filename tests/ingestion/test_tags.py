@@ -12,7 +12,14 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.generation import ChatMessage
-from librarian_metadata.tags import GenerateBookTagsOptions, generate_book_tags
+from librarian_metadata.tags import (
+    DeleteBookTagsOptions,
+    GenerateBookTagsOptions,
+    ListBookTagsOptions,
+    delete_book_tags,
+    generate_book_tags,
+    list_book_tags,
+)
 from librarian_storage.storage import (
     BookRecord,
     BookSummaryRecord,
@@ -200,6 +207,72 @@ class BookTagGenerationTests(unittest.TestCase):
 
         with SQLiteIngestionStore(self.database_path) as store:
             self.assertEqual(store.list_book_tags(book_id="book-1"), [])
+
+    def test_list_and_delete_book_tags_use_book_filters(self) -> None:
+        """Verify tag inspection and cleanup can target a resolved book.
+        The CLI should be able to use title/author filters without reimplementing
+        storage lookup logic or risking accidental deletion across the library.
+        """
+        self._seed_book_summary()
+        generator = _FakeGenerator(
+            json.dumps(
+                {
+                    "tags": [
+                        {
+                            "tag": "psychohistory",
+                            "confidence": 0.94,
+                            "rationale": "Central predictive science.",
+                        }
+                    ]
+                }
+            )
+        )
+        with patch(
+            "librarian_metadata.tags.create_configured_generator",
+            return_value=generator,
+        ):
+            generate_book_tags(
+                GenerateBookTagsOptions(
+                    database_url=self.database_url,
+                    book_id="book-1",
+                    source_summary_provider="codex",
+                    source_summary_model="codex",
+                )
+            )
+
+        listed = list_book_tags(
+            ListBookTagsOptions(
+                database_url=self.database_url,
+                book_title="Forward the Foundation",
+                author="Isaac Asimov",
+                tag_type="topic",
+                source="llm",
+                provider="codex",
+                model="codex",
+            )
+        )
+        deleted = delete_book_tags(
+            DeleteBookTagsOptions(
+                database_url=self.database_url,
+                book_title="Forward the Foundation",
+                author="Isaac Asimov",
+            )
+        )
+        remaining = list_book_tags(
+            ListBookTagsOptions(database_url=self.database_url, book_id="book-1")
+        )
+
+        self.assertEqual([tag.tag for tag in listed], ["psychohistory"])
+        self.assertEqual(deleted, 1)
+        self.assertEqual(remaining, [])
+
+    def test_delete_book_tags_requires_book_filter(self) -> None:
+        """Verify tag deletion has a guardrail against library-wide deletes.
+        We can add an explicit all-library delete later, but the first CLI should
+        require a book target for destructive operations.
+        """
+        with self.assertRaisesRegex(ValueError, "requires --book-id or --book-title"):
+            delete_book_tags(DeleteBookTagsOptions(database_url=self.database_url))
 
     def _seed_book_summary(self) -> None:
         book = BookRecord(
