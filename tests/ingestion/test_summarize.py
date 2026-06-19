@@ -191,7 +191,7 @@ class _FakeGenerator:
     def __init__(self) -> None:
         self.calls: list[list[object]] = []
 
-    def generate(self, messages):
+    def generate(self, messages, *, response_format=None):
         self.calls.append(messages)
         return f"Generated summary {len(self.calls)}"
 

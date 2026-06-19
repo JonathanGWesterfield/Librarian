@@ -79,7 +79,7 @@ class _FakeGenerator:
     def __init__(self) -> None:
         self.messages = []
 
-    def generate(self, messages):
+    def generate(self, messages, *, response_format=None):
         self.messages = messages
         return "War is described as terrifying. [S1]"
 

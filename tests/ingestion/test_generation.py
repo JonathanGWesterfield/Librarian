@@ -113,6 +113,33 @@ class GenerationProviderTests(unittest.TestCase):
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertEqual(answer, "Grounded answer.")
 
+    def test_ollama_generator_can_request_json_response_format(self) -> None:
+        """Verify structured LLM tasks can ask Ollama for JSON mode.
+        Tag and metadata generation should use transport-level format support
+        where the local provider offers it instead of relying only on prompts.
+        """
+        response = _FakeResponse(
+            {
+                "model": "llama3.2:3b",
+                "message": {"role": "assistant", "content": '{"tags":[]}'},
+            }
+        )
+
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            answer = OllamaGenerator(
+                model="llama3.2:3b",
+                base_url="http://localhost:11434",
+            ).generate(
+                [ChatMessage(role="user", content="Return tags.")],
+                response_format="json",
+            )
+
+        http_request = urlopen.call_args.args[0]
+        payload = json.loads(http_request.data.decode("utf-8"))
+
+        self.assertEqual(payload["format"], "json")
+        self.assertEqual(answer, '{"tags":[]}')
+
     def test_codex_generator_runs_codex_exec_with_prompt(self) -> None:
         """Verify the Codex adapter shells out through `codex exec`.
         The adapter keeps CLI usage behind the generator protocol so callers

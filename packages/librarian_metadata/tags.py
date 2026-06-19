@@ -146,12 +146,17 @@ def generate_book_tags(options: GenerateBookTagsOptions) -> BookTagGenerationRes
             )
 
         generated_tags = _parse_tag_response(
+            # Ollama supports a transport-level JSON response mode through the
+            # shared generator boundary. Codex CLI does not currently expose an
+            # equivalent structured-output flag here, so Codex responses are
+            # still validated before anything is persisted.
             generator.generate(
                 _tag_generation_messages(
                     book=book,
                     summary=summary.summary,
                     max_tags=max_tags,
-                )
+                ),
+                response_format="json",
             ),
             max_tags=max_tags,
         )
