@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import sys
 import unittest
@@ -26,9 +28,13 @@ class _FakeGenerator:
     def __init__(self, response: str) -> None:
         self.response = response
         self.messages: list[ChatMessage] = []
+        self.response_format: str | None = None
 
-    def generate(self, messages: list[ChatMessage]) -> str:
+    def generate(
+        self, messages: list[ChatMessage], *, response_format: str | None = None
+    ) -> str:
         self.messages = messages
+        self.response_format = response_format
         return self.response
 
 
@@ -89,6 +95,7 @@ class BookTagGenerationTests(unittest.TestCase):
         self.assertEqual(stored_tags[0].provider, "codex")
         self.assertEqual(stored_tags[0].tag_type, "topic")
         self.assertIn("Do not include genre labels", generator.messages[0].content)
+        self.assertEqual(generator.response_format, "json")
 
     def test_generate_book_tags_reuses_cached_tags(self) -> None:
         """Verify repeated tag generation can avoid another LLM call.

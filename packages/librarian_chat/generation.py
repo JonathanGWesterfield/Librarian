@@ -30,7 +30,9 @@ class Generator(Protocol):
     provider: str
     model: str
 
-    def generate(self, messages: list[ChatMessage]) -> str:
+    def generate(
+        self, messages: list[ChatMessage], *, response_format: str | None = None
+    ) -> str:
         ...
 
 
@@ -39,7 +41,9 @@ class NoopGenerator:
     provider: str = "noop"
     model: str = "noop"
 
-    def generate(self, messages: list[ChatMessage]) -> str:
+    def generate(
+        self, messages: list[ChatMessage], *, response_format: str | None = None
+    ) -> str:
         return "No generation provider is configured."
 
 
@@ -50,16 +54,21 @@ class OllamaGenerator:
     timeout_seconds: float = 180.0
     provider: str = "ollama"
 
-    def generate(self, messages: list[ChatMessage]) -> str:
+    def generate(
+        self, messages: list[ChatMessage], *, response_format: str | None = None
+    ) -> str:
+        payload_dict: dict[str, object] = {
+            "model": self.model,
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in messages
+            ],
+            "stream": False,
+        }
+        if response_format == "json":
+            payload_dict["format"] = "json"
         payload = json.dumps(
-            {
-                "model": self.model,
-                "messages": [
-                    {"role": message.role, "content": message.content}
-                    for message in messages
-                ],
-                "stream": False,
-            }
+            payload_dict
         ).encode("utf-8")
         endpoint = f"{self.base_url.rstrip('/')}/api/chat"
         http_request = request.Request(
@@ -93,7 +102,9 @@ class CodexGenerator:
     timeout_seconds: float = 240.0
     provider: str = "codex"
 
-    def generate(self, messages: list[ChatMessage]) -> str:
+    def generate(
+        self, messages: list[ChatMessage], *, response_format: str | None = None
+    ) -> str:
         prompt = "\n\n".join(
             f"{message.role.upper()}:\n{message.content}" for message in messages
         )
