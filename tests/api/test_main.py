@@ -16,6 +16,7 @@ from librarian_storage.storage import (
     SQLiteIngestionStore,
     utc_now,
 )
+from librarian_summarization.summarize import BookSummary
 
 try:
     from fastapi.testclient import TestClient
@@ -209,6 +210,46 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["generation_model"], "llama3.2:3b")
         self.assertEqual(payload["filters"], {"book_title": "All Quiet"})
         self.assertEqual(payload["sources"][0]["source_id"], "S1")
+
+    def test_book_summary_endpoint_returns_on_demand_summary(self) -> None:
+        """Verify desktop clients can request a first-class book summary.
+        The endpoint should stay separate from chat routing and expose summary
+        cache/rebuild metadata for local experimentation.
+        """
+        fake_summary = BookSummary(
+            book_id="forward-foundation",
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            provider="codex",
+            model="codex",
+            detail="medium",
+            summary="Hari Seldon's work on psychohistory moves toward Foundation.",
+            source_hash="hash",
+            chapter_summary_count=1,
+            cached_chapter_summaries=0,
+            generated_chapter_summaries=1,
+            deleted_summaries=0,
+            chapter_summaries=[],
+        )
+
+        with patch("librarian_api.main.summarize_book", return_value=fake_summary):
+            response = self.client.post(
+                "/books/forward-foundation/summary",
+                json={
+                    "database_url": self.database_url,
+                    "generation_provider": "codex",
+                    "generation_model": "codex",
+                    "detail": "medium",
+                    "reset": True,
+                },
+            )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["title"], "Forward the Foundation")
+        self.assertEqual(payload["provider"], "codex")
+        self.assertEqual(payload["chapter_summary_count"], 1)
 
     def _seed_search_fixture(self) -> None:
         book = BookRecord(
