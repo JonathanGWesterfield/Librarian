@@ -95,6 +95,8 @@ class BookTagGenerationTests(unittest.TestCase):
         self.assertEqual(stored_tags[0].provider, "codex")
         self.assertEqual(stored_tags[0].tag_type, "topic")
         self.assertIn("Do not include genre labels", generator.messages[0].content)
+        self.assertIn("Fill in this JSON object template", generator.messages[1].content)
+        self.assertIn("Return only the completed JSON object", generator.messages[1].content)
         self.assertEqual(generator.response_format, "json")
 
     def test_generate_book_tags_reuses_cached_tags(self) -> None:
