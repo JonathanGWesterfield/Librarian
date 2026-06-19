@@ -28,5 +28,6 @@ packages = [
   "librarian_search",
   "librarian_chat",
   "librarian_summarization",
+  "librarian_metadata",
   "librarian_evaluation",
 ]
