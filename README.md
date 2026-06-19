@@ -154,20 +154,17 @@ scripts/               Developer helper scripts
 
 ## Current Status
 
-Librarian is currently in Phase 4: Evaluation and Quality Reports. The core
+Librarian is currently in Phase 5: Better Book Intelligence. The core
 local RAG loop is working end to end: EPUB ingestion, chunk storage, local
 embeddings through Ollama, SQLite-backed vector search, a FastAPI surface, and
 a standalone chat CLI.
 
-The current engineering focus is making quality measurable. The repo now has
-deterministic retrieval and answer-quality smoke reports for CI, plus optional
-live reports that run the golden corpus against an ingested local SQLite
-database. Live report generation can evaluate both retrieval quality and the
-answers produced by the current chat stack.
+The repo now has deterministic retrieval and answer-quality smoke reports for
+CI, optional live reports that run the golden corpus against an ingested local
+SQLite database, and first-pass scoped retrieval by book and author.
 
-The next roadmap pressure points are richer report metadata, latency tracking,
-larger golden-corpus coverage, and then retrieval improvements such as hybrid
-search or reranking.
+The current engineering focus is book intelligence beyond chat: on-demand
+chapter/book summaries, richer metadata, and later genre/topic tagging.
 
 ## Roadmap
 
@@ -225,9 +222,9 @@ See the evaluation north star:
 ### Phase 5: Better Book Intelligence
 
 - Add author-level and book-level filtering.
+- Add chapter summaries generated only on demand.
 - Add recommendation-oriented queries.
 - Add genre/topic tagging.
-- Add chapter summaries generated only on demand.
 - Add saved searches or reading lists.
 
 ### Phase 6: Hybrid Retrieval
@@ -372,6 +369,53 @@ python3 scripts/chat.py \
   "How brutal and terrible is war?"
 ```
 
+For on-demand book summarization, use the standalone summary CLI. This example
+targets the current test book for human review:
+
+```bash
+python3 scripts/summarize.py \
+  --database-url sqlite:///data/librarian.db \
+  book \
+  --book-title "Forward the Foundation" \
+  --author "Isaac Asimov" \
+  --generation-provider codex \
+  --generation-model codex \
+  --detail medium \
+  --max-section-chars 12000
+```
+
+If your terminal cannot find the bundled Codex executable, set
+`LIBRARIAN_CODEX_EXECUTABLE` to the full path returned by `which codex` in an
+environment where Codex is available.
+
+To rebuild summaries for a different provider/model, either reset during the
+summary run:
+
+```bash
+python3 scripts/summarize.py \
+  --database-url sqlite:///data/librarian.db \
+  book \
+  --book-title "Forward the Foundation" \
+  --author "Isaac Asimov" \
+  --generation-provider ollama \
+  --generation-model llama3.2:3b \
+  --detail medium \
+  --reset
+```
+
+Or delete cached summaries directly:
+
+```bash
+python3 scripts/summarize.py \
+  --database-url sqlite:///data/librarian.db \
+  delete \
+  --book-title "Forward the Foundation" \
+  --author "Isaac Asimov" \
+  --generation-provider codex \
+  --generation-model codex \
+  --detail medium
+```
+
 For automation or a future desktop shell, request JSON output:
 
 ```bash
@@ -394,6 +438,11 @@ POST /search               body: query, database_url, embedding_provider,
 POST /chat                 body: question, database_url, embedding_provider,
                             embedding_model, generation_provider,
                             generation_model, ollama_base_url, retrieval_limit
+POST /books/{book_id}/summary
+                           body: database_url, generation_provider,
+                            generation_model, ollama_base_url, detail,
+                            chunks_per_section, max_section_chars,
+                            force_refresh, reset, include_chapter_summaries
 GET  /ingestion/summary    query: database_url
 GET  /books                query: database_url, status, limit, offset
 ```
