@@ -133,6 +133,37 @@ class BookSummaryRecord:
 
 
 @dataclass(frozen=True)
+class SummaryJobRecord:
+    id: str
+    book_id: str
+    provider: str
+    model: str
+    detail: str
+    status: str = "pending"
+    attempts: int = 0
+    error_message: str | None = None
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass(frozen=True)
+class StoredSummaryJobRecord:
+    id: str
+    book_id: str
+    relative_path: str
+    title: str | None
+    authors: list[str]
+    provider: str
+    model: str
+    detail: str
+    status: str
+    attempts: int
+    error_message: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class BookTagRecord:
     id: str
     book_id: str
@@ -350,6 +381,28 @@ class IngestionStore(Protocol):
     ) -> int:
         ...
 
+    def save_summary_job(self, job: SummaryJobRecord) -> None:
+        ...
+
+    def list_summary_jobs(
+        self,
+        *,
+        status: str | None = None,
+        book_id: str | None = None,
+        limit: int = 100,
+    ) -> list[StoredSummaryJobRecord]:
+        ...
+
+    def update_summary_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        attempts: int | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        ...
+
     def save_book_tags(self, tags: list[BookTagRecord]) -> None:
         ...
 
@@ -511,6 +564,9 @@ class SQLiteIngestionStore:
                 )
                 self._connection.execute(
                     "DELETE FROM book_summaries WHERE book_id = ?", (existing.id,)
+                )
+                self._connection.execute(
+                    "DELETE FROM summary_jobs WHERE book_id = ?", (existing.id,)
                 )
                 self._connection.execute(
                     "DELETE FROM book_tags WHERE book_id = ?", (existing.id,)
@@ -1099,6 +1155,113 @@ class SQLiteIngestionStore:
             )
         return chapter_cursor.rowcount + book_cursor.rowcount
 
+    def save_summary_job(self, job: SummaryJobRecord) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO summary_jobs (
+                    id, book_id, provider, model, detail, status, attempts,
+                    error_message, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(book_id, provider, model, detail)
+                DO UPDATE SET
+                    id = excluded.id,
+                    status = excluded.status,
+                    attempts = excluded.attempts,
+                    error_message = excluded.error_message,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    job.id,
+                    job.book_id,
+                    job.provider.strip().casefold(),
+                    job.model.strip(),
+                    job.detail.strip().casefold(),
+                    job.status.strip().casefold(),
+                    job.attempts,
+                    job.error_message,
+                    job.created_at,
+                    job.updated_at,
+                ),
+            )
+
+    def list_summary_jobs(
+        self,
+        *,
+        status: str | None = None,
+        book_id: str | None = None,
+        limit: int = 100,
+    ) -> list[StoredSummaryJobRecord]:
+        where: list[str] = []
+        parameters: list[object] = []
+        if status:
+            where.append("summary_jobs.status = ?")
+            parameters.append(status.strip().casefold())
+        if book_id:
+            where.append("summary_jobs.book_id = ?")
+            parameters.append(book_id)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        parameters.append(max(1, limit))
+
+        rows = self._connection.execute(
+            f"""
+            SELECT summary_jobs.id, summary_jobs.book_id, books.relative_path,
+                   books.title, books.authors_json, summary_jobs.provider,
+                   summary_jobs.model, summary_jobs.detail, summary_jobs.status,
+                   summary_jobs.attempts, summary_jobs.error_message,
+                   summary_jobs.created_at, summary_jobs.updated_at
+            FROM summary_jobs
+            JOIN books ON books.id = summary_jobs.book_id
+            {where_sql}
+            ORDER BY summary_jobs.created_at ASC, summary_jobs.id ASC
+            LIMIT ?
+            """,
+            parameters,
+        ).fetchall()
+        return [
+            StoredSummaryJobRecord(
+                id=row[0],
+                book_id=row[1],
+                relative_path=row[2],
+                title=row[3],
+                authors=_decode_authors(row[4]),
+                provider=row[5],
+                model=row[6],
+                detail=row[7],
+                status=row[8],
+                attempts=row[9],
+                error_message=row[10],
+                created_at=row[11],
+                updated_at=row[12],
+            )
+            for row in rows
+        ]
+
+    def update_summary_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        attempts: int | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        updates = ["status = ?", "error_message = ?", "updated_at = ?"]
+        parameters: list[object] = [
+            status.strip().casefold(),
+            error_message,
+            utc_now(),
+        ]
+        if attempts is not None:
+            updates.insert(1, "attempts = ?")
+            parameters.insert(1, attempts)
+        parameters.append(job_id)
+        with self._connection:
+            self._connection.execute(
+                f"UPDATE summary_jobs SET {', '.join(updates)} WHERE id = ?",
+                parameters,
+            )
+
     def save_book_tags(self, tags: list[BookTagRecord]) -> None:
         if not tags:
             return
@@ -1532,6 +1695,26 @@ CREATE TABLE IF NOT EXISTS book_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_book_summaries_book_provider_model
 ON book_summaries(book_id, provider, model, detail);
+
+CREATE TABLE IF NOT EXISTS summary_jobs (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(book_id, provider, model, detail)
+);
+
+CREATE INDEX IF NOT EXISTS idx_summary_jobs_status_created
+ON summary_jobs(status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_summary_jobs_book
+ON summary_jobs(book_id);
 
 CREATE TABLE IF NOT EXISTS book_tags (
     id TEXT PRIMARY KEY,
