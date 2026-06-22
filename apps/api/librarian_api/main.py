@@ -16,11 +16,19 @@ from librarian_ingestion.embedding_ops import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
+from librarian_metadata.genres import (
+    DeleteBookGenresOptions,
+    GenerateBookGenresOptions,
+    ListBookGenresOptions,
+    delete_book_genres,
+    generate_book_genres,
+    list_book_genres,
+)
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
 
-app = FastAPI(title="Librarian", version="0.1.0")
+app = FastAPI(title="Librarian API", version="0.1.0")
 
 
 class IngestionRunRequest(BaseModel):
@@ -92,6 +100,19 @@ class BookSummaryRequest(BaseModel):
     force_refresh: bool = False
     reset: bool = False
     include_chapter_summaries: bool = True
+
+
+class BookGenresRequest(BaseModel):
+    database_url: Optional[str] = None
+    source_summary_provider: Optional[str] = None
+    source_summary_model: Optional[str] = None
+    source_summary_detail: str = "medium"
+    generation_provider: Optional[str] = None
+    generation_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    max_secondary_genres: int = 3
+    force_refresh: bool = False
+    reset: bool = False
 
 
 @app.get("/health")
@@ -251,6 +272,77 @@ def summarize_book_endpoint(
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return result.to_dict()
+
+
+@app.post("/books/{book_id}/genres")
+def generate_book_genres_endpoint(
+    book_id: str, request: BookGenresRequest
+) -> dict[str, object]:
+    try:
+        result = generate_book_genres(
+            GenerateBookGenresOptions(
+                database_url=request.database_url or settings.database_url,
+                book_id=book_id,
+                source_summary_provider=request.source_summary_provider,
+                source_summary_model=request.source_summary_model,
+                source_summary_detail=request.source_summary_detail,
+                generation_provider=request.generation_provider,
+                generation_model=request.generation_model,
+                ollama_base_url=request.ollama_base_url,
+                max_secondary_genres=request.max_secondary_genres,
+                force_refresh=request.force_refresh,
+                reset=request.reset,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.get("/books/{book_id}/genres")
+def list_book_genres_endpoint(
+    book_id: str,
+    database_url: Optional[str] = None,
+    genre_role: Optional[str] = None,
+    source: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> list[dict[str, object]]:
+    try:
+        genres = list_book_genres(
+            ListBookGenresOptions(
+                database_url=database_url or settings.database_url,
+                book_id=book_id,
+                genre_role=genre_role,
+                source=source,
+                provider=provider,
+                model=model,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return [asdict(genre) for genre in genres]
+
+
+@app.delete("/books/{book_id}/genres")
+def delete_book_genres_endpoint(
+    book_id: str,
+    database_url: Optional[str] = None,
+    genre_role: Optional[str] = None,
+    source: Optional[str] = "llm",
+) -> dict[str, int]:
+    try:
+        deleted = delete_book_genres(
+            DeleteBookGenresOptions(
+                database_url=database_url or settings.database_url,
+                book_id=book_id,
+                genre_role=genre_role,
+                source=source,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"deleted_genres": deleted}
 
 
 @app.get("/books")

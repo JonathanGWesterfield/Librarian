@@ -37,6 +37,10 @@
       "description": "On-demand chapter and book summarization workflows."
     },
     {
+      "name": "metadata",
+      "description": "Generated book-level metadata such as genres."
+    },
+    {
       "name": "library",
       "description": "Read-only library record views."
     }
@@ -485,6 +489,208 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BookSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/books/{book_id}/genres": {
+      "post": {
+        "tags": ["metadata"],
+        "operationId": "generateBookGenres",
+        "summary": "Generate genres for one ingested book",
+        "description": "Generates or reuses broad bookstore/library genres from an existing stored book summary.",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact stored book id to classify."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookGenresRequest"
+              },
+              "examples": {
+                "codex": {
+                  "summary": "Generate with Codex",
+                  "value": {
+                    "database_url": "sqlite:///data/librarian.db",
+                    "source_summary_provider": "codex",
+                    "source_summary_model": "codex",
+                    "generation_provider": "codex",
+                    "generation_model": "codex"
+                  }
+                },
+                "ollamaRebuild": {
+                  "summary": "Reset and rebuild with Ollama",
+                  "value": {
+                    "database_url": "sqlite:///data/librarian.db",
+                    "source_summary_provider": "codex",
+                    "source_summary_model": "codex",
+                    "generation_provider": "ollama",
+                    "generation_model": "llama3.2:3b",
+                    "reset": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated or cached book genres.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookGenresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
+      "get": {
+        "tags": ["metadata"],
+        "operationId": "listBookGenres",
+        "summary": "List stored genres for one book",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/DatabaseUrl"
+          },
+          {
+            "name": "genre_role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["primary", "secondary"]
+            },
+            "description": "Filter by genre role."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by genre source, such as llm."
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by generation provider."
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter by generation model."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stored genre records for the book.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StoredBookGenre"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
+      "delete": {
+        "tags": ["metadata"],
+        "operationId": "deleteBookGenres",
+        "summary": "Delete stored genres for one book",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/DatabaseUrl"
+          },
+          {
+            "name": "genre_role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["primary", "secondary"]
+            },
+            "description": "Delete only this genre role."
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "llm"
+            },
+            "description": "Delete only this genre source."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteBookGenresResponse"
                 }
               }
             }
@@ -1274,6 +1480,203 @@
           },
           "cached": {
             "type": "boolean"
+          }
+        }
+      },
+      "BookGenresRequest": {
+        "type": "object",
+        "properties": {
+          "database_url": {
+            "type": ["string", "null"],
+            "example": "sqlite:///data/librarian.db"
+          },
+          "source_summary_provider": {
+            "type": ["string", "null"],
+            "description": "Provider for the stored book summary used as genre source."
+          },
+          "source_summary_model": {
+            "type": ["string", "null"],
+            "description": "Model for the stored book summary used as genre source."
+          },
+          "source_summary_detail": {
+            "type": "string",
+            "enum": ["short", "medium", "detailed"],
+            "default": "medium"
+          },
+          "generation_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", "codex", null]
+          },
+          "generation_model": {
+            "type": ["string", "null"],
+            "example": "codex"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          },
+          "max_secondary_genres": {
+            "type": "integer",
+            "default": 3,
+            "minimum": 0
+          },
+          "force_refresh": {
+            "type": "boolean",
+            "default": false
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false,
+            "description": "Delete matching generated genres before regenerating them."
+          }
+        }
+      },
+      "BookGenresResponse": {
+        "type": "object",
+        "required": [
+          "book_id",
+          "title",
+          "authors",
+          "source_summary_provider",
+          "source_summary_model",
+          "source_summary_detail",
+          "generation_provider",
+          "generation_model",
+          "deleted_genres",
+          "generated_genres",
+          "cached_genres",
+          "genres"
+        ],
+        "properties": {
+          "book_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_summary_provider": {
+            "type": "string"
+          },
+          "source_summary_model": {
+            "type": "string"
+          },
+          "source_summary_detail": {
+            "type": "string"
+          },
+          "generation_provider": {
+            "type": "string"
+          },
+          "generation_model": {
+            "type": "string"
+          },
+          "deleted_genres": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "generated_genres": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cached_genres": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GeneratedBookGenre"
+            }
+          }
+        }
+      },
+      "GeneratedBookGenre": {
+        "type": "object",
+        "required": ["genre", "genre_role", "confidence", "rationale", "cached"],
+        "properties": {
+          "genre": {
+            "type": "string"
+          },
+          "genre_role": {
+            "type": "string",
+            "enum": ["primary", "secondary"]
+          },
+          "confidence": {
+            "type": ["number", "null"],
+            "format": "float"
+          },
+          "rationale": {
+            "type": ["string", "null"]
+          },
+          "cached": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StoredBookGenre": {
+        "type": "object",
+        "required": [
+          "id",
+          "book_id",
+          "genre",
+          "genre_role",
+          "source",
+          "confidence",
+          "provider",
+          "model",
+          "rationale",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "book_id": {
+            "type": "string"
+          },
+          "genre": {
+            "type": "string"
+          },
+          "genre_role": {
+            "type": "string",
+            "enum": ["primary", "secondary"]
+          },
+          "source": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": ["number", "null"],
+            "format": "float"
+          },
+          "provider": {
+            "type": ["string", "null"]
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "rationale": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteBookGenresResponse": {
+        "type": "object",
+        "required": ["deleted_genres"],
+        "properties": {
+          "deleted_genres": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
