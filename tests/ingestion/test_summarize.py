@@ -8,7 +8,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_storage.storage import BookRecord, ChunkRecord, SQLiteIngestionStore, utc_now
+from librarian_storage.storage import (
+    BookRecord,
+    ChunkRecord,
+    SQLiteIngestionStore,
+    SummaryJobRecord,
+    utc_now,
+)
+from librarian_summarization.jobs import (
+    ProcessSummaryJobsOptions,
+    process_summary_jobs,
+)
 from librarian_summarization.summarize import (
     DeleteSummariesOptions,
     SummarizeBookOptions,
@@ -157,6 +167,63 @@ class SummarizeBookTests(unittest.TestCase):
 
         self.assertEqual(result.deleted_summaries, 2)
 
+    def test_process_summary_jobs_generates_summary_and_marks_job_completed(self) -> None:
+        """Verify queued summary jobs can be processed outside ingestion.
+        Ingestion should only enqueue work; the worker owns actually calling
+        the summarizer and recording job completion.
+        """
+        self._seed_summary_job()
+        generator = _FakeGenerator()
+
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            return_value=generator,
+        ):
+            result = process_summary_jobs(
+                ProcessSummaryJobsOptions(database_url=self.database_url, limit=1)
+            )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            completed_jobs = store.list_summary_jobs(status="completed")
+            stored_summary = store.get_book_summary(
+                book_id="forward-foundation",
+                provider="codex",
+                model="codex",
+                detail="medium",
+            )
+
+        self.assertEqual(result.processed, 1)
+        self.assertEqual(result.completed, 1)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(completed_jobs[0].attempts, 1)
+        self.assertIsNone(completed_jobs[0].error_message)
+        self.assertIsNotNone(stored_summary)
+        self.assertEqual(len(generator.calls), 2)
+
+    def test_process_summary_jobs_marks_failed_job_without_stopping_worker(self) -> None:
+        """Verify worker failures are persisted as job state.
+        A bad provider or generation failure should not crash the queue; it
+        should leave a useful error for the UI or CLI.
+        """
+        self._seed_summary_job()
+
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            side_effect=RuntimeError("model unavailable"),
+        ):
+            result = process_summary_jobs(
+                ProcessSummaryJobsOptions(database_url=self.database_url, limit=1)
+            )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            failed_jobs = store.list_summary_jobs(status="failed")
+
+        self.assertEqual(result.processed, 1)
+        self.assertEqual(result.completed, 0)
+        self.assertEqual(result.failed, 1)
+        self.assertEqual(failed_jobs[0].attempts, 1)
+        self.assertEqual(failed_jobs[0].error_message, "model unavailable")
+
     def _seed_book(self) -> None:
         book = BookRecord(
             id="forward-foundation",
@@ -182,6 +249,18 @@ class SummarizeBookTests(unittest.TestCase):
         ]
         with SQLiteIngestionStore(self.database_path) as store:
             store.save_book_with_chunks(book, chunks)
+
+    def _seed_summary_job(self) -> None:
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_summary_job(
+                SummaryJobRecord(
+                    id="summary-job-1",
+                    book_id="forward-foundation",
+                    provider="codex",
+                    model="codex",
+                    detail="medium",
+                )
+            )
 
 
 class _FakeGenerator:
