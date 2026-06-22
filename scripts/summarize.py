@@ -56,7 +56,7 @@ Delete cached summaries for a provider/model/detail combination:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from pathlib import Path
 
@@ -71,6 +71,7 @@ from librarian_config.config import (
     GENERATION_PROVIDER_ENV,
     OLLAMA_BASE_URL_ENV,
 )
+from librarian_logging import configure_cli_logging, emit_json
 from librarian_summarization.summarize import (
     DeleteSummariesOptions,
     SummaryProgress,
@@ -79,8 +80,11 @@ from librarian_summarization.summarize import (
     summarize_book,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Summarize one ingested book from local chunks."
     )
@@ -167,9 +171,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = result.to_dict()
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                _print_summary(payload)
+                _log_summary(payload)
             return 0
         if args.command == "delete":
             result = delete_summaries(
@@ -185,12 +189,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = result.to_dict()
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                print(f"Deleted summaries: {payload['deleted_summaries']}")
+                logger.info("Deleted summaries: %s", payload["deleted_summaries"])
             return 0
     except (ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        logger.error("Error: %s", error)
         return 2
 
     parser.error(f"unsupported command: {args.command}")
@@ -219,35 +223,37 @@ def _add_generation_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _print_summary(payload: dict[str, object]) -> None:
-    print(f"Book: {payload['title'] or payload['book_id']}")
-    print(f"Authors: {', '.join(payload['authors'])}")
-    print(f"Generator: {payload['provider']} / {payload['model']}")
-    print(f"Detail: {payload['detail']}")
-    print(
+def _log_summary(payload: dict[str, object]) -> None:
+    logger.info("Book: %s", payload["title"] or payload["book_id"])
+    logger.info("Authors: %s", ", ".join(payload["authors"]))
+    logger.info("Generator: %s / %s", payload["provider"], payload["model"])
+    logger.info("Detail: %s", payload["detail"])
+    logger.info(
         "Chapter summaries: "
         f"{payload['chapter_summary_count']} total, "
         f"{payload['generated_chapter_summaries']} generated, "
         f"{payload['cached_chapter_summaries']} cached"
     )
     if payload["deleted_summaries"]:
-        print(f"Deleted before rebuild: {payload['deleted_summaries']}")
-    print("\nBook summary:\n")
-    print(payload["summary"])
+        logger.info("Deleted before rebuild: %s", payload["deleted_summaries"])
+    logger.info("Book summary:")
+    logger.info("%s", payload["summary"])
     chapter_summaries = payload.get("chapter_summaries")
     if isinstance(chapter_summaries, list) and chapter_summaries:
-        print("\nChapter summaries:")
+        logger.info("Chapter summaries:")
         for summary in chapter_summaries:
             if not isinstance(summary, dict):
                 continue
             title = summary["chapter_title"] or summary["chapter_key"]
             cache_marker = "cached" if summary["cached"] else "generated"
-            print(
-                f"\n- {title} "
-                f"(chunks {summary['chunk_start_index']}-{summary['chunk_end_index']}, "
-                f"{cache_marker})"
+            logger.info(
+                "- %s (chunks %s-%s, %s)",
+                title,
+                summary["chunk_start_index"],
+                summary["chunk_end_index"],
+                cache_marker,
             )
-            print(summary["summary"])
+            logger.info("%s", summary["summary"])
 
 
 def _print_progress(progress: SummaryProgress) -> None:
@@ -255,7 +261,7 @@ def _print_progress(progress: SummaryProgress) -> None:
         prefix = f"[{progress.stage} {progress.current}/{progress.total}]"
     else:
         prefix = f"[{progress.stage}]"
-    print(f"{prefix} {progress.message}", file=sys.stderr)
+    logger.info("%s %s", prefix, progress.message)
 
 
 if __name__ == "__main__":

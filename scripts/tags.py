@@ -51,7 +51,7 @@ Delete generated topic tags for one book:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -67,6 +67,7 @@ from librarian_config.config import (
     GENERATION_PROVIDER_ENV,
     OLLAMA_BASE_URL_ENV,
 )
+from librarian_logging import configure_cli_logging, emit_json
 from librarian_metadata.tags import (
     DeleteBookTagsOptions,
     GenerateBookTagsOptions,
@@ -76,8 +77,11 @@ from librarian_metadata.tags import (
     list_book_tags,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Generate, list, and delete Librarian book topic tags."
     )
@@ -163,9 +167,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = result.to_dict()
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                _print_generated_tags(payload)
+                _log_generated_tags(payload)
             return 0
 
         if args.command == "list":
@@ -183,9 +187,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = [asdict(tag) for tag in tags]
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                _print_tag_list(payload)
+                _log_tag_list(payload)
             return 0
 
         if args.command == "delete":
@@ -201,12 +205,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = {"deleted_tags": deleted}
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                print(f"Deleted tags: {deleted}")
+                logger.info("Deleted tags: %s", deleted)
             return 0
     except (ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        logger.error("Error: %s", error)
         return 2
 
     parser.error(f"unsupported command: {args.command}")
@@ -257,30 +261,30 @@ def _add_json_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true")
 
 
-def _print_generated_tags(payload: dict[str, object]) -> None:
-    print(f"Book: {payload['title'] or payload['book_id']}")
-    print(f"Authors: {', '.join(payload['authors'])}")
-    print(
+def _log_generated_tags(payload: dict[str, object]) -> None:
+    logger.info("Book: %s", payload["title"] or payload["book_id"])
+    logger.info("Authors: %s", ", ".join(payload["authors"]))
+    logger.info(
         "Summary source: "
         f"{payload['source_summary_provider']} / {payload['source_summary_model']}"
     )
-    print(
+    logger.info(
         "Tag generator: "
         f"{payload['generation_provider']} / {payload['generation_model']}"
     )
-    print(
+    logger.info(
         "Tags: "
         f"{payload['generated_tags']} generated, "
         f"{payload['cached_tags']} cached"
     )
     if payload["deleted_tags"]:
-        print(f"Deleted before rebuild: {payload['deleted_tags']}")
-    _print_tag_list(payload["tags"])
+        logger.info("Deleted before rebuild: %s", payload["deleted_tags"])
+    _log_tag_list(payload["tags"])
 
 
-def _print_tag_list(tags: object) -> None:
+def _log_tag_list(tags: object) -> None:
     if not isinstance(tags, list) or not tags:
-        print("No tags found.")
+        logger.info("No tags found.")
         return
     for tag in tags:
         if not isinstance(tag, dict):
@@ -294,9 +298,9 @@ def _print_tag_list(tags: object) -> None:
         provenance = f"{source}"
         if provider or model:
             provenance = f"{provenance}, {provider or '?'} / {model or '?'}"
-        print(f"- [{prefix}] {tag['tag']}{confidence_text} - {provenance}")
+        logger.info("- [%s] %s%s - %s", prefix, tag["tag"], confidence_text, provenance)
         if tag.get("rationale"):
-            print(f"  {tag['rationale']}")
+            logger.info("  %s", tag["rationale"])
 
 
 if __name__ == "__main__":

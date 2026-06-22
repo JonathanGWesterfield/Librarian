@@ -40,7 +40,7 @@ Return machine-readable JSON for automation:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from pathlib import Path
 
@@ -58,9 +58,13 @@ from librarian_config.config import (
     GENERATION_PROVIDER_ENV,
     OLLAMA_BASE_URL_ENV,
 )
+from librarian_logging import configure_cli_logging, emit_json
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(description="Ask Librarian about local books.")
     parser.add_argument("question", nargs="*", help="Question to ask.")
     parser.add_argument(
@@ -108,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     question = " ".join(args.question).strip()
     if not question:
         if args.json:
-            print("Error: --json requires a single question argument", file=sys.stderr)
+            logger.error("Error: --json requires a single question argument")
             return 2
         return _interactive(args)
 
@@ -116,12 +120,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _interactive(args: argparse.Namespace) -> int:
-    print("Librarian chat. Press Ctrl-D or enter an empty question to exit.")
+    logger.info("Librarian chat. Press Ctrl-D or enter an empty question to exit.")
     while True:
         try:
             question = input("\nQuestion: ").strip()
         except EOFError:
-            print()
             return 0
         if not question:
             return 0
@@ -148,38 +151,36 @@ def _ask_once(args: argparse.Namespace, question: str) -> int:
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        logger.error("Error: %s", error)
         return 2
 
     payload = result.to_dict()
     if args.json:
-        print(json.dumps(payload, indent=2))
+        emit_json(payload)
     else:
-        _print_chat(payload)
+        _log_chat(payload)
     return 0
 
 
-def _print_chat(payload: dict[str, object]) -> None:
-    print("\nAnswer:")
-    print(payload["answer"])
-    print()
-    print(
-        "Models: "
+def _log_chat(payload: dict[str, object]) -> None:
+    logger.info("Answer:")
+    logger.info("%s", payload["answer"])
+    logger.info(
+        "\nModels: "
         f"embedding={payload['embedding_provider']}/{payload['embedding_model']}, "
         f"generation={payload['generation_provider']}/{payload['generation_model']}"
     )
-    print(f"Candidates scored: {payload['candidate_count']}")
-    print()
-    print("Sources:")
+    logger.info("Candidates scored: %s", payload["candidate_count"])
+    logger.info("Sources:")
     sources = payload["sources"]
     if not isinstance(sources, list) or not sources:
-        print("- none")
+        logger.info("- none")
         return
     for source in sources:
         if not isinstance(source, dict):
             continue
         title = source["title"] or source["relative_path"]
-        print(
+        logger.info(
             f"- [{source['source_id']}] score={float(source['score']):.4f} "
             f"{title} ({source['relative_path']} chunk {source['chunk_index']})"
         )
