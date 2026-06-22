@@ -163,6 +163,36 @@ class StoredBookTagRecord:
 
 
 @dataclass(frozen=True)
+class BookGenreRecord:
+    id: str
+    book_id: str
+    genre: str
+    genre_role: str
+    source: str
+    confidence: float | None = None
+    provider: str | None = None
+    model: str | None = None
+    rationale: str | None = None
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass(frozen=True)
+class StoredBookGenreRecord:
+    id: str
+    book_id: str
+    genre: str
+    genre_role: str
+    source: str
+    confidence: float | None
+    provider: str | None
+    model: str | None
+    rationale: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class StoredEmbeddingRecord:
     id: str
     chunk_id: str
@@ -341,6 +371,27 @@ class IngestionStore(Protocol):
     ) -> int:
         ...
 
+    def save_book_genres(self, genres: list[BookGenreRecord]) -> None:
+        ...
+
+    def list_book_genres(
+        self,
+        *,
+        book_id: str | None = None,
+        genre_role: str | None = None,
+        source: str | None = None,
+    ) -> list[StoredBookGenreRecord]:
+        ...
+
+    def delete_book_genres(
+        self,
+        *,
+        book_id: str | None = None,
+        genre_role: str | None = None,
+        source: str | None = None,
+    ) -> int:
+        ...
+
     def close(self) -> None:
         ...
 
@@ -463,6 +514,9 @@ class SQLiteIngestionStore:
                 )
                 self._connection.execute(
                     "DELETE FROM book_tags WHERE book_id = ?", (existing.id,)
+                )
+                self._connection.execute(
+                    "DELETE FROM book_genres WHERE book_id = ?", (existing.id,)
                 )
 
             self._connection.execute(
@@ -1158,6 +1212,119 @@ class SQLiteIngestionStore:
             )
         return cursor.rowcount
 
+    def save_book_genres(self, genres: list[BookGenreRecord]) -> None:
+        if not genres:
+            return
+
+        with self._connection:
+            self._connection.executemany(
+                """
+                INSERT INTO book_genres (
+                    id, book_id, genre, genre_key, genre_role, source, confidence,
+                    provider, model, rationale, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(book_id, genre_role, genre_key, source, provider, model)
+                DO UPDATE SET
+                    id = excluded.id,
+                    genre = excluded.genre,
+                    confidence = excluded.confidence,
+                    rationale = excluded.rationale,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        genre.id,
+                        genre.book_id,
+                        genre.genre.strip(),
+                        _book_genre_key(genre.genre),
+                        genre.genre_role.strip().casefold(),
+                        genre.source.strip().casefold(),
+                        genre.confidence,
+                        _empty_if_none(genre.provider),
+                        _empty_if_none(genre.model),
+                        genre.rationale,
+                        genre.created_at,
+                        genre.updated_at,
+                    )
+                    for genre in genres
+                ],
+            )
+
+    def list_book_genres(
+        self,
+        *,
+        book_id: str | None = None,
+        genre_role: str | None = None,
+        source: str | None = None,
+    ) -> list[StoredBookGenreRecord]:
+        where: list[str] = []
+        parameters: list[object] = []
+        if book_id:
+            where.append("book_id = ?")
+            parameters.append(book_id)
+        if genre_role:
+            where.append("genre_role = ?")
+            parameters.append(genre_role.strip().casefold())
+        if source:
+            where.append("source = ?")
+            parameters.append(source.strip().casefold())
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+        rows = self._connection.execute(
+            f"""
+            SELECT id, book_id, genre, genre_role, source, confidence, provider,
+                   model, rationale, created_at, updated_at
+            FROM book_genres
+            {where_sql}
+            ORDER BY book_id ASC, genre_role ASC, genre_key ASC, source ASC,
+                     provider ASC, model ASC
+            """,
+            parameters,
+        ).fetchall()
+        return [
+            StoredBookGenreRecord(
+                id=row[0],
+                book_id=row[1],
+                genre=row[2],
+                genre_role=row[3],
+                source=row[4],
+                confidence=row[5],
+                provider=_none_if_empty(row[6]),
+                model=_none_if_empty(row[7]),
+                rationale=row[8],
+                created_at=row[9],
+                updated_at=row[10],
+            )
+            for row in rows
+        ]
+
+    def delete_book_genres(
+        self,
+        *,
+        book_id: str | None = None,
+        genre_role: str | None = None,
+        source: str | None = None,
+    ) -> int:
+        where: list[str] = []
+        parameters: list[object] = []
+        if book_id:
+            where.append("book_id = ?")
+            parameters.append(book_id)
+        if genre_role:
+            where.append("genre_role = ?")
+            parameters.append(genre_role.strip().casefold())
+        if source:
+            where.append("source = ?")
+            parameters.append(source.strip().casefold())
+        where_sql = f" WHERE {' AND '.join(where)}" if where else ""
+
+        with self._connection:
+            cursor = self._connection.execute(
+                f"DELETE FROM book_genres{where_sql}", parameters
+            )
+        return cursor.rowcount
+
     def close(self) -> None:
         if self.connection is not None:
             self.connection.close()
@@ -1215,6 +1382,13 @@ def _book_tag_key(tag: str) -> str:
     normalized = normalize_metadata_value(tag)
     if not normalized:
         raise ValueError("book tag must not be empty")
+    return normalized
+
+
+def _book_genre_key(genre: str) -> str:
+    normalized = normalize_metadata_value(genre)
+    if not normalized:
+        raise ValueError("book genre must not be empty")
     return normalized
 
 
@@ -1380,4 +1554,26 @@ ON book_tags(book_id, tag_type);
 
 CREATE INDEX IF NOT EXISTS idx_book_tags_type_key
 ON book_tags(tag_type, tag_key);
+
+CREATE TABLE IF NOT EXISTS book_genres (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    genre TEXT NOT NULL,
+    genre_key TEXT NOT NULL,
+    genre_role TEXT NOT NULL,
+    source TEXT NOT NULL,
+    confidence REAL,
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    rationale TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(book_id, genre_role, genre_key, source, provider, model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_book_genres_book_role
+ON book_genres(book_id, genre_role);
+
+CREATE INDEX IF NOT EXISTS idx_book_genres_role_key
+ON book_genres(genre_role, genre_key);
 """

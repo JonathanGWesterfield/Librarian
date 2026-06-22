@@ -20,6 +20,7 @@ from librarian_config.config import (
 )
 from librarian_ingestion.epub import parse_epub
 from librarian_storage.storage import (
+    BookGenreRecord,
     BookTagRecord,
     BookSummaryRecord,
     BookRecord,
@@ -472,6 +473,127 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
 
         self.assertEqual(old_tags, [])
         self.assertEqual(new_tags, [])
+
+    def test_book_genres_can_be_saved_updated_filtered_and_deleted(self) -> None:
+        """Verify book genres are stored as structured derived metadata.
+        Genres are related to tags, but they have their own primary/secondary
+        role semantics, so storage should not force them into generic tag rows.
+        """
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/forward.epub",
+            relative_path="forward.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        original_genre = BookGenreRecord(
+            id="genre-1",
+            book_id="book-1",
+            genre="Science Fiction",
+            genre_role="primary",
+            source="llm",
+            confidence=0.82,
+            provider="codex",
+            model="codex",
+            rationale="The book is part of the Foundation science fiction arc.",
+        )
+        updated_genre = BookGenreRecord(
+            id="genre-1-updated",
+            book_id="book-1",
+            genre=" science fiction ",
+            genre_role="PRIMARY",
+            source="LLM",
+            confidence=0.94,
+            provider="codex",
+            model="codex",
+            rationale="The core genre is Foundation-era science fiction.",
+        )
+        secondary_genre = BookGenreRecord(
+            id="genre-2",
+            book_id="book-1",
+            genre="Political Fiction",
+            genre_role="secondary",
+            source="llm",
+            confidence=0.71,
+            provider="codex",
+            model="codex",
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+            store.save_book_genres([original_genre])
+            store.save_book_genres([updated_genre, secondary_genre])
+
+            all_genres = store.list_book_genres(book_id="book-1")
+            primary_genres = store.list_book_genres(
+                book_id="book-1", genre_role="primary"
+            )
+            deleted_primary = store.delete_book_genres(
+                book_id="book-1", genre_role="primary"
+            )
+            remaining_genres = store.list_book_genres(book_id="book-1")
+
+        self.assertEqual(len(all_genres), 2)
+        self.assertEqual(len(primary_genres), 1)
+        self.assertEqual(primary_genres[0].id, "genre-1-updated")
+        self.assertEqual(primary_genres[0].genre, "science fiction")
+        self.assertEqual(primary_genres[0].genre_role, "primary")
+        self.assertEqual(primary_genres[0].source, "llm")
+        self.assertEqual(primary_genres[0].confidence, 0.94)
+        self.assertEqual(primary_genres[0].provider, "codex")
+        self.assertEqual(primary_genres[0].model, "codex")
+        self.assertEqual(deleted_primary, 1)
+        self.assertEqual([genre.genre for genre in remaining_genres], ["Political Fiction"])
+
+    def test_book_genres_are_removed_when_book_is_deleted(self) -> None:
+        """Verify genre records follow the book lifecycle.
+        Genres are generated from book summaries, so replacing an EPUB should
+        clear stale genre rows exactly like summaries and topic tags.
+        """
+        first_book = BookRecord(
+            id="book-1",
+            source_path="/books/old.epub",
+            relative_path="same.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="First Version",
+            authors=["Author"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        replacement_book = BookRecord(
+            id="book-2",
+            source_path="/books/new.epub",
+            relative_path="same.epub",
+            file_hash="book-2",
+            size_bytes=100,
+            title="Second Version",
+            authors=["Author"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        genre = BookGenreRecord(
+            id="genre-1",
+            book_id="book-1",
+            genre="old genre",
+            genre_role="primary",
+            source="manual",
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(first_book, [])
+            store.save_book_genres([genre])
+            store.save_book_with_chunks(replacement_book, [])
+
+            old_genres = store.list_book_genres(book_id="book-1")
+            new_genres = store.list_book_genres(book_id="book-2")
+
+        self.assertEqual(old_genres, [])
+        self.assertEqual(new_genres, [])
 
     def test_get_book_by_identity_finds_existing_book_metadata(self) -> None:
         """Verify the adapter can find an already ingested book by metadata.
