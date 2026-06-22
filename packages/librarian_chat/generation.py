@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -14,6 +17,8 @@ from librarian_config.config import (
     resolve_generation_provider,
     resolve_ollama_base_url,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GenerationError(RuntimeError):
@@ -100,31 +105,38 @@ class CodexGenerator:
     model: str = "codex"
     executable: str = "codex"
     timeout_seconds: float = 240.0
+    progress_interval_seconds: float = 30.0
     provider: str = "codex"
 
     def generate(
-        self, messages: list[ChatMessage], *, response_format: str | None = None
+        self,
+        messages: list[ChatMessage],
+        *,
+        response_format: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> str:
         prompt = "\n\n".join(
             f"{message.role.upper()}:\n{message.content}" for message in messages
         )
         executable = _resolve_codex_command(self.executable)
+        command = [
+            executable,
+            "exec",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--sandbox",
+            "read-only",
+            "-",
+        ]
+        effective_timeout_seconds = (
+            self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        )
         try:
-            completed = subprocess.run(
-                [
-                    executable,
-                    "exec",
-                    "--ephemeral",
-                    "--ignore-user-config",
-                    "--sandbox",
-                    "read-only",
-                    "-",
-                ],
-                check=True,
-                capture_output=True,
-                input=prompt,
-                text=True,
-                timeout=self.timeout_seconds,
+            completed = _run_codex_process(
+                command,
+                prompt=prompt,
+                timeout_seconds=effective_timeout_seconds,
+                progress_interval_seconds=self.progress_interval_seconds,
             )
         except FileNotFoundError as exc:
             raise GenerationError(
@@ -136,7 +148,7 @@ class CodexGenerator:
             raise GenerationError(f"Codex generation failed: {exc}") from exc
         except subprocess.TimeoutExpired as exc:
             raise GenerationError(
-                f"Codex generation timed out after {self.timeout_seconds:.0f} seconds"
+                f"Codex generation timed out after {effective_timeout_seconds:.0f} seconds"
             ) from exc
         except subprocess.CalledProcessError as exc:
             stderr = _trim_error_output(exc.stderr or "")
@@ -203,6 +215,122 @@ def _resolve_codex_command(configured: str) -> str:
             return str(candidate)
 
     return configured
+
+
+@dataclass(frozen=True)
+class _CodexProcessResult:
+    stdout: str
+    stderr: str
+
+
+def _run_codex_process(
+    command: list[str],
+    *,
+    prompt: str,
+    timeout_seconds: float,
+    progress_interval_seconds: float,
+) -> _CodexProcessResult:
+    logger.info(
+        "Starting Codex subprocess with timeout %.0fs: %s",
+        timeout_seconds,
+        _redacted_command(command),
+    )
+    started_at = time.monotonic()
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    if process.stdin is not None:
+        process.stdin.write(prompt)
+        process.stdin.close()
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    threads = [
+        threading.Thread(
+            target=_capture_process_stream,
+            args=(process.stdout, "stdout", stdout_lines),
+            daemon=True,
+        ),
+        threading.Thread(
+            target=_capture_process_stream,
+            args=(process.stderr, "stderr", stderr_lines),
+            daemon=True,
+        ),
+    ]
+    for thread in threads:
+        thread.start()
+
+    next_progress_at = started_at + max(1.0, progress_interval_seconds)
+    deadline = started_at + timeout_seconds
+    while True:
+        returncode = process.poll()
+        if returncode is not None:
+            break
+
+        now = time.monotonic()
+        if now >= deadline:
+            process.kill()
+            process.wait()
+            _join_stream_threads(threads)
+            stdout = "".join(stdout_lines)
+            stderr = "".join(stderr_lines)
+            raise subprocess.TimeoutExpired(
+                command,
+                timeout_seconds,
+                output=stdout,
+                stderr=stderr,
+            )
+
+        if now >= next_progress_at:
+            logger.info(
+                "Codex subprocess still running after %.0fs",
+                now - started_at,
+            )
+            next_progress_at = now + max(1.0, progress_interval_seconds)
+
+        time.sleep(min(0.25, max(0.0, deadline - now)))
+
+    _join_stream_threads(threads)
+    elapsed_seconds = time.monotonic() - started_at
+    stdout = "".join(stdout_lines)
+    stderr = "".join(stderr_lines)
+    if returncode != 0:
+        raise subprocess.CalledProcessError(
+            returncode,
+            command,
+            output=stdout,
+            stderr=stderr,
+        )
+
+    logger.info("Codex subprocess completed in %.1fs", elapsed_seconds)
+    return _CodexProcessResult(stdout=stdout, stderr=stderr)
+
+
+def _capture_process_stream(stream, name: str, output: list[str]) -> None:
+    if stream is None:
+        return
+    try:
+        for line in iter(stream.readline, ""):
+            output.append(line)
+            cleaned = line.rstrip()
+            if cleaned:
+                logger.info("Codex %s: %s", name, cleaned)
+    finally:
+        stream.close()
+
+
+def _join_stream_threads(threads: list[threading.Thread]) -> None:
+    for thread in threads:
+        thread.join(timeout=1.0)
+
+
+def _redacted_command(command: list[str]) -> str:
+    return " ".join(command)
 
 
 def _trim_error_output(output: str, max_length: int = 1200) -> str:

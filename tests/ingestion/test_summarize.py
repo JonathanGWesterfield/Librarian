@@ -1,4 +1,6 @@
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,6 +17,7 @@ from librarian_storage.storage import (
     SummaryJobRecord,
     utc_now,
 )
+from librarian_chat.generation import CodexGenerator
 from librarian_summarization.jobs import (
     ProcessSummaryJobsOptions,
     process_summary_jobs,
@@ -69,7 +72,11 @@ class SummarizeBookTests(unittest.TestCase):
         self.assertEqual(progress_events[0].stage, "plan")
         self.assertIn("Selected 3 section", progress_events[0].message)
         self.assertEqual(
-            [event.stage for event in progress_events if event.stage == "chapter"],
+            [
+                event.stage
+                for event in progress_events
+                if event.message.startswith("Generating summary for")
+            ],
             ["chapter", "chapter", "chapter"],
         )
         self.assertEqual(progress_events[-1].stage, "book")
@@ -166,6 +173,59 @@ class SummarizeBookTests(unittest.TestCase):
         )
 
         self.assertEqual(result.deleted_summaries, 2)
+
+    def test_summarize_book_applies_timeout_only_to_chunk_summaries(self) -> None:
+        """Verify the Codex timeout knob only constrains section summaries.
+        Final book synthesis can have different runtime characteristics, so the
+        chunk timeout should be passed only to per-section generation calls.
+        """
+        generator = _FakeCodexGenerator()
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            return_value=generator,
+        ):
+            summarize_book(
+                SummarizeBookOptions(
+                    database_url=self.database_url,
+                    book_title="Forward",
+                    generation_provider="codex",
+                    generation_model="codex",
+                    chunks_per_section=2,
+                    chunk_summary_timeout_seconds=12,
+                )
+            )
+
+        self.assertEqual(generator.timeouts, [12, 12, 12, None])
+
+    def test_summarize_book_runs_three_chunk_summaries_in_parallel(self) -> None:
+        """Verify at least three section summaries can run concurrently.
+        Codex-backed summaries may each shell out to a separate process, so the
+        unit test uses a barrier to prove three generation calls are in flight
+        at once while preserving chapter order for final synthesis.
+        """
+        generator = _ParallelFakeCodexGenerator(required_parallelism=3)
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            return_value=generator,
+        ):
+            summary = summarize_book(
+                SummarizeBookOptions(
+                    database_url=self.database_url,
+                    book_title="Forward",
+                    generation_provider="codex",
+                    generation_model="codex",
+                    chunks_per_section=1,
+                    max_parallel_chunk_summaries=3,
+                )
+            )
+
+        self.assertEqual(generator.max_active_calls, 3)
+        self.assertEqual(generator.barrier_passes, 3)
+        self.assertEqual(summary.generated_chapter_summaries, 5)
+        self.assertLess(
+            summary.summary.index("section summary for Chunks 0-0"),
+            summary.summary.index("section summary for Chunks 4-4"),
+        )
 
     def test_process_summary_jobs_generates_summary_and_marks_job_completed(self) -> None:
         """Verify queued summary jobs can be processed outside ingestion.
@@ -273,6 +333,71 @@ class _FakeGenerator:
     def generate(self, messages, *, response_format=None):
         self.calls.append(messages)
         return f"Generated summary {len(self.calls)}"
+
+
+class _FakeCodexGenerator(CodexGenerator):
+    def __init__(self) -> None:
+        object.__setattr__(self, "calls", [])
+        object.__setattr__(self, "timeouts", [])
+
+    def generate(self, messages, *, response_format=None, timeout_seconds=None):
+        self.calls.append(messages)
+        self.timeouts.append(timeout_seconds)
+        return f"Generated summary {len(self.calls)}"
+
+
+class _ParallelFakeCodexGenerator(CodexGenerator):
+    def __init__(self, *, required_parallelism: int) -> None:
+        object.__setattr__(self, "active_calls", 0)
+        object.__setattr__(self, "barrier_passes", 0)
+        object.__setattr__(self, "section_calls", 0)
+        object.__setattr__(self, "max_active_calls", 0)
+        object.__setattr__(self, "required_parallelism", required_parallelism)
+        object.__setattr__(self, "barrier", threading.Barrier(required_parallelism))
+        object.__setattr__(self, "lock", threading.Lock())
+
+    def generate(self, messages, *, response_format=None, timeout_seconds=None):
+        section_title = self._section_title(messages[-1].content)
+        if section_title is None:
+            return messages[-1].content
+
+        with self.lock:
+            object.__setattr__(self, "active_calls", self.active_calls + 1)
+            object.__setattr__(self, "section_calls", self.section_calls + 1)
+            section_call = self.section_calls
+            object.__setattr__(
+                self,
+                "max_active_calls",
+                max(self.max_active_calls, self.active_calls),
+            )
+        try:
+            if section_call <= self.required_parallelism:
+                try:
+                    self.barrier.wait(timeout=2)
+                except threading.BrokenBarrierError as exc:
+                    raise AssertionError(
+                        f"expected {self.required_parallelism} concurrent section summaries"
+                    ) from exc
+                with self.lock:
+                    object.__setattr__(self, "barrier_passes", self.barrier_passes + 1)
+            time.sleep(self._delay_for_section(section_title))
+            return f"section summary for {section_title}"
+        finally:
+            with self.lock:
+                object.__setattr__(self, "active_calls", self.active_calls - 1)
+
+    def _section_title(self, content: str):
+        for line in content.splitlines():
+            if line.startswith("Section: "):
+                return line.removeprefix("Section: ")
+        return None
+
+    def _delay_for_section(self, section_title: str) -> float:
+        try:
+            start = int(section_title.removeprefix("Chunks ").split("-")[0])
+        except ValueError:
+            return 0.0
+        return (5 - start) * 0.01
 
 
 if __name__ == "__main__":

@@ -66,9 +66,11 @@ if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_config.config import (
+    CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV,
     DATABASE_URL_ENV,
     GENERATION_MODEL_ENV,
     GENERATION_PROVIDER_ENV,
+    MAX_PARALLEL_CHUNK_SUMMARIES_ENV,
     OLLAMA_BASE_URL_ENV,
 )
 from librarian_logging import configure_cli_logging, emit_json
@@ -133,6 +135,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Hide chapter summaries in the printed/JSON response.",
     )
+    summarize_parser.add_argument(
+        "--chunk-summary-timeout-seconds",
+        type=float,
+        help=(
+            "Timeout for each Codex chunk/chapter summary call instead of "
+            f"{CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV}."
+        ),
+    )
+    summarize_parser.add_argument(
+        "--max-parallel-chunk-summaries",
+        type=int,
+        help=(
+            "Maximum chunk/chapter summaries to generate concurrently instead "
+            f"of {MAX_PARALLEL_CHUNK_SUMMARIES_ENV}."
+        ),
+    )
     summarize_parser.add_argument("--json", action="store_true")
 
     delete_parser = subparsers.add_parser(
@@ -166,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
                     force_refresh=args.force_refresh,
                     reset=args.reset,
                     include_chapter_summaries=not args.no_chapter_summaries,
+                    chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                    max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
                     progress_callback=None if args.json else _print_progress,
                 )
             )

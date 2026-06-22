@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from typing import Callable
 
-from librarian_chat.generation import ChatMessage, create_configured_generator
-from librarian_config.config import resolve_database_url
+from librarian_chat.generation import (
+    ChatMessage,
+    CodexGenerator,
+    create_configured_generator,
+)
+from librarian_config.config import (
+    resolve_chunk_summary_timeout_seconds,
+    resolve_database_url,
+    resolve_max_parallel_chunk_summaries,
+)
 from librarian_storage.storage import (
     BookSummaryRecord,
     ChapterSummaryRecord,
@@ -39,6 +48,8 @@ class SummarizeBookOptions:
     reset: bool = False
     include_chapter_summaries: bool = True
     max_reduce_inputs: int = 12
+    chunk_summary_timeout_seconds: float | None = None
+    max_parallel_chunk_summaries: int | None = None
     progress_callback: Callable[[SummaryProgress], None] | None = None
 
 
@@ -122,6 +133,22 @@ class _Section:
         return "\n\n".join(chunk.text for chunk in self.chunks)
 
 
+@dataclass(frozen=True)
+class _SectionGenerationTask:
+    section_index: int
+    section: _Section
+    source_hash: str
+    messages: list[ChatMessage]
+
+
+@dataclass(frozen=True)
+class _SectionGenerationResult:
+    section_index: int
+    section: _Section
+    source_hash: str
+    summary: str
+
+
 def summarize_book(options: SummarizeBookOptions) -> BookSummary:
     detail = _normalize_detail(options.detail)
     database_url = resolve_database_url(options.database_url)
@@ -129,6 +156,12 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
         provider=options.generation_provider,
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,
+    )
+    chunk_summary_timeout_seconds = resolve_chunk_summary_timeout_seconds(
+        options.chunk_summary_timeout_seconds
+    )
+    max_parallel_chunk_summaries = resolve_max_parallel_chunk_summaries(
+        options.max_parallel_chunk_summaries
     )
     store = create_ingestion_store(database_url)
     store.initialize()
@@ -168,8 +201,8 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
                 f"with max {options.max_section_chars} source chars per section."
             ),
         )
-        chapter_summaries: list[ChapterSummary] = []
-        generated_count = 0
+        chapter_summaries: list[ChapterSummary | None] = [None] * len(sections)
+        generation_tasks: list[_SectionGenerationTask] = []
         cached_count = 0
         for section_index, section in enumerate(sections, start=1):
             source_hash = _section_source_hash(section)
@@ -194,7 +227,15 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
                 )
                 summary_text = cached.summary
                 cached_count += 1
-                used_cache = True
+                chapter_summaries[section_index - 1] = ChapterSummary(
+                    chapter_key=section.key,
+                    chapter_title=section.title,
+                    chunk_start_index=section.chunk_start_index,
+                    chunk_end_index=section.chunk_end_index,
+                    summary=summary_text,
+                    source_hash=source_hash,
+                    cached=True,
+                )
             else:
                 _emit_progress(
                     options.progress_callback,
@@ -206,52 +247,69 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
                         f"({len(section.text)} source chars)."
                     ),
                 )
-                summary_text = generator.generate(
-                    _chapter_summary_messages(
-                        book=book,
+                generation_tasks.append(
+                    _SectionGenerationTask(
+                        section_index=section_index,
                         section=section,
-                        detail=detail,
-                    )
-                )
-                generated_count += 1
-                used_cache = False
-                store.save_chapter_summary(
-                    ChapterSummaryRecord(
-                        id=_summary_id(
-                            book.id,
-                            section.key,
-                            generator.provider,
-                            generator.model,
-                            detail,
-                        ),
-                        book_id=book.id,
-                        chapter_key=section.key,
-                        chapter_title=section.title,
-                        chunk_start_index=section.chunk_start_index,
-                        chunk_end_index=section.chunk_end_index,
-                        provider=generator.provider,
-                        model=generator.model,
-                        detail=detail,
                         source_hash=source_hash,
-                        summary=summary_text,
+                        messages=_chapter_summary_messages(
+                            book=book,
+                            section=section,
+                            detail=detail,
+                        ),
                     )
                 )
-            chapter_summaries.append(
-                ChapterSummary(
+
+        generated_results = _generate_chunk_summary_tasks(
+            generator,
+            generation_tasks,
+            timeout_seconds=chunk_summary_timeout_seconds,
+            max_parallel=max_parallel_chunk_summaries,
+            progress_callback=options.progress_callback,
+        )
+        for result in sorted(generated_results, key=lambda item: item.section_index):
+            section = result.section
+            summary_text = result.summary
+            source_hash = result.source_hash
+            chapter_summaries[result.section_index - 1] = ChapterSummary(
+                chapter_key=section.key,
+                chapter_title=section.title,
+                chunk_start_index=section.chunk_start_index,
+                chunk_end_index=section.chunk_end_index,
+                summary=summary_text,
+                source_hash=source_hash,
+                cached=False,
+            )
+            store.save_chapter_summary(
+                ChapterSummaryRecord(
+                    id=_summary_id(
+                        book.id,
+                        section.key,
+                        generator.provider,
+                        generator.model,
+                        detail,
+                    ),
+                    book_id=book.id,
                     chapter_key=section.key,
                     chapter_title=section.title,
                     chunk_start_index=section.chunk_start_index,
                     chunk_end_index=section.chunk_end_index,
-                    summary=summary_text,
+                    provider=generator.provider,
+                    model=generator.model,
+                    detail=detail,
                     source_hash=source_hash,
-                    cached=used_cache,
+                    summary=summary_text,
                 )
             )
+
+        visible_chapter_summary_inputs = [
+            summary for summary in chapter_summaries if summary is not None
+        ]
 
         final_inputs = _condense_until_fits(
             generator=generator,
             book=book,
-            summaries=chapter_summaries,
+            summaries=visible_chapter_summary_inputs,
             detail=detail,
             max_reduce_inputs=max(2, options.max_reduce_inputs),
             progress_callback=options.progress_callback,
@@ -267,7 +325,7 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
             cached_book is not None
             and cached_book.source_hash == book_source_hash
             and not options.force_refresh
-            and generated_count == 0
+            and len(generated_results) == 0
         ):
             book_summary_text = cached_book.summary
         else:
@@ -290,12 +348,12 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
                     detail=detail,
                     source_hash=book_source_hash,
                     summary=book_summary_text,
-                    chapter_summary_count=len(chapter_summaries),
+                    chapter_summary_count=len(visible_chapter_summary_inputs),
                 )
             )
 
         visible_chapter_summaries = (
-            chapter_summaries if options.include_chapter_summaries else []
+            visible_chapter_summary_inputs if options.include_chapter_summaries else []
         )
         return BookSummary(
             book_id=book.id,
@@ -306,9 +364,9 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
             detail=detail,
             summary=book_summary_text,
             source_hash=book_source_hash,
-            chapter_summary_count=len(chapter_summaries),
+            chapter_summary_count=len(visible_chapter_summary_inputs),
             cached_chapter_summaries=cached_count,
-            generated_chapter_summaries=generated_count,
+            generated_chapter_summaries=len(generated_results),
             deleted_summaries=deleted_summaries,
             chapter_summaries=visible_chapter_summaries,
         )
@@ -347,6 +405,103 @@ def delete_summaries(options: DeleteSummariesOptions) -> DeleteSummariesResult:
         )
     finally:
         store.close()
+
+
+def _generate_chunk_summary(
+    generator,
+    messages: list[ChatMessage],
+    *,
+    timeout_seconds: float,
+) -> str:
+    if isinstance(generator, CodexGenerator):
+        return generator.generate(messages, timeout_seconds=timeout_seconds)
+    return generator.generate(messages)
+
+
+def _generate_chunk_summary_tasks(
+    generator,
+    tasks: list[_SectionGenerationTask],
+    *,
+    timeout_seconds: float,
+    max_parallel: int,
+    progress_callback: Callable[[SummaryProgress], None] | None,
+) -> list[_SectionGenerationResult]:
+    if not tasks:
+        return []
+
+    _emit_progress(
+        progress_callback,
+        stage="chapter",
+        current=0,
+        total=len(tasks),
+        message=(
+            f"Generating {len(tasks)} uncached section summary/summaries "
+            f"with up to {max_parallel} parallel worker(s)."
+        ),
+    )
+
+    if max_parallel == 1:
+        results = []
+        for completed, task in enumerate(tasks, start=1):
+            results.append(
+                _run_section_generation_task(
+                    generator,
+                    task,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+            _emit_progress(
+                progress_callback,
+                stage="chapter",
+                current=completed,
+                total=len(tasks),
+                message=f"Completed summary for {task.section.title or task.section.key}.",
+            )
+        return results
+
+    results: list[_SectionGenerationResult] = []
+    worker_count = min(max_parallel, len(tasks))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(
+                _run_section_generation_task,
+                generator,
+                task,
+                timeout_seconds=timeout_seconds,
+            ): task
+            for task in tasks
+        }
+        for completed, future in enumerate(as_completed(futures), start=1):
+            task = futures[future]
+            result = future.result()
+            results.append(result)
+            _emit_progress(
+                progress_callback,
+                stage="chapter",
+                current=completed,
+                total=len(tasks),
+                message=f"Completed summary for {task.section.title or task.section.key}.",
+            )
+    return results
+
+
+def _run_section_generation_task(
+    generator,
+    task: _SectionGenerationTask,
+    *,
+    timeout_seconds: float,
+) -> _SectionGenerationResult:
+    summary_text = _generate_chunk_summary(
+        generator,
+        task.messages,
+        timeout_seconds=timeout_seconds,
+    )
+    return _SectionGenerationResult(
+        section_index=task.section_index,
+        section=task.section,
+        source_hash=task.source_hash,
+        summary=summary_text,
+    )
 
 
 def _resolve_single_book(
