@@ -32,6 +32,14 @@ Force re-parse unchanged EPUBs and generate Ollama embeddings:
       --embedding-provider ollama \\
       --embedding-model all-minilm
 
+Ingest EPUBs and queue asynchronous summary jobs:
+    python3 scripts/play/ingest_epubs.py \\
+      --books-dir ./Epub-Books \\
+      --database-url sqlite:///data/librarian.db \\
+      --enqueue-summaries \\
+      --summary-generation-provider codex \\
+      --summary-generation-model codex
+
 Return machine-readable JSON for inspection:
     python3 scripts/play/ingest_epubs.py \\
       --books-dir ./Epub-Books \\
@@ -55,6 +63,8 @@ from librarian_config.config import (
     DATABASE_URL_ENV,
     EMBEDDING_MODEL_ENV,
     EMBEDDING_PROVIDER_ENV,
+    GENERATION_MODEL_ENV,
+    GENERATION_PROVIDER_ENV,
     OLLAMA_BASE_URL_ENV,
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
@@ -112,6 +122,26 @@ def main(argv: list[str] | None = None) -> int:
         default=16,
         help="Number of chunks to send to the embedder per request.",
     )
+    parser.add_argument(
+        "--enqueue-summaries",
+        action="store_true",
+        help="Queue asynchronous chapter/book summary jobs for newly ingested books.",
+    )
+    parser.add_argument(
+        "--summary-generation-provider",
+        choices=["noop", "ollama", "codex"],
+        help=f"Summary provider override instead of {GENERATION_PROVIDER_ENV}.",
+    )
+    parser.add_argument(
+        "--summary-generation-model",
+        help=f"Summary model override instead of {GENERATION_MODEL_ENV}.",
+    )
+    parser.add_argument(
+        "--summary-detail",
+        choices=["short", "medium", "detailed"],
+        default="medium",
+        help="Queued summary detail level.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -126,6 +156,10 @@ def main(argv: list[str] | None = None) -> int:
                 embedding_model=args.embedding_model,
                 ollama_base_url=args.ollama_base_url,
                 embedding_batch_size=args.embedding_batch_size,
+                enqueue_summaries=args.enqueue_summaries,
+                summary_generation_provider=args.summary_generation_provider,
+                summary_generation_model=args.summary_generation_model,
+                summary_detail=args.summary_detail,
             )
         )
     except (EpubSourceError, ValueError, NotImplementedError) as error:
@@ -160,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Failed {result.failed}")
     print(f"Stored chunks {result.stored_chunks}")
     print(f"Stored embeddings {result.stored_embeddings}")
+    print(f"Queued summary jobs {result.summary_jobs_enqueued}")
     print(
         "Database totals: "
         f"{result.total_books} books, "

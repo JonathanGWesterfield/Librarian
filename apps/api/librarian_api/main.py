@@ -41,6 +41,10 @@ class IngestionRunRequest(BaseModel):
     embedding_model: Optional[str] = None
     ollama_base_url: Optional[str] = None
     embedding_batch_size: int = 16
+    enqueue_summaries: bool = False
+    summary_generation_provider: Optional[str] = None
+    summary_generation_model: Optional[str] = None
+    summary_detail: str = "medium"
 
 
 class RebuildEmbeddingsRequest(BaseModel):
@@ -147,6 +151,10 @@ def run_ingestion_endpoint(request: IngestionRunRequest) -> dict[str, object]:
                 embedding_model=request.embedding_model,
                 ollama_base_url=request.ollama_base_url,
                 embedding_batch_size=request.embedding_batch_size,
+                enqueue_summaries=request.enqueue_summaries,
+                summary_generation_provider=request.summary_generation_provider,
+                summary_generation_model=request.summary_generation_model,
+                summary_detail=request.summary_detail,
             )
         )
     except (EpubSourceError, ValueError, NotImplementedError) as error:

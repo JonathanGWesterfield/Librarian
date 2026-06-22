@@ -433,7 +433,9 @@ Tauri frontend can call:
 ```text
 POST /ingestion/run        body: books_dir, database_url, force, list_epubs,
                             embed_chunks, embedding_provider, embedding_model,
-                            ollama_base_url, embedding_batch_size
+                            ollama_base_url, embedding_batch_size,
+                            enqueue_summaries, summary_generation_provider,
+                            summary_generation_model, summary_detail
 POST /embeddings/rebuild   body: database_url, embedding_provider,
                             embedding_model, ollama_base_url, reset, reset_all
 POST /embeddings/query     body: query, embedding_provider, embedding_model,

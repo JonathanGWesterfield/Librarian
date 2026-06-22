@@ -24,6 +24,15 @@ Ingest EPUBs from a local source directory:
       ingest \\
       --books-dir ./Epub-Books
 
+Ingest EPUBs and queue asynchronous summary jobs:
+    python3 scripts/play/librarian.py \\
+      --database-url sqlite:///data/librarian.db \\
+      ingest \\
+      --books-dir ./Epub-Books \\
+      --enqueue-summaries \\
+      --summary-generation-provider codex \\
+      --summary-generation-model codex
+
 Rebuild embeddings after changing the embedding model:
     python3 scripts/play/librarian.py \\
       --database-url sqlite:///data/librarian.db \\
@@ -57,6 +66,8 @@ from librarian_config.config import (
     DATABASE_URL_ENV,
     EMBEDDING_MODEL_ENV,
     EMBEDDING_PROVIDER_ENV,
+    GENERATION_MODEL_ENV,
+    GENERATION_PROVIDER_ENV,
     OLLAMA_BASE_URL_ENV,
     resolve_database_url,
 )
@@ -100,6 +111,26 @@ def main(argv: list[str] | None = None) -> int:
         "--list",
         action="store_true",
         help="Include discovered EPUB files in the result.",
+    )
+    ingest_parser.add_argument(
+        "--enqueue-summaries",
+        action="store_true",
+        help="Queue asynchronous chapter/book summary jobs for newly ingested books.",
+    )
+    ingest_parser.add_argument(
+        "--summary-generation-provider",
+        choices=["noop", "ollama", "codex"],
+        help=f"Summary provider override instead of {GENERATION_PROVIDER_ENV}.",
+    )
+    ingest_parser.add_argument(
+        "--summary-generation-model",
+        help=f"Summary model override instead of {GENERATION_MODEL_ENV}.",
+    )
+    ingest_parser.add_argument(
+        "--summary-detail",
+        choices=["short", "medium", "detailed"],
+        default="medium",
+        help="Queued summary detail level.",
     )
     _add_json_flag(ingest_parser)
 
@@ -209,6 +240,10 @@ def main(argv: list[str] | None = None) -> int:
                     database_url=database_url,
                     force=args.force,
                     list_epubs=args.list,
+                    enqueue_summaries=args.enqueue_summaries,
+                    summary_generation_provider=args.summary_generation_provider,
+                    summary_generation_model=args.summary_generation_model,
+                    summary_detail=args.summary_detail,
                 )
             )
             _print_payload(result.to_dict(), args.json)

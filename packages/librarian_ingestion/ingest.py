@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -9,6 +11,8 @@ from librarian_config.config import (
     resolve_database_url,
     resolve_embedding_model,
     resolve_embedding_provider,
+    resolve_generation_model,
+    resolve_generation_provider,
 )
 from librarian_ingestion.embeddings import create_configured_embedder
 from librarian_ingestion.epub import parse_epub
@@ -17,6 +21,7 @@ from librarian_storage.storage import (
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,
+    SummaryJobRecord,
     create_ingestion_store,
     utc_now,
 )
@@ -33,6 +38,10 @@ class IngestionOptions:
     embedding_model: str | None = None
     ollama_base_url: str | None = None
     embedding_batch_size: int = 16
+    enqueue_summaries: bool = False
+    summary_generation_provider: str | None = None
+    summary_generation_model: str | None = None
+    summary_detail: str = "medium"
 
 
 @dataclass(frozen=True)
@@ -57,6 +66,7 @@ class IngestionResult:
     failed: int = 0
     stored_chunks: int = 0
     stored_embeddings: int = 0
+    summary_jobs_enqueued: int = 0
     total_books: int = 0
     total_chunks: int = 0
     total_embeddings: int = 0
@@ -73,6 +83,14 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
     database_url = resolve_database_url(options.database_url)
     embedding_provider = resolve_embedding_provider(options.embedding_provider)
     embedding_model = resolve_embedding_model(options.embedding_model)
+    summary_provider = resolve_generation_provider(options.summary_generation_provider)
+    summary_model = (
+        "codex"
+        if summary_provider.strip().casefold() == "codex"
+        and options.summary_generation_model is None
+        else resolve_generation_model(options.summary_generation_model)
+    )
+    summary_detail = _normalize_summary_detail(options.summary_detail)
     discovered_epubs = scan_epub_files(books_dir)
     book_results: list[BookIngestionResult] = []
 
@@ -82,6 +100,7 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
     failed_count = 0
     chunk_count = 0
     embedding_count = 0
+    summary_job_count = 0
     embedder = None
     if options.embed_chunks:
         embedder = create_configured_embedder(
@@ -159,6 +178,22 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                     )
                     store.save_chunk_embeddings(embedding_records)
                     embedding_count += len(embedding_records)
+                if options.enqueue_summaries:
+                    store.save_summary_job(
+                        SummaryJobRecord(
+                            id=_summary_job_id(
+                                book_id=book.id,
+                                provider=summary_provider,
+                                model=summary_model,
+                                detail=summary_detail,
+                            ),
+                            book_id=book.id,
+                            provider=summary_provider,
+                            model=summary_model,
+                            detail=summary_detail,
+                        )
+                    )
+                    summary_job_count += 1
                 parsed_count += 1
                 chunk_count += len(chunk_records)
                 book_results.append(
@@ -198,12 +233,36 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
         failed=failed_count,
         stored_chunks=chunk_count,
         stored_embeddings=embedding_count,
+        summary_jobs_enqueued=summary_job_count,
         total_books=total_books,
         total_chunks=total_chunks,
         total_embeddings=total_embeddings,
         books=book_results,
         discovered=discovered,
     )
+
+
+def _summary_job_id(*, book_id: str, provider: str, model: str, detail: str) -> str:
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "book_id": book_id,
+                "provider": provider.strip().casefold(),
+                "model": model.strip(),
+                "detail": detail.strip().casefold(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"summary-job:{digest}"
+
+
+def _normalize_summary_detail(detail: str) -> str:
+    normalized = detail.strip().casefold()
+    if normalized not in {"short", "medium", "detailed"}:
+        raise ValueError("summary_detail must be one of: short, medium, detailed")
+    return normalized
 
 
 def _embed_chunks(
