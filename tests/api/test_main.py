@@ -9,7 +9,9 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from librarian_chat.chat import ChatResponse, ChatSource
+from librarian_metadata.genres import BookGenreGenerationResult, GeneratedBookGenre
 from librarian_storage.storage import (
+    BookGenreRecord,
     BookRecord,
     ChunkRecord,
     EmbeddingRecord,
@@ -251,6 +253,97 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["provider"], "codex")
         self.assertEqual(payload["chapter_summary_count"], 1)
 
+    def test_book_genres_endpoint_returns_generated_genres(self) -> None:
+        """Verify desktop clients can trigger genre generation over HTTP.
+        The route should expose the metadata service response while keeping
+        prompt execution inside the package layer.
+        """
+        fake_result = BookGenreGenerationResult(
+            book_id="forward-foundation",
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            source_summary_provider="codex",
+            source_summary_model="codex",
+            source_summary_detail="medium",
+            generation_provider="codex",
+            generation_model="codex",
+            deleted_genres=0,
+            generated_genres=2,
+            cached_genres=0,
+            genres=[
+                GeneratedBookGenre(
+                    genre="Science Fiction",
+                    genre_role="primary",
+                    confidence=0.96,
+                    rationale="Foundation is science fiction.",
+                    cached=False,
+                ),
+                GeneratedBookGenre(
+                    genre="Political Fiction",
+                    genre_role="secondary",
+                    confidence=0.74,
+                    rationale="Imperial politics shape the story.",
+                    cached=False,
+                ),
+            ],
+        )
+
+        with patch("librarian_api.main.generate_book_genres", return_value=fake_result):
+            response = self.client.post(
+                "/books/forward-foundation/genres",
+                json={
+                    "database_url": self.database_url,
+                    "source_summary_provider": "codex",
+                    "source_summary_model": "codex",
+                    "generation_provider": "codex",
+                    "generation_model": "codex",
+                    "reset": True,
+                },
+            )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["title"], "Forward the Foundation")
+        self.assertEqual(payload["generated_genres"], 2)
+        self.assertEqual(payload["genres"][0]["genre"], "Science Fiction")
+        self.assertEqual(payload["genres"][0]["genre_role"], "primary")
+
+    def test_book_genres_endpoint_lists_and_deletes_stored_genres(self) -> None:
+        """Verify clients can inspect and clean up stored genre metadata.
+        The GET/DELETE endpoints should use the same storage-backed filters as
+        the CLI so a future desktop app can manage genre records directly.
+        """
+        self._seed_genre_fixture()
+
+        list_response = self.client.get(
+            "/books/api-book/genres",
+            params={
+                "database_url": self.database_url,
+                "genre_role": "primary",
+                "provider": "codex",
+                "model": "codex",
+            },
+        )
+        delete_response = self.client.delete(
+            "/books/api-book/genres",
+            params={
+                "database_url": self.database_url,
+                "source": "llm",
+            },
+        )
+        remaining_response = self.client.get(
+            "/books/api-book/genres",
+            params={"database_url": self.database_url},
+        )
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()[0]["genre"], "Science Fiction")
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json(), {"deleted_genres": 2})
+        self.assertEqual(remaining_response.status_code, 200)
+        self.assertEqual(remaining_response.json(), [])
+
     def _seed_search_fixture(self) -> None:
         book = BookRecord(
             id="api-book",
@@ -319,6 +412,47 @@ class IngestionApiTests(unittest.TestCase):
         with SQLiteIngestionStore(self.database_path) as store:
             store.save_book_with_chunks(book, chunks)
             store.save_chunk_embeddings(embeddings)
+
+    def _seed_genre_fixture(self) -> None:
+        book = BookRecord(
+            id="api-book",
+            source_path="/books/api-sample.epub",
+            relative_path="api-sample.epub",
+            file_hash="api-book",
+            size_bytes=100,
+            title="API Sample Book",
+            authors=["Test Author"],
+            publisher="Fixture Press",
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        genres = [
+            BookGenreRecord(
+                id="api-book:genre:primary",
+                book_id="api-book",
+                genre="Science Fiction",
+                genre_role="primary",
+                source="llm",
+                confidence=0.96,
+                provider="codex",
+                model="codex",
+                rationale="Speculative setting.",
+            ),
+            BookGenreRecord(
+                id="api-book:genre:secondary",
+                book_id="api-book",
+                genre="Political Fiction",
+                genre_role="secondary",
+                source="llm",
+                confidence=0.74,
+                provider="codex",
+                model="codex",
+                rationale="Politics matter.",
+            ),
+        ]
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+            store.save_book_genres(genres)
 
 
 class _FakeQueryEmbedder:
