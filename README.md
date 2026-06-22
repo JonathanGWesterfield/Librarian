@@ -161,10 +161,13 @@ a standalone chat CLI.
 
 The repo now has deterministic retrieval and answer-quality smoke reports for
 CI, optional live reports that run the golden corpus against an ingested local
-SQLite database, and first-pass scoped retrieval by book and author.
+SQLite database, scoped retrieval by book and author, on-demand chapter/book
+summaries, topic tags, and genre metadata.
 
-The current engineering focus is book intelligence beyond chat: on-demand
-chapter/book summaries, richer metadata, and later genre/topic tagging.
+The current engineering focus is strengthening ingestion so chapter and book
+summaries can be generated asynchronously after EPUB parsing/chunking. Summaries
+started as an on-demand workflow, but they are now foundational inputs for
+tags, genres, recommendations, and future book-level retrieval.
 
 ## Roadmap
 
@@ -222,9 +225,11 @@ See the evaluation north star:
 ### Phase 5: Better Book Intelligence
 
 - Add author-level and book-level filtering.
-- Add chapter summaries generated only on demand.
+- Add chapter summaries generated on demand.
+- Add topic tagging from stored book summaries.
+- Add genre classification from stored book summaries.
+- Add asynchronous chapter/book summary generation after ingestion.
 - Add recommendation-oriented queries.
-- Add genre/topic tagging.
 - Add saved searches or reading lists.
 
 ### Phase 6: Hybrid Retrieval
