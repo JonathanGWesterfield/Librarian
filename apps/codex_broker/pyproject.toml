@@ -5,6 +5,7 @@ description = "Host-side wrapper around Codex CLI for Librarian answer synthesis
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",
+  "librarian-packages",
   "pydantic>=2.10.0",
   "uvicorn[standard]>=0.32.0",
 ]
@@ -21,4 +22,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["librarian_broker"]
-

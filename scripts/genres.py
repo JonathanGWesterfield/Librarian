@@ -81,7 +81,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Generate, list, and delete Librarian book genres."
     )
@@ -146,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_json_flag(delete_parser)
 
     args = parser.parse_args(argv)
+    configure_cli_logging(console=not args.json)
     try:
         if args.command == "generate":
             result = generate_book_genres(

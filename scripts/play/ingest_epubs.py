@@ -75,7 +75,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Scan the configured Librarian EPUB directory."
     )
@@ -147,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Queued summary detail level.",
     )
     args = parser.parse_args(argv)
+    configure_cli_logging(console=not args.json)
 
     try:
         result = run_ingestion(

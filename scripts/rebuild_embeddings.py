@@ -63,7 +63,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Rebuild chunk embeddings without deleting raw book text."
     )
@@ -112,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Print machine-readable JSON for desktop apps and automation.",
     )
     args = parser.parse_args(argv)
+    configure_cli_logging(console=not args.json)
 
     try:
         result = rebuild_embeddings(

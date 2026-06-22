@@ -16,6 +16,7 @@ from librarian_ingestion.embedding_ops import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
+from librarian_logging import configure_logging
 from librarian_metadata.genres import (
     DeleteBookGenresOptions,
     GenerateBookGenresOptions,
@@ -27,6 +28,8 @@ from librarian_metadata.genres import (
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
+
+configure_logging()
 
 app = FastAPI(title="Librarian API", version="0.1.0")
 
