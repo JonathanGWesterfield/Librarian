@@ -101,6 +101,75 @@ Response:
 - `books`: per-book ingestion results.
 - `discovered`: optional discovered EPUB metadata when `list_epubs` is true.
 
+## Book Summaries
+
+### `POST /books/{book_id}/summary`
+
+Generates or reuses chapter-level summaries for one stored book, then
+synthesizes a book-level summary from those chapter summaries. This endpoint can
+reset cached summaries when benchmarking providers or prompt changes.
+
+Request fields:
+
+- `database_url`: optional SQLite database URL. Defaults to
+  `LIBRARIAN_DATABASE_URL`.
+- `book_title`: optional title check/filter for the target book.
+- `author`: optional author check/filter for the target book.
+- `generation_provider`: optional summary provider. One of `codex`, `ollama`, or
+  `noop`.
+- `generation_model`: optional model for the generation provider.
+- `ollama_base_url`: optional Ollama URL override.
+- `detail`: summary detail level: `short`, `medium`, or `detailed`.
+- `chunks_per_section`: fallback chunk window size when chapter metadata is not
+  available.
+- `max_section_chars`: maximum source characters for one section summary prompt.
+- `force_refresh`: regenerate even when cached summaries match the source hash.
+- `reset`: delete matching summaries before regenerating.
+- `include_chapter_summaries`: include chapter-level summary records in the
+  response.
+- `chunk_summary_timeout_seconds`: timeout for each Codex chunk/chapter summary
+  call. This does not apply to final book summary synthesis.
+- `max_parallel_chunk_summaries`: maximum number of chunk/chapter summaries to
+  generate concurrently. This can launch multiple Codex subprocesses at once.
+
+Summarize with Codex:
+
+```json
+{
+  "database_url": "sqlite:///data/librarian.db",
+  "generation_provider": "codex",
+  "generation_model": "codex",
+  "detail": "medium",
+  "chunk_summary_timeout_seconds": 240,
+  "max_parallel_chunk_summaries": 2
+}
+```
+
+Reset and rebuild with Ollama:
+
+```json
+{
+  "database_url": "sqlite:///data/librarian.db",
+  "generation_provider": "ollama",
+  "generation_model": "llama3.2:3b",
+  "detail": "medium",
+  "reset": true,
+  "chunks_per_section": 8,
+  "max_section_chars": 12000
+}
+```
+
+Response:
+
+- `book_id`, `title`, `authors`: summarized book identity.
+- `provider`, `model`, `detail`: summary generation settings.
+- `summary`: synthesized book-level summary.
+- `chapter_summary_count`: total chapter/section summaries used.
+- `cached_chapter_summaries`: chapter summaries reused from cache.
+- `generated_chapter_summaries`: chapter summaries generated in this call.
+- `deleted_summaries`: summaries deleted before rebuild.
+- `chapter_summaries`: optional chapter-level summaries when requested.
+
 ## Book Genres
 
 ### `POST /books/{book_id}/genres`

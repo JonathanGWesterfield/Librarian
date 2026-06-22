@@ -12,6 +12,8 @@ class ProcessSummaryJobsOptions:
     database_url: str | None = None
     limit: int = 1
     include_chapter_summaries: bool = False
+    chunk_summary_timeout_seconds: float | None = None
+    max_parallel_chunk_summaries: int | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,8 @@ def process_summary_jobs(
                     generation_model=job.model,
                     detail=job.detail,
                     include_chapter_summaries=options.include_chapter_summaries,
+                    chunk_summary_timeout_seconds=options.chunk_summary_timeout_seconds,
+                    max_parallel_chunk_summaries=options.max_parallel_chunk_summaries,
                 )
             )
         except Exception as error:

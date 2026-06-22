@@ -1,6 +1,7 @@
 import json
 import sys
 import unittest
+from io import StringIO
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
@@ -145,14 +146,9 @@ class GenerationProviderTests(unittest.TestCase):
         The adapter keeps CLI usage behind the generator protocol so callers
         can swap between Ollama and Codex with provider settings.
         """
-        completed = __import__("subprocess").CompletedProcess(
-            args=["codex"],
-            returncode=0,
-            stdout="Codex answer.\n",
-            stderr="",
-        )
+        process = _FakeCodexProcess(stdout="Codex answer.\n")
 
-        with patch("subprocess.run", return_value=completed) as run:
+        with patch("subprocess.Popen", return_value=process) as popen:
             answer = CodexGenerator().generate(
                 [
                     ChatMessage(role="system", content="Summarize."),
@@ -161,9 +157,9 @@ class GenerationProviderTests(unittest.TestCase):
             )
 
         self.assertEqual(answer, "Codex answer.")
-        self.assertTrue(run.call_args.args[0][0].endswith("codex"))
+        self.assertTrue(popen.call_args.args[0][0].endswith("codex"))
         self.assertEqual(
-            run.call_args.args[0][1:],
+            popen.call_args.args[0][1:],
             [
                 "exec",
                 "--ephemeral",
@@ -173,8 +169,24 @@ class GenerationProviderTests(unittest.TestCase):
                 "-",
             ],
         )
-        self.assertIn("SYSTEM:\nSummarize.", run.call_args.kwargs["input"])
-        self.assertEqual(run.call_args.kwargs["timeout"], 240.0)
+        self.assertIn("SYSTEM:\nSummarize.", process.stdin.value)
+        self.assertTrue(popen.call_args.kwargs["text"])
+
+    def test_codex_generator_allows_per_call_timeout_override(self) -> None:
+        """Verify callers can tighten timeout for one Codex generation call.
+        Chunk summarization uses this to cap individual section summaries
+        without changing chat or final book-summary generation defaults.
+        """
+        process = _NeverEndingCodexProcess()
+
+        with patch("subprocess.Popen", return_value=process):
+            with self.assertRaisesRegex(RuntimeError, "timed out after 0 seconds"):
+                CodexGenerator(progress_interval_seconds=0.01).generate(
+                    [ChatMessage(role="user", content="Hello")],
+                    timeout_seconds=0.01,
+                )
+
+        self.assertTrue(process.killed)
 
     def test_codex_generator_reports_missing_executable_clearly(self) -> None:
         """Verify missing Codex CLI setup produces an actionable message.
@@ -183,7 +195,7 @@ class GenerationProviderTests(unittest.TestCase):
         """
         with patch("shutil.which", return_value=None):
             with patch("pathlib.Path.exists", return_value=False):
-                with patch("subprocess.run", side_effect=FileNotFoundError):
+                with patch("subprocess.Popen", side_effect=FileNotFoundError):
                     with self.assertRaisesRegex(
                         RuntimeError,
                         "LIBRARIAN_CODEX_EXECUTABLE",
@@ -203,7 +215,9 @@ class GenerationProviderTests(unittest.TestCase):
             stderr="x" * 2000,
         )
 
-        with patch("subprocess.run", side_effect=error):
+        process = _FakeCodexProcess(returncode=1, stderr="x" * 2000)
+
+        with patch("subprocess.Popen", return_value=process):
             with self.assertRaisesRegex(RuntimeError, "stderr truncated"):
                 CodexGenerator(executable="codex").generate(
                     [ChatMessage(role="user", content="Hello")]
@@ -222,6 +236,61 @@ class _FakeResponse:
 
     def read(self) -> bytes:
         return json.dumps(self.payload).encode("utf-8")
+
+
+class _FakeStdin:
+    def __init__(self) -> None:
+        self.value = ""
+
+    def write(self, text: str) -> None:
+        self.value += text
+
+    def close(self) -> None:
+        return None
+
+
+class _FakeCodexProcess:
+    def __init__(
+        self,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+    ) -> None:
+        self.stdin = _FakeStdin()
+        self.stdout = StringIO(stdout)
+        self.stderr = StringIO(stderr)
+        self.returncode = returncode
+        self._poll_count = 0
+
+    def poll(self):
+        self._poll_count += 1
+        if self._poll_count == 1:
+            return None
+        return self.returncode
+
+    def wait(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        return None
+
+
+class _NeverEndingCodexProcess:
+    def __init__(self) -> None:
+        self.stdin = _FakeStdin()
+        self.stdout = StringIO("")
+        self.stderr = StringIO("")
+        self.killed = False
+
+    def poll(self) -> None:
+        return None
+
+    def wait(self) -> int:
+        return -9
+
+    def kill(self) -> None:
+        self.killed = True
 
 
 if __name__ == "__main__":

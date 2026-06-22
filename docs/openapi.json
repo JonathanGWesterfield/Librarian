@@ -474,6 +474,8 @@
                     "generation_provider": "codex",
                     "generation_model": "codex",
                     "detail": "medium",
+                    "chunk_summary_timeout_seconds": 240,
+                    "max_parallel_chunk_summaries": 2,
                     "reset": false
                   }
                 },
@@ -1408,6 +1410,16 @@
           "include_chapter_summaries": {
             "type": "boolean",
             "default": true
+          },
+          "chunk_summary_timeout_seconds": {
+            "type": ["number", "null"],
+            "minimum": 1,
+            "description": "Timeout in seconds for each Codex chunk/chapter summary call. Does not apply to final book summary synthesis."
+          },
+          "max_parallel_chunk_summaries": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "Maximum number of chunk/chapter summaries to generate concurrently."
           }
         }
       },

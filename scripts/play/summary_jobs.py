@@ -49,7 +49,12 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import DATABASE_URL_ENV, resolve_database_url
+from librarian_config.config import (
+    CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV,
+    DATABASE_URL_ENV,
+    MAX_PARALLEL_CHUNK_SUMMARIES_ENV,
+    resolve_database_url,
+)
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.jobs import (
@@ -101,6 +106,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Include chapter summaries in worker result payloads.",
     )
+    process_parser.add_argument(
+        "--chunk-summary-timeout-seconds",
+        type=float,
+        help=(
+            "Timeout for each Codex chunk/chapter summary call instead of "
+            f"{CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV}."
+        ),
+    )
+    process_parser.add_argument(
+        "--max-parallel-chunk-summaries",
+        type=int,
+        help=(
+            "Maximum chunk/chapter summaries to generate concurrently instead "
+            f"of {MAX_PARALLEL_CHUNK_SUMMARIES_ENV}."
+        ),
+    )
     _add_json_flag(process_parser)
 
     args = parser.parse_args(argv)
@@ -126,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
                     database_url=database_url,
                     limit=args.limit,
                     include_chapter_summaries=args.include_chapter_summaries,
+                    chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                    max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
                 )
             )
             payload = result.to_dict()

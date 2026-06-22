@@ -104,6 +104,8 @@ class BookSummaryRequest(BaseModel):
     force_refresh: bool = False
     reset: bool = False
     include_chapter_summaries: bool = True
+    chunk_summary_timeout_seconds: Optional[float] = None
+    max_parallel_chunk_summaries: Optional[int] = None
 
 
 class BookGenresRequest(BaseModel):
@@ -275,6 +277,8 @@ def summarize_book_endpoint(
                 force_refresh=request.force_refresh,
                 reset=request.reset,
                 include_chapter_summaries=request.include_chapter_summaries,
+                chunk_summary_timeout_seconds=request.chunk_summary_timeout_seconds,
+                max_parallel_chunk_summaries=request.max_parallel_chunk_summaries,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
