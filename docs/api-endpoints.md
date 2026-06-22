@@ -30,6 +30,77 @@ Common error behavior:
 - `422`: request body or query parameters do not match FastAPI/Pydantic
   validation.
 
+## Ingestion
+
+### `POST /ingestion/run`
+
+Scans EPUB files, parses text, chunks books, stores book/chunk records, can
+generate chunk embeddings, and can enqueue asynchronous chapter/book summary
+jobs for newly ingested books.
+
+Summary queueing is deliberately separate from summary generation. When
+`enqueue_summaries` is true, ingestion writes durable `pending` summary jobs and
+returns without calling the summarizer LLM. A worker such as
+`scripts/process_summary_jobs.py` drains those jobs later.
+
+Request fields:
+
+- `books_dir`: EPUB source directory. Defaults to `LIBRARIAN_BOOKS_DIR`.
+- `database_url`: local storage URL. Defaults to `LIBRARIAN_DATABASE_URL`.
+- `force`: re-parse unchanged EPUB files.
+- `list_epubs`: include discovered EPUB metadata in the response.
+- `embed_chunks`: generate embeddings for chunks created during the run.
+- `embedding_provider`: embedding provider, such as `noop` or `ollama`.
+- `embedding_model`: embedding model name.
+- `ollama_base_url`: optional Ollama URL override.
+- `embedding_batch_size`: chunk embedding batch size.
+- `enqueue_summaries`: queue asynchronous summary jobs for newly ingested books.
+- `summary_generation_provider`: queued summary provider, such as `codex` or
+  `ollama`.
+- `summary_generation_model`: queued summary model.
+- `summary_detail`: queued summary detail level: `short`, `medium`, or
+  `detailed`.
+
+Ingest and queue summaries:
+
+```json
+{
+  "books_dir": "/books",
+  "database_url": "sqlite:///data/librarian.db",
+  "enqueue_summaries": true,
+  "summary_generation_provider": "codex",
+  "summary_generation_model": "codex",
+  "summary_detail": "medium"
+}
+```
+
+Ingest, embed, and queue summaries:
+
+```json
+{
+  "books_dir": "/books",
+  "database_url": "sqlite:///data/librarian.db",
+  "embed_chunks": true,
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "enqueue_summaries": true,
+  "summary_generation_provider": "ollama",
+  "summary_generation_model": "llama3.2:3b"
+}
+```
+
+Response:
+
+- `found`, `parsed`, `skipped_unchanged`, `skipped_duplicates`, `failed`:
+  ingestion counters.
+- `stored_chunks`: chunks stored during this run.
+- `stored_embeddings`: embeddings stored during this run.
+- `summary_jobs_enqueued`: asynchronous summary jobs queued during this run.
+- `total_books`, `total_chunks`, `total_embeddings`: database totals after the
+  run.
+- `books`: per-book ingestion results.
+- `discovered`: optional discovered EPUB metadata when `list_epubs` is true.
+
 ## Book Genres
 
 ### `POST /books/{book_id}/genres`

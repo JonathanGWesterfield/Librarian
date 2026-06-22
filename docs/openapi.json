@@ -107,7 +107,7 @@
         "tags": ["ingestion"],
         "operationId": "runIngestion",
         "summary": "Run EPUB ingestion",
-        "description": "Scans EPUB files, parses text, chunks books, stores book and chunk rows, and optionally generates embeddings for newly ingested chunks.",
+        "description": "Scans EPUB files, parses text, chunks books, stores book and chunk rows, optionally generates embeddings, and can enqueue asynchronous summary jobs for newly ingested books.",
         "requestBody": {
           "required": true,
           "content": {
@@ -135,6 +135,17 @@
                     "embedding_model": "all-minilm",
                     "ollama_base_url": "http://host.docker.internal:11434",
                     "embedding_batch_size": 16
+                  }
+                },
+                "ingestAndQueueSummaries": {
+                  "summary": "Ingest and queue summary jobs",
+                  "value": {
+                    "books_dir": "/books",
+                    "database_url": "sqlite:///data/librarian.db",
+                    "enqueue_summaries": true,
+                    "summary_generation_provider": "codex",
+                    "summary_generation_model": "codex",
+                    "summary_detail": "medium"
                   }
                 }
               }
@@ -884,6 +895,24 @@
             "type": "integer",
             "default": 16,
             "minimum": 1
+          },
+          "enqueue_summaries": {
+            "type": "boolean",
+            "default": false,
+            "description": "Queue asynchronous chapter/book summary jobs for newly ingested books."
+          },
+          "summary_generation_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", "codex", null]
+          },
+          "summary_generation_model": {
+            "type": ["string", "null"],
+            "example": "codex"
+          },
+          "summary_detail": {
+            "type": "string",
+            "enum": ["short", "medium", "detailed"],
+            "default": "medium"
           }
         }
       },
@@ -901,6 +930,7 @@
           "failed",
           "stored_chunks",
           "stored_embeddings",
+          "summary_jobs_enqueued",
           "total_books",
           "total_chunks",
           "total_embeddings",
@@ -945,6 +975,10 @@
             "minimum": 0
           },
           "stored_embeddings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "summary_jobs_enqueued": {
             "type": "integer",
             "minimum": 0
           },

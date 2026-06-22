@@ -57,11 +57,15 @@ class IngestionApiTests(unittest.TestCase):
                 "books_dir": str(self.books_dir),
                 "database_url": self.database_url,
                 "list_epubs": True,
+                "enqueue_summaries": True,
+                "summary_generation_provider": "codex",
+                "summary_generation_model": "codex",
             },
         )
 
         self.assertEqual(run_response.status_code, 200)
         self.assertEqual(run_response.json()["parsed"], 1)
+        self.assertEqual(run_response.json()["summary_jobs_enqueued"], 1)
 
         summary_response = self.client.get(
             "/ingestion/summary",
@@ -76,6 +80,8 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(books_response.status_code, 200)
         self.assertEqual(summary_response.json()["total_books"], 1)
         self.assertEqual(books_response.json()[0]["relative_path"], "sample.epub")
+        with SQLiteIngestionStore(self.database_path) as store:
+            self.assertEqual(len(store.list_summary_jobs(status="pending")), 1)
 
     def test_embedding_rebuild_endpoint_supports_noop_rebuilds(self) -> None:
         """Verify desktop clients can trigger embedding maintenance.
