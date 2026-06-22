@@ -39,7 +39,7 @@ Process up to five pending summary jobs:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -50,14 +50,18 @@ if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_config.config import DATABASE_URL_ENV, resolve_database_url
+from librarian_logging import configure_cli_logging, emit_json
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.jobs import (
     ProcessSummaryJobsOptions,
     process_summary_jobs,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Inspect and process Librarian summary jobs."
     )
@@ -111,9 +115,9 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
             )
             if args.json:
-                print(json.dumps(jobs, indent=2))
+                emit_json(jobs)
             else:
-                _print_jobs(jobs)
+                _log_jobs(jobs)
             return 0
 
         if args.command == "process":
@@ -126,12 +130,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = result.to_dict()
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                _print_process_result(payload)
+                _log_process_result(payload)
             return 0
     except (ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        LOGGER.error("Error: %s", error)
         return 2
 
     parser.error(f"unsupported command: {args.command}")
@@ -160,30 +164,30 @@ def _list_jobs(
         store.close()
 
 
-def _print_jobs(jobs: list[dict[str, object]]) -> None:
+def _log_jobs(jobs: list[dict[str, object]]) -> None:
     if not jobs:
-        print("No summary jobs found.")
+        LOGGER.info("No summary jobs found.")
         return
     for job in jobs:
         title = job["title"] or job["relative_path"] or job["book_id"]
         error = f" - {job['error_message']}" if job.get("error_message") else ""
-        print(
+        LOGGER.info(
             f"- [{job['status']}] {title} "
             f"({job['provider']}/{job['model']}/{job['detail']}, "
             f"attempts={job['attempts']}){error}"
         )
 
 
-def _print_process_result(payload: dict[str, object]) -> None:
-    print("Librarian summary job worker")
-    print(f"Database: {payload['database_url']}")
-    print(f"Requested limit: {payload['requested_limit']}")
-    print(f"Processed: {payload['processed']}")
-    print(f"Completed: {payload['completed']}")
-    print(f"Failed: {payload['failed']}")
+def _log_process_result(payload: dict[str, object]) -> None:
+    LOGGER.info("Librarian summary job worker")
+    LOGGER.info("Database: %s", payload["database_url"])
+    LOGGER.info("Requested limit: %s", payload["requested_limit"])
+    LOGGER.info("Processed: %s", payload["processed"])
+    LOGGER.info("Completed: %s", payload["completed"])
+    LOGGER.info("Failed: %s", payload["failed"])
     jobs = payload.get("jobs", [])
     if isinstance(jobs, list):
-        _print_jobs(jobs)
+        _log_jobs(jobs)
 
 
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:

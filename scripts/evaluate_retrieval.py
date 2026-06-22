@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import logging
 import subprocess
 import sys
 import time
@@ -77,7 +78,10 @@ from librarian_evaluation.retrieval import (
     RetrievalResult,
     evaluate_retrieval_cases,
 )
+from librarian_logging import configure_cli_logging
 from librarian_search.search import SearchOptions, SearchResponse, search_chunks
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_BENCHMARK_PATH = REPO_ROOT / "tests/fixtures/evaluation/retrieval_benchmark.json"
 DEFAULT_OUTPUT_PATH = REPO_ROOT / "docs/evaluation-retrieval-report.json"
@@ -96,6 +100,7 @@ DEFAULT_GOLDEN_ANSWER_CORPUS_PATH = (
 
 
 def main() -> int:
+    configure_cli_logging()
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     parser = argparse.ArgumentParser(
@@ -336,8 +341,8 @@ def main() -> int:
     args.markdown_output.write_text(output_rendered_markdown, encoding="utf-8")
     if args.github_summary:
         _append_summary(args.github_summary, summary_markdown)
-    print(f"Wrote retrieval evaluation report to {args.output}")
-    print(f"Wrote human-readable evaluation report to {args.markdown_output}")
+    LOGGER.info("Wrote retrieval evaluation report to %s", args.output)
+    LOGGER.info("Wrote human-readable evaluation report to %s", args.markdown_output)
     return 0
 
 
@@ -679,11 +684,11 @@ def _with_comparison(
 
 def _report_is_stale(path: Path, expected: str, *, regenerate_hint: str) -> bool:
     if not path.exists():
-        print(f"Report is missing: {path}", file=sys.stderr)
+        LOGGER.error("Report is missing: %s", path)
         return True
     current = path.read_text(encoding="utf-8")
     if current != expected:
-        print(f"Report is stale: {regenerate_hint}", file=sys.stderr)
+        LOGGER.error("Report is stale: %s", regenerate_hint)
         return True
     return False
 

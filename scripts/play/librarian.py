@@ -51,7 +51,7 @@ Search within one author or book:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -77,11 +77,15 @@ from librarian_ingestion.embedding_ops import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
+from librarian_logging import configure_cli_logging, emit_json
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 
+LOGGER = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Play with Librarian ingestion, chunks, embeddings, and DB state."
     )
@@ -231,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "state":
             payload = _database_state(database_url)
-            _print_payload(payload, args.json)
+            _log_payload(payload, args.json)
             return 0
         if args.command == "ingest":
             result = run_ingestion(
@@ -246,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
                     summary_detail=args.summary_detail,
                 )
             )
-            _print_payload(result.to_dict(), args.json)
+            _log_payload(result.to_dict(), args.json)
             return 0
         if args.command == "embed":
             result = rebuild_embeddings(
@@ -261,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
                     reset_all=args.reset_all,
                 )
             )
-            _print_payload(result.to_dict(), args.json)
+            _log_payload(result.to_dict(), args.json)
             return 0
         if args.command == "books":
             payload = _list_books(
@@ -270,11 +274,11 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
                 offset=args.offset,
             )
-            _print_payload(payload, args.json)
+            _log_payload(payload, args.json)
             return 0
         if args.command == "chunks":
             payload = _list_chunks(database_url, limit=args.limit, offset=args.offset)
-            _print_payload(payload, args.json)
+            _log_payload(payload, args.json)
             return 0
         if args.command == "embeddings":
             payload = _list_embeddings(
@@ -284,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
                 offset=args.offset,
             )
-            _print_payload(payload, args.json)
+            _log_payload(payload, args.json)
             return 0
         if args.command == "search":
             result = search_chunks(
@@ -302,12 +306,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = result.to_dict()
             if args.json:
-                _print_payload(payload, args.json)
+                _log_payload(payload, args.json)
             else:
-                _print_search_response(payload)
+                _log_search_response(payload)
             return 0
     except (EpubSourceError, ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        LOGGER.error("Error: %s", error)
         return 2
 
     parser.error(f"unsupported command: {args.command}")
@@ -425,47 +429,47 @@ def _list_embeddings(
         store.close()
 
 
-def _print_payload(payload: object, as_json: bool) -> None:
+def _log_payload(payload: object, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(payload, indent=2))
+        emit_json(payload)
         return
 
     if isinstance(payload, dict):
-        _print_dict(payload)
+        _log_dict(payload)
         return
     if isinstance(payload, list):
         for item in payload:
             if isinstance(item, dict):
-                _print_dict(item)
-                print()
+                _log_dict(item)
+                LOGGER.info("")
             else:
-                print(item)
+                LOGGER.info("%s", item)
         return
-    print(payload)
+    LOGGER.info("%s", payload)
 
 
-def _print_dict(payload: dict[str, object]) -> None:
+def _log_dict(payload: dict[str, object]) -> None:
     for key, value in payload.items():
-        print(f"{key}: {value}")
+        LOGGER.info("%s: %s", key, value)
 
 
-def _print_search_response(payload: dict[str, object]) -> None:
-    print("Librarian search")
-    print(f"Query: {payload['query']}")
-    print(
+def _log_search_response(payload: dict[str, object]) -> None:
+    LOGGER.info("Librarian search")
+    LOGGER.info("Query: %s", payload["query"])
+    LOGGER.info(
         "Embedding: "
         f"{payload['embedding_provider']} / {payload['embedding_model']} "
         f"({payload['dimensions']} dimensions)"
     )
-    print(f"Candidates scored: {payload['candidate_count']}")
+    LOGGER.info("Candidates scored: %s", payload["candidate_count"])
     filters = payload.get("filters")
     if isinstance(filters, dict) and filters:
-        print(f"Filters: {filters}")
-    print()
+        LOGGER.info("Filters: %s", filters)
+    LOGGER.info("")
 
     results = payload["results"]
     if not isinstance(results, list) or not results:
-        print("No matching chunks found.")
+        LOGGER.info("No matching chunks found.")
         return
 
     for index, result in enumerate(results, start=1):
@@ -474,13 +478,17 @@ def _print_search_response(payload: dict[str, object]) -> None:
         title = result["title"] or result["relative_path"]
         authors = result["authors"]
         author_text = ", ".join(authors) if isinstance(authors, list) else authors
-        print(f"{index}. score={float(result['score']):.4f}")
-        print(f"   book: {title}")
+        LOGGER.info("%s. score=%.4f", index, float(result["score"]))
+        LOGGER.info("   book: %s", title)
         if author_text:
-            print(f"   authors: {author_text}")
-        print(f"   source: {result['relative_path']} chunk {result['chunk_index']}")
-        print(f"   text: {_single_line(str(result['text']), max_length=360)}")
-        print()
+            LOGGER.info("   authors: %s", author_text)
+        LOGGER.info(
+            "   source: %s chunk %s",
+            result["relative_path"],
+            result["chunk_index"],
+        )
+        LOGGER.info("   text: %s", _single_line(str(result["text"]), max_length=360))
+        LOGGER.info("")
 
 
 def _single_line(text: str, *, max_length: int) -> str:

@@ -28,9 +28,9 @@ Emit machine-readable JSON for automation:
 from __future__ import annotations
 
 import argparse
-import json
-import sys
+import logging
 from pathlib import Path
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGES_DIR = REPO_ROOT / "packages"
@@ -38,13 +38,17 @@ if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_config.config import DATABASE_URL_ENV
+from librarian_logging import configure_cli_logging, emit_json
 from librarian_summarization.jobs import (
     ProcessSummaryJobsOptions,
     process_summary_jobs,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Process queued Librarian chapter/book summary jobs."
     )
@@ -75,24 +79,32 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        LOGGER.error("Error: %s", error)
         return 2
 
     payload = result.to_dict()
     if args.json:
-        print(json.dumps(payload, indent=2))
+        emit_json(payload)
         return 0
 
-    print("Librarian summary job worker")
-    print(f"Database: {result.database_url}")
-    print(f"Requested limit: {result.requested_limit}")
-    print(f"Processed: {result.processed}")
-    print(f"Completed: {result.completed}")
-    print(f"Failed: {result.failed}")
+    LOGGER.info("Librarian summary job worker")
+    LOGGER.info("Database: %s", result.database_url)
+    LOGGER.info("Requested limit: %s", result.requested_limit)
+    LOGGER.info("Processed: %s", result.processed)
+    LOGGER.info("Completed: %s", result.completed)
+    LOGGER.info("Failed: %s", result.failed)
     for job in result.jobs:
         title = job.title or job.book_id
         message = f" - {job.message}" if job.message else ""
-        print(f"- [{job.status}] {title} ({job.provider}/{job.model}/{job.detail}){message}")
+        LOGGER.info(
+            "- [%s] %s (%s/%s/%s)%s",
+            job.status,
+            title,
+            job.provider,
+            job.model,
+            job.detail,
+            message,
+        )
     return 0
 
 

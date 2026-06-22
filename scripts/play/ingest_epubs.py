@@ -49,7 +49,7 @@ Return machine-readable JSON for inspection:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from pathlib import Path
 
@@ -69,9 +69,13 @@ from librarian_config.config import (
 )
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
+from librarian_logging import configure_cli_logging, emit_json
+
+LOGGER = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Scan the configured Librarian EPUB directory."
     )
@@ -163,39 +167,41 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     except (EpubSourceError, ValueError, NotImplementedError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        LOGGER.error("Error: %s", error)
         return 2
 
     if args.json:
-        print(json.dumps(result.to_dict(), indent=2))
+        emit_json(result.to_dict())
         return 0
 
-    print("Librarian EPUB ingestion")
-    print(f"Books directory: {result.books_dir}")
-    print(f"Database: {result.database_url}")
-    print(f"Embedding provider: {result.embedding_provider}")
-    print(f"Embedding model: {result.embedding_model}")
-    print(f"Found {result.found} EPUB files")
+    LOGGER.info("Librarian EPUB ingestion")
+    LOGGER.info("Books directory: %s", result.books_dir)
+    LOGGER.info("Database: %s", result.database_url)
+    LOGGER.info("Embedding provider: %s", result.embedding_provider)
+    LOGGER.info("Embedding model: %s", result.embedding_model)
+    LOGGER.info("Found %s EPUB files", result.found)
 
     if args.list:
         for epub in result.discovered:
-            print(
-                f"- {epub['relative_path']} "
-                f"({epub['size_bytes']} bytes, sha256={epub['sha256']})"
+            LOGGER.info(
+                "- %s (%s bytes, sha256=%s)",
+                epub["relative_path"],
+                epub["size_bytes"],
+                epub["sha256"],
             )
 
     for book in result.books:
         if book.status == "failed":
-            print(f"Failed {book.relative_path}: {book.message}", file=sys.stderr)
+            LOGGER.error("Failed %s: %s", book.relative_path, book.message)
 
-    print(f"Parsed {result.parsed}")
-    print(f"Skipped unchanged {result.skipped_unchanged}")
-    print(f"Skipped duplicates {result.skipped_duplicates}")
-    print(f"Failed {result.failed}")
-    print(f"Stored chunks {result.stored_chunks}")
-    print(f"Stored embeddings {result.stored_embeddings}")
-    print(f"Queued summary jobs {result.summary_jobs_enqueued}")
-    print(
+    LOGGER.info("Parsed %s", result.parsed)
+    LOGGER.info("Skipped unchanged %s", result.skipped_unchanged)
+    LOGGER.info("Skipped duplicates %s", result.skipped_duplicates)
+    LOGGER.info("Failed %s", result.failed)
+    LOGGER.info("Stored chunks %s", result.stored_chunks)
+    LOGGER.info("Stored embeddings %s", result.stored_embeddings)
+    LOGGER.info("Queued summary jobs %s", result.summary_jobs_enqueued)
+    LOGGER.info(
         "Database totals: "
         f"{result.total_books} books, "
         f"{result.total_chunks} chunks, "

@@ -51,7 +51,7 @@ Delete generated genres for one book:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -67,6 +67,7 @@ from librarian_config.config import (
     GENERATION_PROVIDER_ENV,
     OLLAMA_BASE_URL_ENV,
 )
+from librarian_logging import configure_cli_logging, emit_json
 from librarian_metadata.genres import (
     DeleteBookGenresOptions,
     GenerateBookGenresOptions,
@@ -76,8 +77,11 @@ from librarian_metadata.genres import (
     list_book_genres,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Generate, list, and delete Librarian book genres."
     )
@@ -163,9 +167,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = result.to_dict()
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                _print_generated_genres(payload)
+                _log_generated_genres(payload)
             return 0
 
         if args.command == "list":
@@ -183,9 +187,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = [asdict(genre) for genre in genres]
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                _print_genre_list(payload)
+                _log_genre_list(payload)
             return 0
 
         if args.command == "delete":
@@ -201,12 +205,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             payload = {"deleted_genres": deleted}
             if args.json:
-                print(json.dumps(payload, indent=2))
+                emit_json(payload)
             else:
-                print(f"Deleted genres: {deleted}")
+                LOGGER.info("Deleted genres: %s", deleted)
             return 0
     except (ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        LOGGER.error("Error: %s", error)
         return 2
 
     parser.error(f"unsupported command: {args.command}")
@@ -257,30 +261,30 @@ def _add_json_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true")
 
 
-def _print_generated_genres(payload: dict[str, object]) -> None:
-    print(f"Book: {payload['title'] or payload['book_id']}")
-    print(f"Authors: {', '.join(payload['authors'])}")
-    print(
+def _log_generated_genres(payload: dict[str, object]) -> None:
+    LOGGER.info("Book: %s", payload["title"] or payload["book_id"])
+    LOGGER.info("Authors: %s", ", ".join(payload["authors"]))
+    LOGGER.info(
         "Summary source: "
         f"{payload['source_summary_provider']} / {payload['source_summary_model']}"
     )
-    print(
+    LOGGER.info(
         "Genre generator: "
         f"{payload['generation_provider']} / {payload['generation_model']}"
     )
-    print(
+    LOGGER.info(
         "Genres: "
         f"{payload['generated_genres']} generated, "
         f"{payload['cached_genres']} cached"
     )
     if payload["deleted_genres"]:
-        print(f"Deleted before rebuild: {payload['deleted_genres']}")
-    _print_genre_list(payload["genres"])
+        LOGGER.info("Deleted before rebuild: %s", payload["deleted_genres"])
+    _log_genre_list(payload["genres"])
 
 
-def _print_genre_list(genres: object) -> None:
+def _log_genre_list(genres: object) -> None:
     if not isinstance(genres, list) or not genres:
-        print("No genres found.")
+        LOGGER.info("No genres found.")
         return
     for genre in genres:
         if not isinstance(genre, dict):
@@ -294,9 +298,15 @@ def _print_genre_list(genres: object) -> None:
         provenance = f"{source}"
         if provider or model:
             provenance = f"{provenance}, {provider or '?'} / {model or '?'}"
-        print(f"- [{role}] {genre['genre']}{confidence_text} - {provenance}")
+        LOGGER.info(
+            "- [%s] %s%s - %s",
+            role,
+            genre["genre"],
+            confidence_text,
+            provenance,
+        )
         if genre.get("rationale"):
-            print(f"  {genre['rationale']}")
+            LOGGER.info("  %s", genre["rationale"])
 
 
 if __name__ == "__main__":
