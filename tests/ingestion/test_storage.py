@@ -28,6 +28,7 @@ from librarian_storage.storage import (
     ChunkRecord,
     EmbeddingRecord,
     SQLiteIngestionStore,
+    SummaryJobRecord,
     build_book_identity_key,
     create_ingestion_store,
     utc_now,
@@ -356,6 +357,59 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         assert stored_summary is not None
         self.assertEqual(stored_summary.chapter_summary_count, 1)
         self.assertEqual(deleted, 2)
+
+    def test_summary_jobs_can_be_queued_listed_and_updated(self) -> None:
+        """Verify ingestion can queue durable summary work without running it.
+        The job row records provider/model/detail and status so a separate
+        worker can generate summaries after ingestion returns.
+        """
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/forward.epub",
+            relative_path="forward.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        original_job = SummaryJobRecord(
+            id="summary-job-1",
+            book_id="book-1",
+            provider="CODEX",
+            model="codex",
+            detail="MEDIUM",
+        )
+        refreshed_job = SummaryJobRecord(
+            id="summary-job-1-refreshed",
+            book_id="book-1",
+            provider="codex",
+            model="codex",
+            detail="medium",
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+            store.save_summary_job(original_job)
+            store.save_summary_job(refreshed_job)
+
+            pending_jobs = store.list_summary_jobs(status="pending")
+            store.update_summary_job(
+                "summary-job-1-refreshed",
+                status="failed",
+                attempts=1,
+                error_message="summary service unavailable",
+            )
+            failed_jobs = store.list_summary_jobs(status="failed")
+
+        self.assertEqual(len(pending_jobs), 1)
+        self.assertEqual(pending_jobs[0].id, "summary-job-1-refreshed")
+        self.assertEqual(pending_jobs[0].provider, "codex")
+        self.assertEqual(pending_jobs[0].detail, "medium")
+        self.assertEqual(pending_jobs[0].title, "Forward the Foundation")
+        self.assertEqual(failed_jobs[0].attempts, 1)
+        self.assertEqual(failed_jobs[0].error_message, "summary service unavailable")
 
     def test_book_tags_can_be_saved_updated_filtered_and_deleted(self) -> None:
         """Verify book tags are stored with provenance and replace cleanly.
