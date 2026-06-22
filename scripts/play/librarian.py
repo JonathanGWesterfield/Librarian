@@ -85,7 +85,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Play with Librarian ingestion, chunks, embeddings, and DB state."
     )
@@ -230,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_json_flag(search_parser)
 
     args = parser.parse_args(argv)
+    configure_cli_logging(console=not getattr(args, "json", False))
     database_url = resolve_database_url(args.database_url)
 
     try:

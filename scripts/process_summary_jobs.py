@@ -52,7 +52,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Process queued Librarian chapter/book summary jobs."
     )
@@ -89,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    configure_cli_logging(console=not args.json)
 
     try:
         result = process_summary_jobs(

@@ -66,7 +66,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Inspect and process Librarian summary jobs."
     )
@@ -125,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_json_flag(process_parser)
 
     args = parser.parse_args(argv)
+    configure_cli_logging(console=not args.json)
     database_url = resolve_database_url(args.database_url)
 
     try:

@@ -1,7 +1,10 @@
 import subprocess
 
 from fastapi import FastAPI
+from librarian_logging import configure_logging
 from pydantic import BaseModel, Field
+
+configure_logging()
 
 app = FastAPI(title="Librarian Codex Broker", version="0.1.0")
 
@@ -49,4 +52,3 @@ def build_prompt(request: GenerateRequest) -> str:
         f"Question:\n{request.question}\n\n"
         f"Passages:\n{passages}"
     )
-

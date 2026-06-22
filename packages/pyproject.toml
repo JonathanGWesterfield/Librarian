@@ -30,4 +30,5 @@ packages = [
   "librarian_summarization",
   "librarian_metadata",
   "librarian_evaluation",
+  "librarian_logging",
 ]

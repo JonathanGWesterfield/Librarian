@@ -23,6 +23,7 @@ books/*
 !books/.gitkeep
 data/*
 !data/.gitkeep
+logs/
 models/*
 !models/.gitkeep
 

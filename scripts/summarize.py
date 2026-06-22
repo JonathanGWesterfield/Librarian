@@ -86,7 +86,6 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Summarize one ingested book from local chunks."
     )
@@ -167,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     delete_parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
+    configure_cli_logging(console=not args.json)
     try:
         if args.command == "book":
             result = summarize_book(

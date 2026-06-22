@@ -316,6 +316,10 @@ Or start the container stack:
 docker compose up --build
 ```
 
+Runtime logs are written to stdout and to the file configured by
+`LIBRARIAN_LOG_FILE`. With the default Docker environment, inspect live output
+with `docker compose logs api` and the persisted file at `data/librarian.log`.
+
 Run the test suite:
 
 ```bash

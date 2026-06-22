@@ -1,5 +1,5 @@
-"""Shared logging helpers for Librarian command-line tools."""
+"""Shared logging helpers for Librarian Python runtimes."""
 
-from librarian_logging.config import configure_cli_logging, emit_json
+from librarian_logging.config import configure_cli_logging, configure_logging, emit_json
 
-__all__ = ["configure_cli_logging", "emit_json"]
+__all__ = ["configure_cli_logging", "configure_logging", "emit_json"]
