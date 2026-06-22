@@ -1,6 +1,6 @@
 import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -46,7 +46,7 @@ class ChatCliTests(unittest.TestCase):
 
         with patch("chat.answer_question", return_value=fake_response):
             output = StringIO()
-            with redirect_stdout(output):
+            with redirect_stderr(output):
                 exit_code = main(["How brutal is war?", "--retrieval-limit", "20"])
 
         self.assertEqual(exit_code, 0)

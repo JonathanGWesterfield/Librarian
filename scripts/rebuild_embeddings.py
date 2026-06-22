@@ -38,7 +38,7 @@ Return machine-readable JSON for automation:
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
 from pathlib import Path
 
@@ -57,9 +57,13 @@ from librarian_ingestion.embedding_ops import (
     RebuildEmbeddingsOptions,
     rebuild_embeddings,
 )
+from librarian_logging import configure_cli_logging, emit_json
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_cli_logging()
     parser = argparse.ArgumentParser(
         description="Rebuild chunk embeddings without deleting raw book text."
     )
@@ -123,21 +127,21 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        logger.error("Error: %s", error)
         return 2
 
     if args.json:
-        print(json.dumps(result.to_dict(), indent=2))
+        emit_json(result.to_dict())
         return 0
 
-    print("Librarian embedding rebuild")
-    print(f"Database: {result.database_url}")
-    print(f"Embedding provider: {result.embedding_provider}")
-    print(f"Embedding model: {result.embedding_model}")
-    print(f"Chunks seen {result.chunks_seen}")
-    print(f"Embeddings deleted {result.embeddings_deleted}")
-    print(f"Embeddings stored {result.embeddings_stored}")
-    print(f"Total embeddings {result.total_embeddings}")
+    logger.info("Librarian embedding rebuild")
+    logger.info("Database: %s", result.database_url)
+    logger.info("Embedding provider: %s", result.embedding_provider)
+    logger.info("Embedding model: %s", result.embedding_model)
+    logger.info("Chunks seen %s", result.chunks_seen)
+    logger.info("Embeddings deleted %s", result.embeddings_deleted)
+    logger.info("Embeddings stored %s", result.embeddings_stored)
+    logger.info("Total embeddings %s", result.total_embeddings)
     return 0
 
 
