@@ -25,6 +25,11 @@ Run a polling worker until it observes three idle cycles:
       --watch \\
       --idle-exit-after 3
 
+Process summaries without queuing tag/genre jobs afterward:
+    python3 scripts/process_summary_jobs.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --no-enqueue-metadata-jobs
+
 Emit machine-readable JSON for automation:
     python3 scripts/process_summary_jobs.py \\
       --database-url sqlite:///data/librarian.db \\
@@ -115,6 +120,11 @@ def main(argv: list[str] | None = None) -> int:
             f"of {MAX_PARALLEL_CHUNK_SUMMARIES_ENV}."
         ),
     )
+    parser.add_argument(
+        "--no-enqueue-metadata-jobs",
+        action="store_true",
+        help="Do not enqueue tag/genre jobs after a summary job completes.",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     configure_cli_logging(console=not args.json)
@@ -131,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
                     include_chapter_summaries=args.include_chapter_summaries,
                     chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
                     max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                    enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
                 )
             )
         else:
@@ -141,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
                     include_chapter_summaries=args.include_chapter_summaries,
                     chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
                     max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                    enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
                 )
             )
     except (ValueError, NotImplementedError, RuntimeError) as error:
