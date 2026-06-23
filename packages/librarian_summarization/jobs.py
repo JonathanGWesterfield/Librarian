@@ -7,7 +7,11 @@ from collections.abc import Callable
 
 from librarian_config.config import resolve_database_url
 from librarian_storage.storage import StoredSummaryJobRecord, create_ingestion_store
-from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
+from librarian_summarization.summarize import (
+    SummarizeBookOptions,
+    SummaryProgress,
+    summarize_book,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +101,16 @@ def process_summary_jobs(
             logger.info("Skipping summary job already claimed by another worker: %s", job.id)
             continue
 
+        logger.info(
+            "Processing summary job %s for %s provider=%s model=%s detail=%s attempt=%s",
+            job.id,
+            job.title or job.relative_path,
+            job.provider,
+            job.model,
+            job.detail,
+            attempts,
+        )
+
         try:
             summary = summarize_book(
                 SummarizeBookOptions(
@@ -108,10 +122,17 @@ def process_summary_jobs(
                     include_chapter_summaries=options.include_chapter_summaries,
                     chunk_summary_timeout_seconds=options.chunk_summary_timeout_seconds,
                     max_parallel_chunk_summaries=options.max_parallel_chunk_summaries,
+                    progress_callback=_job_progress_callback(database_url, job),
                 )
             )
         except Exception as error:
             message = str(error)
+            logger.exception(
+                "Summary job %s failed for %s: %s",
+                job.id,
+                job.title or job.relative_path,
+                message,
+            )
             _update_job(
                 database_url,
                 job.id,
@@ -129,6 +150,20 @@ def process_summary_jobs(
             )
             continue
 
+        message = (
+            f"{summary.generated_chapter_summaries} chapter summaries generated, "
+            f"{summary.cached_chapter_summaries} reused"
+        )
+        _update_job_progress(
+            database_url,
+            job.id,
+            SummaryProgress(
+                stage="completed",
+                current=summary.chapter_summary_count,
+                total=summary.chapter_summary_count,
+                message=message,
+            ),
+        )
         _update_job(
             database_url,
             job.id,
@@ -141,10 +176,7 @@ def process_summary_jobs(
             _job_result(
                 job,
                 status="completed",
-                message=(
-                    f"{summary.generated_chapter_summaries} chapter summaries "
-                    f"generated, {summary.cached_chapter_summaries} reused"
-                ),
+                message=message,
             )
         )
 
@@ -277,6 +309,43 @@ def _update_job(
         )
     finally:
         store.close()
+
+
+def _update_job_progress(
+    database_url: str, job_id: str, progress: SummaryProgress
+) -> None:
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        store.update_summary_job_progress(
+            job_id,
+            stage=progress.stage,
+            current_step=progress.current,
+            total_steps=progress.total,
+            message=progress.message,
+        )
+    finally:
+        store.close()
+
+
+def _job_progress_callback(
+    database_url: str, job: StoredSummaryJobRecord
+) -> Callable[[SummaryProgress], None]:
+    def _callback(progress: SummaryProgress) -> None:
+        logger.info(
+            "Summary job %s %s/%s stage=%s book=%s provider=%s model=%s: %s",
+            job.id,
+            progress.current,
+            progress.total,
+            progress.stage,
+            job.title or job.relative_path,
+            job.provider,
+            job.model,
+            progress.message,
+        )
+        _update_job_progress(database_url, job.id, progress)
+
+    return _callback
 
 
 def _job_result(

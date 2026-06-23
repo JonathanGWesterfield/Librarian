@@ -159,6 +159,11 @@ class StoredSummaryJobRecord:
     status: str
     attempts: int
     error_message: str | None
+    current_stage: str | None
+    current_step: int | None
+    total_steps: int | None
+    progress_message: str | None
+    progress_updated_at: str | None
     created_at: str
     updated_at: str
 
@@ -279,6 +284,7 @@ class IngestionStageStatus:
     failed_books: int
     percent_complete: float
     details: dict[str, int] = field(default_factory=dict)
+    active_jobs: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -426,6 +432,17 @@ class IngestionStore(Protocol):
     ) -> None:
         ...
 
+    def update_summary_job_progress(
+        self,
+        job_id: str,
+        *,
+        stage: str,
+        current_step: int,
+        total_steps: int,
+        message: str,
+    ) -> None:
+        ...
+
     def claim_summary_job(self, job_id: str, *, attempts: int) -> bool:
         ...
 
@@ -517,6 +534,27 @@ class SQLiteIngestionStore:
                 self._connection.execute(
                     "UPDATE books SET identity_key = ? WHERE id = ?",
                     (identity_key, book_id),
+                )
+        self._migrate_summary_jobs_schema()
+
+    def _migrate_summary_jobs_schema(self) -> None:
+        columns = {
+            row[1]
+            for row in self._connection.execute(
+                "PRAGMA table_info(summary_jobs)"
+            ).fetchall()
+        }
+        progress_columns = {
+            "current_stage": "TEXT",
+            "current_step": "INTEGER",
+            "total_steps": "INTEGER",
+            "progress_message": "TEXT",
+            "progress_updated_at": "TEXT",
+        }
+        for column, column_type in progress_columns.items():
+            if column not in columns:
+                self._connection.execute(
+                    f"ALTER TABLE summary_jobs ADD COLUMN {column} {column_type}"
                 )
 
     def get_book_by_relative_path(
@@ -949,6 +987,7 @@ class SQLiteIngestionStore:
                 "summary_jobs_failed": failed_books,
                 "unqueued_books": unqueued_books,
             },
+            active_jobs=self._running_summary_job_progress(),
         )
 
     def _get_tagging_status(self) -> IngestionStageStatus:
@@ -1007,6 +1046,28 @@ class SQLiteIngestionStore:
                 "SELECT status, COUNT(DISTINCT book_id) FROM summary_jobs GROUP BY status"
             ).fetchall()
         }
+
+    def _running_summary_job_progress(self) -> list[dict[str, object]]:
+        running_jobs = self.list_summary_jobs(status="running", limit=25)
+        return [
+            {
+                "job_id": job.id,
+                "book_id": job.book_id,
+                "relative_path": job.relative_path,
+                "title": job.title,
+                "authors": job.authors,
+                "provider": job.provider,
+                "model": job.model,
+                "detail": job.detail,
+                "attempts": job.attempts,
+                "stage": job.current_stage,
+                "current": job.current_step,
+                "total": job.total_steps,
+                "message": job.progress_message,
+                "updated_at": job.progress_updated_at,
+            }
+            for job in running_jobs
+        ]
 
     def _distinct_count(self, table: str, column: str) -> int:
         return self._connection.execute(
@@ -1315,6 +1376,11 @@ class SQLiteIngestionStore:
                     status = excluded.status,
                     attempts = excluded.attempts,
                     error_message = excluded.error_message,
+                    current_stage = NULL,
+                    current_step = NULL,
+                    total_steps = NULL,
+                    progress_message = NULL,
+                    progress_updated_at = NULL,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -1355,7 +1421,10 @@ class SQLiteIngestionStore:
                    books.title, books.authors_json, summary_jobs.provider,
                    summary_jobs.model, summary_jobs.detail, summary_jobs.status,
                    summary_jobs.attempts, summary_jobs.error_message,
-                   summary_jobs.created_at, summary_jobs.updated_at
+                   summary_jobs.current_stage, summary_jobs.current_step,
+                   summary_jobs.total_steps, summary_jobs.progress_message,
+                   summary_jobs.progress_updated_at, summary_jobs.created_at,
+                   summary_jobs.updated_at
             FROM summary_jobs
             JOIN books ON books.id = summary_jobs.book_id
             {where_sql}
@@ -1377,8 +1446,13 @@ class SQLiteIngestionStore:
                 status=row[8],
                 attempts=row[9],
                 error_message=row[10],
-                created_at=row[11],
-                updated_at=row[12],
+                current_stage=row[11],
+                current_step=row[12],
+                total_steps=row[13],
+                progress_message=row[14],
+                progress_updated_at=row[15],
+                created_at=row[16],
+                updated_at=row[17],
             )
             for row in rows
         ]
@@ -1407,15 +1481,59 @@ class SQLiteIngestionStore:
                 parameters,
             )
 
+    def update_summary_job_progress(
+        self,
+        job_id: str,
+        *,
+        stage: str,
+        current_step: int,
+        total_steps: int,
+        message: str,
+    ) -> None:
+        now = utc_now()
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE summary_jobs
+                SET current_stage = ?, current_step = ?, total_steps = ?,
+                    progress_message = ?, progress_updated_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    stage.strip().casefold(),
+                    max(0, current_step),
+                    max(0, total_steps),
+                    message,
+                    now,
+                    now,
+                    job_id,
+                ),
+            )
+
     def claim_summary_job(self, job_id: str, *, attempts: int) -> bool:
         with self._connection:
             cursor = self._connection.execute(
                 """
                 UPDATE summary_jobs
-                SET status = ?, attempts = ?, error_message = ?, updated_at = ?
+                SET status = ?, attempts = ?, error_message = ?,
+                    current_stage = ?, current_step = ?, total_steps = ?,
+                    progress_message = ?, progress_updated_at = ?,
+                    updated_at = ?
                 WHERE id = ? AND status = ?
                 """,
-                ("running", attempts, None, utc_now(), job_id, "pending"),
+                (
+                    "running",
+                    attempts,
+                    None,
+                    "queued",
+                    0,
+                    0,
+                    "Summary job claimed by worker.",
+                    utc_now(),
+                    utc_now(),
+                    job_id,
+                    "pending",
+                ),
             )
         return cursor.rowcount == 1
 
@@ -1765,6 +1883,7 @@ def _stage_status(
     running_books: int = 0,
     failed_books: int = 0,
     details: dict[str, int] | None = None,
+    active_jobs: list[dict[str, object]] | None = None,
 ) -> IngestionStageStatus:
     if total_books <= 0:
         status = "empty"
@@ -1791,6 +1910,7 @@ def _stage_status(
         failed_books=failed_books,
         percent_complete=percent_complete,
         details=details or {},
+        active_jobs=active_jobs or [],
     )
 
 
