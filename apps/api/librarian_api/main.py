@@ -180,6 +180,22 @@ def ingestion_summary(database_url: Optional[str] = None) -> dict[str, object]:
         store.close()
 
 
+@app.get("/ingestion/status")
+def ingestion_status(database_url: Optional[str] = None) -> dict[str, object]:
+    resolved_database_url = database_url or settings.database_url
+    try:
+        store = create_ingestion_store(resolved_database_url)
+    except (ValueError, NotImplementedError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    store.initialize()
+    try:
+        payload = asdict(store.get_ingestion_status())
+        payload["database_url"] = resolved_database_url
+        return payload
+    finally:
+        store.close()
+
+
 @app.post("/embeddings/rebuild")
 def rebuild_embeddings_endpoint(request: RebuildEmbeddingsRequest) -> dict[str, object]:
     try:

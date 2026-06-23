@@ -13,9 +13,12 @@ from librarian_metadata.genres import BookGenreGenerationResult, GeneratedBookGe
 from librarian_storage.storage import (
     BookGenreRecord,
     BookRecord,
+    BookSummaryRecord,
+    BookTagRecord,
     ChunkRecord,
     EmbeddingRecord,
     SQLiteIngestionStore,
+    SummaryJobRecord,
     utc_now,
 )
 from librarian_summarization.summarize import BookSummary
@@ -82,6 +85,36 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(books_response.json()[0]["relative_path"], "sample.epub")
         with SQLiteIngestionStore(self.database_path) as store:
             self.assertEqual(len(store.list_summary_jobs(status="pending")), 1)
+
+    def test_ingestion_status_endpoint_returns_stage_progress(self) -> None:
+        """Verify clients can show ingestion progress across pipeline stages.
+        The response should tell a UI how much chunking, summarizing, and
+        tagging work is complete, pending, running, or failed.
+        """
+        self._seed_ingestion_status_fixture()
+
+        response = self.client.get(
+            "/ingestion/status",
+            params={"database_url": self.database_url},
+        )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["database_url"], self.database_url)
+        self.assertEqual(payload["total_books"], 2)
+        self.assertEqual(payload["chunking"]["status"], "complete")
+        self.assertEqual(payload["chunking"]["completed_books"], 2)
+        self.assertEqual(payload["chunking"]["details"]["total_chunks"], 2)
+        self.assertEqual(payload["summarizing"]["status"], "in_progress")
+        self.assertEqual(payload["summarizing"]["completed_books"], 1)
+        self.assertEqual(payload["summarizing"]["pending_books"], 1)
+        self.assertEqual(payload["summarizing"]["details"]["summary_jobs_pending"], 1)
+        self.assertEqual(payload["tagging"]["status"], "in_progress")
+        self.assertEqual(payload["tagging"]["completed_books"], 1)
+        self.assertEqual(payload["tagging"]["pending_books"], 1)
+        self.assertEqual(payload["tagging"]["details"]["total_tags"], 1)
+        self.assertEqual(payload["tagging"]["details"]["total_genres"], 1)
 
     def test_embedding_rebuild_endpoint_supports_noop_rebuilds(self) -> None:
         """Verify desktop clients can trigger embedding maintenance.
@@ -459,6 +492,96 @@ class IngestionApiTests(unittest.TestCase):
         with SQLiteIngestionStore(self.database_path) as store:
             store.save_book_with_chunks(book, [])
             store.save_book_genres(genres)
+
+    def _seed_ingestion_status_fixture(self) -> None:
+        first_book = BookRecord(
+            id="api-book-1",
+            source_path="/books/api-sample-1.epub",
+            relative_path="api-sample-1.epub",
+            file_hash="api-book-1",
+            size_bytes=100,
+            title="API Sample One",
+            authors=["Test Author"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        second_book = BookRecord(
+            id="api-book-2",
+            source_path="/books/api-sample-2.epub",
+            relative_path="api-sample-2.epub",
+            file_hash="api-book-2",
+            size_bytes=100,
+            title="API Sample Two",
+            authors=["Test Author"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        first_chunk = ChunkRecord(
+            id="api-book-1:0",
+            book_id="api-book-1",
+            chunk_index=0,
+            text="First book chunk.",
+            character_count=17,
+            token_estimate=4,
+        )
+        second_chunk = ChunkRecord(
+            id="api-book-2:0",
+            book_id="api-book-2",
+            chunk_index=0,
+            text="Second book chunk.",
+            character_count=18,
+            token_estimate=4,
+        )
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(first_book, [first_chunk])
+            store.save_book_with_chunks(second_book, [second_chunk])
+            store.save_book_summary(
+                BookSummaryRecord(
+                    id="api-book-1:summary",
+                    book_id="api-book-1",
+                    provider="codex",
+                    model="codex",
+                    detail="medium",
+                    source_hash="hash",
+                    summary="A finished summary.",
+                    chapter_summary_count=1,
+                )
+            )
+            store.save_summary_job(
+                SummaryJobRecord(
+                    id="api-book-2:summary-job",
+                    book_id="api-book-2",
+                    provider="codex",
+                    model="codex",
+                    detail="medium",
+                )
+            )
+            store.save_book_tags(
+                [
+                    BookTagRecord(
+                        id="api-book-1:tag:psychohistory",
+                        book_id="api-book-1",
+                        tag="psychohistory",
+                        tag_type="topic",
+                        source="llm",
+                        provider="codex",
+                        model="codex",
+                    )
+                ]
+            )
+            store.save_book_genres(
+                [
+                    BookGenreRecord(
+                        id="api-book-1:genre:primary",
+                        book_id="api-book-1",
+                        genre="Science Fiction",
+                        genre_role="primary",
+                        source="llm",
+                        provider="codex",
+                        model="codex",
+                    )
+                ]
+            )
 
 
 class _FakeQueryEmbedder:

@@ -202,6 +202,91 @@
         }
       }
     },
+    "/ingestion/status": {
+      "get": {
+        "tags": ["ingestion"],
+        "operationId": "getIngestionStatus",
+        "summary": "Get ingestion pipeline status",
+        "description": "Returns UI-oriented progress for chunking, summarizing, and tagging so clients can poll while ingestion-related background work runs.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DatabaseUrl"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current ingestion pipeline progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionPipelineStatus"
+                },
+                "examples": {
+                  "partialProgress": {
+                    "value": {
+                      "database_url": "sqlite:///data/librarian.db",
+                      "total_books": 2,
+                      "chunking": {
+                        "status": "complete",
+                        "total_books": 2,
+                        "completed_books": 2,
+                        "pending_books": 0,
+                        "running_books": 0,
+                        "failed_books": 0,
+                        "percent_complete": 100.0,
+                        "details": {
+                          "ingested_books": 2,
+                          "total_chunks": 42
+                        }
+                      },
+                      "summarizing": {
+                        "status": "in_progress",
+                        "total_books": 2,
+                        "completed_books": 1,
+                        "pending_books": 1,
+                        "running_books": 0,
+                        "failed_books": 0,
+                        "percent_complete": 50.0,
+                        "details": {
+                          "book_summaries": 1,
+                          "chapter_summaries": 12,
+                          "summary_jobs_pending": 1,
+                          "summary_jobs_running": 0,
+                          "summary_jobs_completed": 1,
+                          "summary_jobs_failed": 0,
+                          "unqueued_books": 0
+                        }
+                      },
+                      "tagging": {
+                        "status": "in_progress",
+                        "total_books": 2,
+                        "completed_books": 1,
+                        "pending_books": 1,
+                        "running_books": 0,
+                        "failed_books": 0,
+                        "percent_complete": 50.0,
+                        "details": {
+                          "books_with_tags": 1,
+                          "books_with_genres": 1,
+                          "total_tags": 8,
+                          "total_genres": 2
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
     "/embeddings/rebuild": {
       "post": {
         "tags": ["embeddings"],
@@ -1069,6 +1154,81 @@
             "minimum": 0
           },
           "status_counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "IngestionPipelineStatus": {
+        "type": "object",
+        "required": ["database_url", "total_books", "chunking", "summarizing", "tagging"],
+        "properties": {
+          "database_url": {
+            "type": "string",
+            "example": "sqlite:///data/librarian.db"
+          },
+          "total_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "chunking": {
+            "$ref": "#/components/schemas/IngestionStageStatus"
+          },
+          "summarizing": {
+            "$ref": "#/components/schemas/IngestionStageStatus"
+          },
+          "tagging": {
+            "$ref": "#/components/schemas/IngestionStageStatus"
+          }
+        }
+      },
+      "IngestionStageStatus": {
+        "type": "object",
+        "required": [
+          "status",
+          "total_books",
+          "completed_books",
+          "pending_books",
+          "running_books",
+          "failed_books",
+          "percent_complete",
+          "details"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["empty", "not_started", "in_progress", "running", "complete", "failed"]
+          },
+          "total_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completed_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "running_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed_books": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "percent_complete": {
+            "type": "number",
+            "format": "float",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "details": {
             "type": "object",
             "additionalProperties": {
               "type": "integer",

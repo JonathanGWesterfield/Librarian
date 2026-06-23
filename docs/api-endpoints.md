@@ -32,6 +32,91 @@ Common error behavior:
 
 ## Ingestion
 
+### `GET /ingestion/status`
+
+Returns UI-oriented progress for the ingestion pipeline. This endpoint is meant
+to be polled by a desktop frontend after books are submitted so the user can see
+whether chunking, summarization, and metadata tagging are empty, not started, in
+progress, running, complete, or failed.
+
+Query fields:
+
+- `database_url`: optional SQLite database URL. Defaults to
+  `LIBRARIAN_DATABASE_URL`.
+
+Example request:
+
+```text
+GET /ingestion/status?database_url=sqlite:///data/librarian.db
+```
+
+Example response:
+
+```json
+{
+  "database_url": "sqlite:///data/librarian.db",
+  "total_books": 2,
+  "chunking": {
+    "status": "complete",
+    "total_books": 2,
+    "completed_books": 2,
+    "pending_books": 0,
+    "running_books": 0,
+    "failed_books": 0,
+    "percent_complete": 100.0,
+    "details": {
+      "ingested_books": 2,
+      "total_chunks": 42
+    }
+  },
+  "summarizing": {
+    "status": "in_progress",
+    "total_books": 2,
+    "completed_books": 1,
+    "pending_books": 1,
+    "running_books": 0,
+    "failed_books": 0,
+    "percent_complete": 50.0,
+    "details": {
+      "book_summaries": 1,
+      "chapter_summaries": 12,
+      "summary_jobs_pending": 1,
+      "summary_jobs_running": 0,
+      "summary_jobs_completed": 1,
+      "summary_jobs_failed": 0,
+      "unqueued_books": 0
+    }
+  },
+  "tagging": {
+    "status": "in_progress",
+    "total_books": 2,
+    "completed_books": 1,
+    "pending_books": 1,
+    "running_books": 0,
+    "failed_books": 0,
+    "percent_complete": 50.0,
+    "details": {
+      "books_with_tags": 1,
+      "books_with_genres": 1,
+      "total_tags": 8,
+      "total_genres": 2
+    }
+  }
+}
+```
+
+Response fields:
+
+- `database_url`: database inspected by the endpoint.
+- `total_books`: total book records in the database.
+- `chunking`: progress for parsing/chunk storage.
+- `summarizing`: progress for book summary generation and queued summary jobs.
+- `tagging`: progress for generated tags and genres.
+- `status`: one of `empty`, `not_started`, `in_progress`, `running`,
+  `complete`, or `failed`.
+- `percent_complete`: completed books divided by total books for that stage.
+- `details`: stage-specific counters useful for progress labels and debugging.
+
 ### `POST /ingestion/run`
 
 Scans EPUB files, parses text, chunks books, stores book/chunk records, can
