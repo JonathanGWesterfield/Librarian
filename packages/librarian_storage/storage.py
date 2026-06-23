@@ -403,6 +403,9 @@ class IngestionStore(Protocol):
     ) -> None:
         ...
 
+    def claim_summary_job(self, job_id: str, *, attempts: int) -> bool:
+        ...
+
     def save_book_tags(self, tags: list[BookTagRecord]) -> None:
         ...
 
@@ -1261,6 +1264,18 @@ class SQLiteIngestionStore:
                 f"UPDATE summary_jobs SET {', '.join(updates)} WHERE id = ?",
                 parameters,
             )
+
+    def claim_summary_job(self, job_id: str, *, attempts: int) -> bool:
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                UPDATE summary_jobs
+                SET status = ?, attempts = ?, error_message = ?, updated_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                ("running", attempts, None, utc_now(), job_id, "pending"),
+            )
+        return cursor.rowcount == 1
 
     def save_book_tags(self, tags: list[BookTagRecord]) -> None:
         if not tags:
