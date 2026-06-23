@@ -247,6 +247,7 @@ class SummarizeBookTests(unittest.TestCase):
 
         with SQLiteIngestionStore(self.database_path) as store:
             completed_jobs = store.list_summary_jobs(status="completed")
+            metadata_jobs = store.list_metadata_jobs(status="pending")
             stored_summary = store.get_book_summary(
                 book_id="forward-foundation",
                 provider="codex",
@@ -263,6 +264,7 @@ class SummarizeBookTests(unittest.TestCase):
         self.assertEqual(completed_jobs[0].current_step, 1)
         self.assertEqual(completed_jobs[0].total_steps, 1)
         self.assertIn("chapter summaries generated", completed_jobs[0].progress_message)
+        self.assertEqual([job.job_type for job in metadata_jobs], ["tags", "genres"])
         self.assertIsNotNone(stored_summary)
         self.assertEqual(len(generator.calls), 2)
 

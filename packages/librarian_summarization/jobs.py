@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 
 from librarian_config.config import resolve_database_url
+from librarian_metadata.jobs import EnqueueMetadataJobsOptions, enqueue_metadata_jobs
 from librarian_storage.storage import StoredSummaryJobRecord, create_ingestion_store
 from librarian_summarization.summarize import (
     SummarizeBookOptions,
@@ -23,6 +24,7 @@ class ProcessSummaryJobsOptions:
     include_chapter_summaries: bool = False
     chunk_summary_timeout_seconds: float | None = None
     max_parallel_chunk_summaries: int | None = None
+    enqueue_metadata_jobs: bool = True
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,7 @@ class SummaryJobWorkerOptions:
     include_chapter_summaries: bool = False
     chunk_summary_timeout_seconds: float | None = None
     max_parallel_chunk_summaries: int | None = None
+    enqueue_metadata_jobs: bool = True
 
 
 @dataclass(frozen=True)
@@ -171,12 +174,34 @@ def process_summary_jobs(
             attempts=attempts,
             error_message=None,
         )
+        metadata_jobs_enqueued = 0
+        if options.enqueue_metadata_jobs:
+            metadata_jobs_enqueued = enqueue_metadata_jobs(
+                EnqueueMetadataJobsOptions(
+                    database_url=database_url,
+                    book_id=job.book_id,
+                    source_summary_provider=summary.provider,
+                    source_summary_model=summary.model,
+                    source_summary_detail=summary.detail,
+                    generation_provider=job.provider,
+                    generation_model=job.model,
+                )
+            )
+            logger.info(
+                "Queued %s metadata job(s) after summary job %s",
+                metadata_jobs_enqueued,
+                job.id,
+            )
         completed_count += 1
         results.append(
             _job_result(
                 job,
                 status="completed",
-                message=message,
+                message=(
+                    f"{message}; {metadata_jobs_enqueued} metadata jobs queued"
+                    if options.enqueue_metadata_jobs
+                    else message
+                ),
             )
         )
 
@@ -230,6 +255,7 @@ def run_summary_job_worker(
                 include_chapter_summaries=options.include_chapter_summaries,
                 chunk_summary_timeout_seconds=options.chunk_summary_timeout_seconds,
                 max_parallel_chunk_summaries=options.max_parallel_chunk_summaries,
+                enqueue_metadata_jobs=options.enqueue_metadata_jobs,
             )
         )
         processed += run_result.processed
