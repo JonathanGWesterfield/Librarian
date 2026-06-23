@@ -237,25 +237,44 @@
                         "details": {
                           "ingested_books": 2,
                           "total_chunks": 42
-                        }
+                        },
+                        "active_jobs": []
                       },
                       "summarizing": {
                         "status": "in_progress",
                         "total_books": 2,
                         "completed_books": 1,
-                        "pending_books": 1,
-                        "running_books": 0,
+                        "pending_books": 0,
+                        "running_books": 1,
                         "failed_books": 0,
                         "percent_complete": 50.0,
                         "details": {
                           "book_summaries": 1,
                           "chapter_summaries": 12,
-                          "summary_jobs_pending": 1,
-                          "summary_jobs_running": 0,
+                          "summary_jobs_pending": 0,
+                          "summary_jobs_running": 1,
                           "summary_jobs_completed": 1,
                           "summary_jobs_failed": 0,
                           "unqueued_books": 0
-                        }
+                        },
+                        "active_jobs": [
+                          {
+                            "job_id": "summary-job-2",
+                            "book_id": "book-2",
+                            "relative_path": "Forward the Foundation.epub",
+                            "title": "Forward the Foundation",
+                            "authors": ["Isaac Asimov"],
+                            "provider": "ollama",
+                            "model": "llama3.2:3b",
+                            "detail": "medium",
+                            "attempts": 1,
+                            "stage": "chapter",
+                            "current": 4,
+                            "total": 18,
+                            "message": "Generating summary for Chunks 24-31.",
+                            "updated_at": "2026-06-23T12:00:00+00:00"
+                          }
+                        ]
                       },
                       "tagging": {
                         "status": "in_progress",
@@ -270,7 +289,8 @@
                           "books_with_genres": 1,
                           "total_tags": 8,
                           "total_genres": 2
-                        }
+                        },
+                        "active_jobs": []
                       }
                     }
                   }
@@ -1195,7 +1215,8 @@
           "running_books",
           "failed_books",
           "percent_complete",
-          "details"
+          "details",
+          "active_jobs"
         ],
         "properties": {
           "status": {
@@ -1234,6 +1255,81 @@
               "type": "integer",
               "minimum": 0
             }
+          },
+          "active_jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IngestionActiveJob"
+            }
+          }
+        }
+      },
+      "IngestionActiveJob": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "book_id",
+          "relative_path",
+          "title",
+          "authors",
+          "provider",
+          "model",
+          "detail",
+          "attempts",
+          "stage",
+          "current",
+          "total",
+          "message",
+          "updated_at"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "book_id": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stage": {
+            "type": ["string", "null"]
+          },
+          "current": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "total": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "message": {
+            "type": ["string", "null"]
+          },
+          "updated_at": {
+            "type": ["string", "null"]
           }
         }
       },

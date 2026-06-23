@@ -73,19 +73,37 @@ Example response:
     "status": "in_progress",
     "total_books": 2,
     "completed_books": 1,
-    "pending_books": 1,
-    "running_books": 0,
+    "pending_books": 0,
+    "running_books": 1,
     "failed_books": 0,
     "percent_complete": 50.0,
     "details": {
       "book_summaries": 1,
       "chapter_summaries": 12,
-      "summary_jobs_pending": 1,
-      "summary_jobs_running": 0,
+      "summary_jobs_pending": 0,
+      "summary_jobs_running": 1,
       "summary_jobs_completed": 1,
       "summary_jobs_failed": 0,
       "unqueued_books": 0
-    }
+    },
+    "active_jobs": [
+      {
+        "job_id": "summary-job-2",
+        "book_id": "book-2",
+        "relative_path": "Forward the Foundation.epub",
+        "title": "Forward the Foundation",
+        "authors": ["Isaac Asimov"],
+        "provider": "ollama",
+        "model": "llama3.2:3b",
+        "detail": "medium",
+        "attempts": 1,
+        "stage": "chapter",
+        "current": 4,
+        "total": 18,
+        "message": "Generating summary for Chunks 24-31.",
+        "updated_at": "2026-06-23T12:00:00+00:00"
+      }
+    ]
   },
   "tagging": {
     "status": "in_progress",
@@ -116,6 +134,9 @@ Response fields:
   `complete`, or `failed`.
 - `percent_complete`: completed books divided by total books for that stage.
 - `details`: stage-specific counters useful for progress labels and debugging.
+- `active_jobs`: currently running background jobs for that stage. For
+  summarization, this includes the active book, provider/model, current stage,
+  progress counter, and latest worker message.
 
 ### `POST /ingestion/run`
 

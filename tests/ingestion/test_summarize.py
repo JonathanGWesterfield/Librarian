@@ -259,6 +259,10 @@ class SummarizeBookTests(unittest.TestCase):
         self.assertEqual(result.failed, 0)
         self.assertEqual(completed_jobs[0].attempts, 1)
         self.assertIsNone(completed_jobs[0].error_message)
+        self.assertEqual(completed_jobs[0].current_stage, "completed")
+        self.assertEqual(completed_jobs[0].current_step, 1)
+        self.assertEqual(completed_jobs[0].total_steps, 1)
+        self.assertIn("chapter summaries generated", completed_jobs[0].progress_message)
         self.assertIsNotNone(stored_summary)
         self.assertEqual(len(generator.calls), 2)
 

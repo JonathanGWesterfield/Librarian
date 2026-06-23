@@ -106,10 +106,19 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["chunking"]["status"], "complete")
         self.assertEqual(payload["chunking"]["completed_books"], 2)
         self.assertEqual(payload["chunking"]["details"]["total_chunks"], 2)
-        self.assertEqual(payload["summarizing"]["status"], "in_progress")
+        self.assertEqual(payload["summarizing"]["status"], "running")
         self.assertEqual(payload["summarizing"]["completed_books"], 1)
-        self.assertEqual(payload["summarizing"]["pending_books"], 1)
-        self.assertEqual(payload["summarizing"]["details"]["summary_jobs_pending"], 1)
+        self.assertEqual(payload["summarizing"]["pending_books"], 0)
+        self.assertEqual(payload["summarizing"]["running_books"], 1)
+        self.assertEqual(payload["summarizing"]["details"]["summary_jobs_pending"], 0)
+        self.assertEqual(payload["summarizing"]["details"]["summary_jobs_running"], 1)
+        self.assertEqual(
+            payload["summarizing"]["active_jobs"][0]["title"],
+            "API Sample Two",
+        )
+        self.assertEqual(payload["summarizing"]["active_jobs"][0]["stage"], "chapter")
+        self.assertEqual(payload["summarizing"]["active_jobs"][0]["current"], 1)
+        self.assertEqual(payload["summarizing"]["active_jobs"][0]["total"], 2)
         self.assertEqual(payload["tagging"]["status"], "in_progress")
         self.assertEqual(payload["tagging"]["completed_books"], 1)
         self.assertEqual(payload["tagging"]["pending_books"], 1)
@@ -555,6 +564,14 @@ class IngestionApiTests(unittest.TestCase):
                     model="codex",
                     detail="medium",
                 )
+            )
+            store.claim_summary_job("api-book-2:summary-job", attempts=1)
+            store.update_summary_job_progress(
+                "api-book-2:summary-job",
+                stage="chapter",
+                current_step=1,
+                total_steps=2,
+                message="Generating summary for Chunks 0-0.",
             )
             store.save_book_tags(
                 [
