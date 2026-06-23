@@ -169,6 +169,43 @@ class StoredSummaryJobRecord:
 
 
 @dataclass(frozen=True)
+class MetadataJobRecord:
+    id: str
+    book_id: str
+    job_type: str
+    source_summary_provider: str
+    source_summary_model: str
+    source_summary_detail: str
+    generation_provider: str
+    generation_model: str
+    status: str = "pending"
+    attempts: int = 0
+    error_message: str | None = None
+    created_at: str = field(default_factory=lambda: utc_now())
+    updated_at: str = field(default_factory=lambda: utc_now())
+
+
+@dataclass(frozen=True)
+class StoredMetadataJobRecord:
+    id: str
+    book_id: str
+    relative_path: str
+    title: str | None
+    authors: list[str]
+    job_type: str
+    source_summary_provider: str
+    source_summary_model: str
+    source_summary_detail: str
+    generation_provider: str
+    generation_model: str
+    status: str
+    attempts: int
+    error_message: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class BookTagRecord:
     id: str
     book_id: str
@@ -446,6 +483,32 @@ class IngestionStore(Protocol):
     def claim_summary_job(self, job_id: str, *, attempts: int) -> bool:
         ...
 
+    def save_metadata_job(self, job: MetadataJobRecord) -> None:
+        ...
+
+    def list_metadata_jobs(
+        self,
+        *,
+        status: str | None = None,
+        job_type: str | None = None,
+        book_id: str | None = None,
+        limit: int = 100,
+    ) -> list[StoredMetadataJobRecord]:
+        ...
+
+    def update_metadata_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        attempts: int | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        ...
+
+    def claim_metadata_job(self, job_id: str, *, attempts: int) -> bool:
+        ...
+
     def save_book_tags(self, tags: list[BookTagRecord]) -> None:
         ...
 
@@ -631,6 +694,9 @@ class SQLiteIngestionStore:
                 )
                 self._connection.execute(
                     "DELETE FROM summary_jobs WHERE book_id = ?", (existing.id,)
+                )
+                self._connection.execute(
+                    "DELETE FROM metadata_jobs WHERE book_id = ?", (existing.id,)
                 )
                 self._connection.execute(
                     "DELETE FROM book_tags WHERE book_id = ?", (existing.id,)
@@ -994,6 +1060,10 @@ class SQLiteIngestionStore:
         total_books = self._chunked_book_count()
         books_with_tags = self._distinct_count("book_tags", "book_id")
         books_with_genres = self._distinct_count("book_genres", "book_id")
+        status_counts = self._metadata_job_status_counts()
+        pending_jobs = status_counts.get("pending", 0)
+        running_books = status_counts.get("running", 0)
+        failed_books = status_counts.get("failed", 0)
         completed_books = self._connection.execute(
             """
             SELECT COUNT(*) FROM (
@@ -1006,13 +1076,20 @@ class SQLiteIngestionStore:
         return _stage_status(
             total_books=total_books,
             completed_books=completed_books,
-            pending_books=max(0, total_books - completed_books),
+            pending_books=max(0, total_books - completed_books) + pending_jobs,
+            running_books=running_books,
+            failed_books=failed_books,
             details={
                 "books_with_tags": books_with_tags,
                 "books_with_genres": books_with_genres,
                 "total_tags": self._count_table_rows("book_tags"),
                 "total_genres": self._count_table_rows("book_genres"),
+                "metadata_jobs_pending": pending_jobs,
+                "metadata_jobs_running": running_books,
+                "metadata_jobs_completed": status_counts.get("completed", 0),
+                "metadata_jobs_failed": failed_books,
             },
+            active_jobs=self._running_metadata_job_progress(),
         )
 
     def _chunked_book_count(self) -> int:
@@ -1047,6 +1124,14 @@ class SQLiteIngestionStore:
             ).fetchall()
         }
 
+    def _metadata_job_status_counts(self) -> dict[str, int]:
+        return {
+            row[0]: row[1]
+            for row in self._connection.execute(
+                "SELECT status, COUNT(DISTINCT book_id) FROM metadata_jobs GROUP BY status"
+            ).fetchall()
+        }
+
     def _running_summary_job_progress(self) -> list[dict[str, object]]:
         running_jobs = self.list_summary_jobs(status="running", limit=25)
         return [
@@ -1065,6 +1150,31 @@ class SQLiteIngestionStore:
                 "total": job.total_steps,
                 "message": job.progress_message,
                 "updated_at": job.progress_updated_at,
+            }
+            for job in running_jobs
+        ]
+
+    def _running_metadata_job_progress(self) -> list[dict[str, object]]:
+        running_jobs = self.list_metadata_jobs(status="running", limit=25)
+        return [
+            {
+                "job_id": job.id,
+                "book_id": job.book_id,
+                "relative_path": job.relative_path,
+                "title": job.title,
+                "authors": job.authors,
+                "job_type": job.job_type,
+                "source_summary_provider": job.source_summary_provider,
+                "source_summary_model": job.source_summary_model,
+                "source_summary_detail": job.source_summary_detail,
+                "provider": job.generation_provider,
+                "model": job.generation_model,
+                "attempts": job.attempts,
+                "stage": "metadata",
+                "current": 0,
+                "total": 1,
+                "message": f"Generating {job.job_type} metadata.",
+                "updated_at": job.updated_at,
             }
             for job in running_jobs
         ]
@@ -1534,6 +1644,146 @@ class SQLiteIngestionStore:
                     job_id,
                     "pending",
                 ),
+            )
+        return cursor.rowcount == 1
+
+    def save_metadata_job(self, job: MetadataJobRecord) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO metadata_jobs (
+                    id, book_id, job_type, source_summary_provider,
+                    source_summary_model, source_summary_detail,
+                    generation_provider, generation_model, status, attempts,
+                    error_message, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(
+                    book_id, job_type, source_summary_provider,
+                    source_summary_model, source_summary_detail,
+                    generation_provider, generation_model
+                )
+                DO UPDATE SET
+                    id = excluded.id,
+                    status = excluded.status,
+                    attempts = excluded.attempts,
+                    error_message = excluded.error_message,
+                    updated_at = excluded.updated_at
+                WHERE metadata_jobs.status != 'completed'
+                """,
+                (
+                    job.id,
+                    job.book_id,
+                    job.job_type.strip().casefold(),
+                    job.source_summary_provider.strip().casefold(),
+                    job.source_summary_model.strip(),
+                    job.source_summary_detail.strip().casefold(),
+                    job.generation_provider.strip().casefold(),
+                    job.generation_model.strip(),
+                    job.status.strip().casefold(),
+                    job.attempts,
+                    job.error_message,
+                    job.created_at,
+                    job.updated_at,
+                ),
+            )
+
+    def list_metadata_jobs(
+        self,
+        *,
+        status: str | None = None,
+        job_type: str | None = None,
+        book_id: str | None = None,
+        limit: int = 100,
+    ) -> list[StoredMetadataJobRecord]:
+        where: list[str] = []
+        parameters: list[object] = []
+        if status:
+            where.append("metadata_jobs.status = ?")
+            parameters.append(status.strip().casefold())
+        if job_type:
+            where.append("metadata_jobs.job_type = ?")
+            parameters.append(job_type.strip().casefold())
+        if book_id:
+            where.append("metadata_jobs.book_id = ?")
+            parameters.append(book_id)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        parameters.append(max(1, limit))
+
+        rows = self._connection.execute(
+            f"""
+            SELECT metadata_jobs.id, metadata_jobs.book_id, books.relative_path,
+                   books.title, books.authors_json, metadata_jobs.job_type,
+                   metadata_jobs.source_summary_provider,
+                   metadata_jobs.source_summary_model,
+                   metadata_jobs.source_summary_detail,
+                   metadata_jobs.generation_provider,
+                   metadata_jobs.generation_model, metadata_jobs.status,
+                   metadata_jobs.attempts, metadata_jobs.error_message,
+                   metadata_jobs.created_at, metadata_jobs.updated_at
+            FROM metadata_jobs
+            JOIN books ON books.id = metadata_jobs.book_id
+            {where_sql}
+            ORDER BY metadata_jobs.created_at ASC, metadata_jobs.id ASC
+            LIMIT ?
+            """,
+            parameters,
+        ).fetchall()
+        return [
+            StoredMetadataJobRecord(
+                id=row[0],
+                book_id=row[1],
+                relative_path=row[2],
+                title=row[3],
+                authors=_decode_authors(row[4]),
+                job_type=row[5],
+                source_summary_provider=row[6],
+                source_summary_model=row[7],
+                source_summary_detail=row[8],
+                generation_provider=row[9],
+                generation_model=row[10],
+                status=row[11],
+                attempts=row[12],
+                error_message=row[13],
+                created_at=row[14],
+                updated_at=row[15],
+            )
+            for row in rows
+        ]
+
+    def update_metadata_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        attempts: int | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        updates = ["status = ?", "error_message = ?", "updated_at = ?"]
+        parameters: list[object] = [
+            status.strip().casefold(),
+            error_message,
+            utc_now(),
+        ]
+        if attempts is not None:
+            updates.insert(1, "attempts = ?")
+            parameters.insert(1, attempts)
+        parameters.append(job_id)
+        with self._connection:
+            self._connection.execute(
+                f"UPDATE metadata_jobs SET {', '.join(updates)} WHERE id = ?",
+                parameters,
+            )
+
+    def claim_metadata_job(self, job_id: str, *, attempts: int) -> bool:
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                UPDATE metadata_jobs
+                SET status = ?, attempts = ?, error_message = ?, updated_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                ("running", attempts, None, utc_now(), job_id, "pending"),
             )
         return cursor.rowcount == 1
 
@@ -2029,6 +2279,32 @@ ON summary_jobs(status, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_summary_jobs_book
 ON summary_jobs(book_id);
+
+CREATE TABLE IF NOT EXISTS metadata_jobs (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    job_type TEXT NOT NULL,
+    source_summary_provider TEXT NOT NULL,
+    source_summary_model TEXT NOT NULL,
+    source_summary_detail TEXT NOT NULL,
+    generation_provider TEXT NOT NULL,
+    generation_model TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(
+        book_id, job_type, source_summary_provider, source_summary_model,
+        source_summary_detail, generation_provider, generation_model
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_metadata_jobs_status_created
+ON metadata_jobs(status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_metadata_jobs_book_type
+ON metadata_jobs(book_id, job_type);
 
 CREATE TABLE IF NOT EXISTS book_tags (
     id TEXT PRIMARY KEY,

@@ -27,6 +27,7 @@ from librarian_storage.storage import (
     ChapterSummaryRecord,
     ChunkRecord,
     EmbeddingRecord,
+    MetadataJobRecord,
     SQLiteIngestionStore,
     SummaryJobRecord,
     build_book_identity_key,
@@ -491,6 +492,56 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
             running_jobs[0].progress_message, "Generating summary for Chunks 8-15."
         )
         self.assertIsNotNone(running_jobs[0].progress_updated_at)
+
+    def test_metadata_jobs_can_be_queued_claimed_and_updated(self) -> None:
+        """Verify tag and genre work can be queued after summarization.
+        Metadata generation needs the same durable worker handoff as summaries,
+        including atomic claims so two workers do not process the same job.
+        """
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/forward.epub",
+            relative_path="forward.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        job = MetadataJobRecord(
+            id="metadata-job-1",
+            book_id="book-1",
+            job_type="TAGS",
+            source_summary_provider="CODEX",
+            source_summary_model="codex",
+            source_summary_detail="MEDIUM",
+            generation_provider="CODEX",
+            generation_model="codex",
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+            store.save_metadata_job(job)
+            pending_jobs = store.list_metadata_jobs(status="pending")
+            first_claim = store.claim_metadata_job("metadata-job-1", attempts=1)
+            second_claim = store.claim_metadata_job("metadata-job-1", attempts=1)
+            running_jobs = store.list_metadata_jobs(status="running", job_type="tags")
+            store.update_metadata_job(
+                "metadata-job-1",
+                status="completed",
+                attempts=1,
+                error_message=None,
+            )
+            completed_jobs = store.list_metadata_jobs(status="completed")
+
+        self.assertEqual(len(pending_jobs), 1)
+        self.assertEqual(pending_jobs[0].job_type, "tags")
+        self.assertEqual(pending_jobs[0].source_summary_provider, "codex")
+        self.assertTrue(first_claim)
+        self.assertFalse(second_claim)
+        self.assertEqual(running_jobs[0].attempts, 1)
+        self.assertEqual(completed_jobs[0].status, "completed")
 
     def test_book_tags_can_be_saved_updated_filtered_and_deleted(self) -> None:
         """Verify book tags are stored with provenance and replace cleanly.

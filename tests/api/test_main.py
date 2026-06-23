@@ -17,6 +17,7 @@ from librarian_storage.storage import (
     BookTagRecord,
     ChunkRecord,
     EmbeddingRecord,
+    MetadataJobRecord,
     SQLiteIngestionStore,
     SummaryJobRecord,
     utc_now,
@@ -119,11 +120,15 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["summarizing"]["active_jobs"][0]["stage"], "chapter")
         self.assertEqual(payload["summarizing"]["active_jobs"][0]["current"], 1)
         self.assertEqual(payload["summarizing"]["active_jobs"][0]["total"], 2)
-        self.assertEqual(payload["tagging"]["status"], "in_progress")
+        self.assertEqual(payload["tagging"]["status"], "running")
         self.assertEqual(payload["tagging"]["completed_books"], 1)
-        self.assertEqual(payload["tagging"]["pending_books"], 1)
+        self.assertEqual(payload["tagging"]["pending_books"], 2)
+        self.assertEqual(payload["tagging"]["running_books"], 1)
         self.assertEqual(payload["tagging"]["details"]["total_tags"], 1)
         self.assertEqual(payload["tagging"]["details"]["total_genres"], 1)
+        self.assertEqual(payload["tagging"]["details"]["metadata_jobs_pending"], 1)
+        self.assertEqual(payload["tagging"]["details"]["metadata_jobs_running"], 1)
+        self.assertEqual(payload["tagging"]["active_jobs"][0]["job_type"], "genres")
 
     def test_embedding_rebuild_endpoint_supports_noop_rebuilds(self) -> None:
         """Verify desktop clients can trigger embedding maintenance.
@@ -573,6 +578,31 @@ class IngestionApiTests(unittest.TestCase):
                 total_steps=2,
                 message="Generating summary for Chunks 0-0.",
             )
+            store.save_metadata_job(
+                MetadataJobRecord(
+                    id="api-book-2:metadata-tags",
+                    book_id="api-book-2",
+                    job_type="tags",
+                    source_summary_provider="codex",
+                    source_summary_model="codex",
+                    source_summary_detail="medium",
+                    generation_provider="codex",
+                    generation_model="codex",
+                )
+            )
+            store.save_metadata_job(
+                MetadataJobRecord(
+                    id="api-book-2:metadata-genres",
+                    book_id="api-book-2",
+                    job_type="genres",
+                    source_summary_provider="codex",
+                    source_summary_model="codex",
+                    source_summary_detail="medium",
+                    generation_provider="codex",
+                    generation_model="codex",
+                )
+            )
+            store.claim_metadata_job("api-book-2:metadata-genres", attempts=1)
             store.save_book_tags(
                 [
                     BookTagRecord(

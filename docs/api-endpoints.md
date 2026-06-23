@@ -109,16 +109,41 @@ Example response:
     "status": "in_progress",
     "total_books": 2,
     "completed_books": 1,
-    "pending_books": 1,
-    "running_books": 0,
+    "pending_books": 2,
+    "running_books": 1,
     "failed_books": 0,
     "percent_complete": 50.0,
     "details": {
       "books_with_tags": 1,
       "books_with_genres": 1,
       "total_tags": 8,
-      "total_genres": 2
-    }
+      "total_genres": 2,
+      "metadata_jobs_pending": 1,
+      "metadata_jobs_running": 1,
+      "metadata_jobs_completed": 0,
+      "metadata_jobs_failed": 0
+    },
+    "active_jobs": [
+      {
+        "job_id": "metadata-job-1",
+        "book_id": "book-2",
+        "relative_path": "Forward the Foundation.epub",
+        "title": "Forward the Foundation",
+        "authors": ["Isaac Asimov"],
+        "job_type": "genres",
+        "source_summary_provider": "ollama",
+        "source_summary_model": "llama3.2:3b",
+        "source_summary_detail": "medium",
+        "provider": "ollama",
+        "model": "llama3.2:3b",
+        "attempts": 1,
+        "stage": "metadata",
+        "current": 0,
+        "total": 1,
+        "message": "Generating genres metadata.",
+        "updated_at": "2026-06-23T12:01:00+00:00"
+      }
+    ]
   }
 }
 ```
@@ -137,6 +162,8 @@ Response fields:
 - `active_jobs`: currently running background jobs for that stage. For
   summarization, this includes the active book, provider/model, current stage,
   progress counter, and latest worker message.
+  For tagging, this includes active tag/genre jobs and the source summary
+  provider/model they depend on.
 
 ### `POST /ingestion/run`
 
