@@ -425,6 +425,30 @@ python3 scripts/summarize.py \
   --detail medium
 ```
 
+To process summary jobs queued during ingestion, run the worker. One batch:
+
+```bash
+python3 scripts/process_summary_jobs.py \
+  --database-url sqlite:///data/librarian.db \
+  --limit 1
+```
+
+Or poll continuously until stopped:
+
+```bash
+python3 scripts/process_summary_jobs.py \
+  --database-url sqlite:///data/librarian.db \
+  --watch \
+  --poll-interval-seconds 10
+```
+
+In Docker, the summary worker is opt-in so it does not unexpectedly spend LLM
+time during every local startup:
+
+```bash
+docker compose --profile workers up --build
+```
+
 For automation or a future desktop shell, request JSON output:
 
 ```bash

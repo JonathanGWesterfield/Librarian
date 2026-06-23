@@ -20,7 +20,9 @@ from librarian_storage.storage import (
 from librarian_chat.generation import CodexGenerator
 from librarian_summarization.jobs import (
     ProcessSummaryJobsOptions,
+    SummaryJobWorkerOptions,
     process_summary_jobs,
+    run_summary_job_worker,
 )
 from librarian_summarization.summarize import (
     DeleteSummariesOptions,
@@ -283,6 +285,60 @@ class SummarizeBookTests(unittest.TestCase):
         self.assertEqual(result.failed, 1)
         self.assertEqual(failed_jobs[0].attempts, 1)
         self.assertEqual(failed_jobs[0].error_message, "model unavailable")
+
+    def test_process_summary_jobs_skips_jobs_claimed_elsewhere(self) -> None:
+        """Verify one-shot processing honors atomic worker claims.
+        If a pending job is already claimed by another process between listing
+        and processing, this worker should skip it instead of summarizing twice.
+        """
+        self._seed_summary_job()
+        generator = _FakeGenerator()
+
+        with patch(
+            "librarian_summarization.jobs._claim_job",
+            return_value=False,
+        ), patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            return_value=generator,
+        ):
+            result = process_summary_jobs(
+                ProcessSummaryJobsOptions(database_url=self.database_url, limit=1)
+            )
+
+        self.assertEqual(result.processed, 0)
+        self.assertEqual(result.completed, 0)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(generator.calls, [])
+
+    def test_summary_job_worker_processes_pending_jobs_until_idle(self) -> None:
+        """Verify the worker loop drains jobs and exits after idle cycles.
+        This locks in the app/runtime behavior we need for background summary
+        processing without requiring an infinite loop in tests.
+        """
+        self._seed_summary_job()
+        generator = _FakeGenerator()
+        sleeps: list[float] = []
+
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            return_value=generator,
+        ):
+            result = run_summary_job_worker(
+                SummaryJobWorkerOptions(
+                    database_url=self.database_url,
+                    limit=1,
+                    poll_interval_seconds=0.25,
+                    idle_exit_after=1,
+                ),
+                sleep=sleeps.append,
+            )
+
+        self.assertEqual(result.cycles, 2)
+        self.assertEqual(result.processed, 1)
+        self.assertEqual(result.completed, 1)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(result.idle_cycles, 1)
+        self.assertEqual(sleeps, [0.25])
 
     def _seed_book(self) -> None:
         book = BookRecord(
