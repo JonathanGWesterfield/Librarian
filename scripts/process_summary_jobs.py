@@ -19,6 +19,12 @@ Process up to five pending jobs from the local development database:
       --database-url sqlite:///data/librarian.db \\
       --limit 5
 
+Run a polling worker until it observes three idle cycles:
+    python3 scripts/process_summary_jobs.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --watch \\
+      --idle-exit-after 3
+
 Emit machine-readable JSON for automation:
     python3 scripts/process_summary_jobs.py \\
       --database-url sqlite:///data/librarian.db \\
@@ -45,7 +51,9 @@ from librarian_config.config import (
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_summarization.jobs import (
     ProcessSummaryJobsOptions,
+    SummaryJobWorkerOptions,
     process_summary_jobs,
+    run_summary_job_worker,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,7 +71,28 @@ def main(argv: list[str] | None = None) -> int:
         "--limit",
         type=int,
         default=1,
-        help="Maximum pending summary jobs to process.",
+        help="Maximum pending summary jobs to process per cycle.",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Keep polling for pending summary jobs instead of running one batch.",
+    )
+    parser.add_argument(
+        "--poll-interval-seconds",
+        type=float,
+        default=5.0,
+        help="Seconds to sleep between worker polling cycles.",
+    )
+    parser.add_argument(
+        "--idle-exit-after",
+        type=int,
+        help="Stop watch mode after this many consecutive idle cycles.",
+    )
+    parser.add_argument(
+        "--max-cycles",
+        type=int,
+        help="Stop watch mode after this many polling cycles.",
     )
     parser.add_argument(
         "--include-chapter-summaries",
@@ -91,15 +120,29 @@ def main(argv: list[str] | None = None) -> int:
     configure_cli_logging(console=not args.json)
 
     try:
-        result = process_summary_jobs(
-            ProcessSummaryJobsOptions(
-                database_url=args.database_url,
-                limit=args.limit,
-                include_chapter_summaries=args.include_chapter_summaries,
-                chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
-                max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+        if args.watch:
+            result = run_summary_job_worker(
+                SummaryJobWorkerOptions(
+                    database_url=args.database_url,
+                    limit=args.limit,
+                    poll_interval_seconds=args.poll_interval_seconds,
+                    max_cycles=args.max_cycles,
+                    idle_exit_after=args.idle_exit_after,
+                    include_chapter_summaries=args.include_chapter_summaries,
+                    chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                    max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                )
             )
-        )
+        else:
+            result = process_summary_jobs(
+                ProcessSummaryJobsOptions(
+                    database_url=args.database_url,
+                    limit=args.limit,
+                    include_chapter_summaries=args.include_chapter_summaries,
+                    chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                    max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                )
+            )
     except (ValueError, NotImplementedError, RuntimeError) as error:
         logger.error("Error: %s", error)
         return 2
@@ -112,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Librarian summary job worker")
     logger.info("Database: %s", result.database_url)
     logger.info("Requested limit: %s", result.requested_limit)
+    if hasattr(result, "cycles"):
+        logger.info("Cycles: %s", result.cycles)
+        logger.info("Idle cycles: %s", result.idle_cycles)
     logger.info("Processed: %s", result.processed)
     logger.info("Completed: %s", result.completed)
     logger.info("Failed: %s", result.failed)

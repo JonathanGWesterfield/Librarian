@@ -12,3 +12,25 @@ services:
       - ./data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  summary-worker:
+    profiles:
+      - workers
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env.example
+    command:
+      - python
+      - scripts/process_summary_jobs.py
+      - --watch
+      - --limit
+      - "1"
+      - --poll-interval-seconds
+      - "10"
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
