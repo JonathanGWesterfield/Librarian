@@ -269,6 +269,26 @@ class IngestionSummary:
     status_counts: dict[str, int]
 
 
+@dataclass(frozen=True)
+class IngestionStageStatus:
+    status: str
+    total_books: int
+    completed_books: int
+    pending_books: int
+    running_books: int
+    failed_books: int
+    percent_complete: float
+    details: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class IngestionPipelineStatus:
+    total_books: int
+    chunking: IngestionStageStatus
+    summarizing: IngestionStageStatus
+    tagging: IngestionStageStatus
+
+
 class IngestionStore(Protocol):
     def initialize(self) -> None:
         ...
@@ -333,6 +353,9 @@ class IngestionStore(Protocol):
         ...
 
     def get_summary(self) -> IngestionSummary:
+        ...
+
+    def get_ingestion_status(self) -> IngestionPipelineStatus:
         ...
 
     def list_books(
@@ -873,6 +896,125 @@ class SQLiteIngestionStore:
             total_embeddings=self.count_embeddings(),
             status_counts=status_counts,
         )
+
+    def get_ingestion_status(self) -> IngestionPipelineStatus:
+        total_books = self.count_books()
+        return IngestionPipelineStatus(
+            total_books=total_books,
+            chunking=self._get_chunking_status(total_books),
+            summarizing=self._get_summarizing_status(),
+            tagging=self._get_tagging_status(),
+        )
+
+    def _get_chunking_status(self, total_books: int) -> IngestionStageStatus:
+        chunked_books = self._chunked_book_count()
+        failed_books = self._connection.execute(
+            "SELECT COUNT(*) FROM books WHERE status = 'failed'"
+        ).fetchone()[0]
+        ingested_books = self._connection.execute(
+            "SELECT COUNT(*) FROM books WHERE status = 'ingested'"
+        ).fetchone()[0]
+        pending_books = max(0, total_books - chunked_books - failed_books)
+        return _stage_status(
+            total_books=total_books,
+            completed_books=chunked_books,
+            pending_books=pending_books,
+            failed_books=failed_books,
+            details={
+                "ingested_books": ingested_books,
+                "total_chunks": self.count_chunks(),
+            },
+        )
+
+    def _get_summarizing_status(self) -> IngestionStageStatus:
+        total_books = self._chunked_book_count()
+        completed_books = self._distinct_count("book_summaries", "book_id")
+        status_counts = self._summary_job_status_counts()
+        pending_jobs = status_counts.get("pending", 0)
+        running_books = status_counts.get("running", 0)
+        failed_books = status_counts.get("failed", 0)
+        unqueued_books = max(0, total_books - self._summary_known_book_count())
+        return _stage_status(
+            total_books=total_books,
+            completed_books=completed_books,
+            pending_books=pending_jobs + unqueued_books,
+            running_books=running_books,
+            failed_books=failed_books,
+            details={
+                "book_summaries": self._count_table_rows("book_summaries"),
+                "chapter_summaries": self._count_table_rows("chapter_summaries"),
+                "summary_jobs_pending": pending_jobs,
+                "summary_jobs_running": running_books,
+                "summary_jobs_completed": status_counts.get("completed", 0),
+                "summary_jobs_failed": failed_books,
+                "unqueued_books": unqueued_books,
+            },
+        )
+
+    def _get_tagging_status(self) -> IngestionStageStatus:
+        total_books = self._chunked_book_count()
+        books_with_tags = self._distinct_count("book_tags", "book_id")
+        books_with_genres = self._distinct_count("book_genres", "book_id")
+        completed_books = self._connection.execute(
+            """
+            SELECT COUNT(*) FROM (
+                SELECT book_id FROM book_tags
+                UNION
+                SELECT book_id FROM book_genres
+            )
+            """
+        ).fetchone()[0]
+        return _stage_status(
+            total_books=total_books,
+            completed_books=completed_books,
+            pending_books=max(0, total_books - completed_books),
+            details={
+                "books_with_tags": books_with_tags,
+                "books_with_genres": books_with_genres,
+                "total_tags": self._count_table_rows("book_tags"),
+                "total_genres": self._count_table_rows("book_genres"),
+            },
+        )
+
+    def _chunked_book_count(self) -> int:
+        return self._connection.execute(
+            """
+            SELECT COUNT(*) FROM (
+                SELECT books.id
+                FROM books
+                JOIN chunks ON chunks.book_id = books.id
+                WHERE books.status = 'ingested'
+                GROUP BY books.id
+            )
+            """
+        ).fetchone()[0]
+
+    def _summary_known_book_count(self) -> int:
+        return self._connection.execute(
+            """
+            SELECT COUNT(*) FROM (
+                SELECT book_id FROM book_summaries
+                UNION
+                SELECT book_id FROM summary_jobs
+            )
+            """
+        ).fetchone()[0]
+
+    def _summary_job_status_counts(self) -> dict[str, int]:
+        return {
+            row[0]: row[1]
+            for row in self._connection.execute(
+                "SELECT status, COUNT(DISTINCT book_id) FROM summary_jobs GROUP BY status"
+            ).fetchall()
+        }
+
+    def _distinct_count(self, table: str, column: str) -> int:
+        return self._connection.execute(
+            f"SELECT COUNT(DISTINCT {column}) FROM {table}"
+        ).fetchone()[0]
+
+    def _count_table_rows(self, table: str) -> int:
+        return self._connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
     def list_books(
         self, *, status: str | None = None, limit: int = 100, offset: int = 0
@@ -1613,6 +1755,43 @@ def _preview_text(text: str, max_length: int = 140) -> str:
     if len(preview) <= max_length:
         return preview
     return f"{preview[:max_length - 3]}..."
+
+
+def _stage_status(
+    *,
+    total_books: int,
+    completed_books: int,
+    pending_books: int,
+    running_books: int = 0,
+    failed_books: int = 0,
+    details: dict[str, int] | None = None,
+) -> IngestionStageStatus:
+    if total_books <= 0:
+        status = "empty"
+        percent_complete = 0.0
+    else:
+        percent_complete = round((completed_books / total_books) * 100, 2)
+        if running_books:
+            status = "running"
+        elif failed_books and completed_books + failed_books >= total_books:
+            status = "failed"
+        elif completed_books >= total_books:
+            status = "complete"
+        elif completed_books == 0 and pending_books:
+            status = "not_started"
+        else:
+            status = "in_progress"
+
+    return IngestionStageStatus(
+        status=status,
+        total_books=total_books,
+        completed_books=completed_books,
+        pending_books=pending_books,
+        running_books=running_books,
+        failed_books=failed_books,
+        percent_complete=percent_complete,
+        details=details or {},
+    )
 
 
 def create_ingestion_store(database_url: str) -> IngestionStore:
