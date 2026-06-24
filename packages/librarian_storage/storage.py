@@ -587,16 +587,6 @@ class SQLiteIngestionStore:
             self._connection.execute("ALTER TABLE books ADD COLUMN publisher TEXT")
         if "identity_key" not in columns:
             self._connection.execute("ALTER TABLE books ADD COLUMN identity_key TEXT")
-        book_timing_columns = {
-            "chunk_started_at": "TEXT",
-            "chunk_completed_at": "TEXT",
-            "chunk_duration_seconds": "REAL",
-        }
-        for column, column_type in book_timing_columns.items():
-            if column not in columns:
-                self._connection.execute(
-                    f"ALTER TABLE books ADD COLUMN {column} {column_type}"
-                )
         self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_books_identity_key ON books(identity_key)"
         )
@@ -619,7 +609,6 @@ class SQLiteIngestionStore:
                     (identity_key, book_id),
                 )
         self._migrate_summary_jobs_schema()
-        self._migrate_metadata_jobs_schema()
 
     def _migrate_summary_jobs_schema(self) -> None:
         columns = {
@@ -634,32 +623,11 @@ class SQLiteIngestionStore:
             "total_steps": "INTEGER",
             "progress_message": "TEXT",
             "progress_updated_at": "TEXT",
-            "started_at": "TEXT",
-            "completed_at": "TEXT",
-            "duration_seconds": "REAL",
         }
         for column, column_type in progress_columns.items():
             if column not in columns:
                 self._connection.execute(
                     f"ALTER TABLE summary_jobs ADD COLUMN {column} {column_type}"
-                )
-
-    def _migrate_metadata_jobs_schema(self) -> None:
-        columns = {
-            row[1]
-            for row in self._connection.execute(
-                "PRAGMA table_info(metadata_jobs)"
-            ).fetchall()
-        }
-        timing_columns = {
-            "started_at": "TEXT",
-            "completed_at": "TEXT",
-            "duration_seconds": "REAL",
-        }
-        for column, column_type in timing_columns.items():
-            if column not in columns:
-                self._connection.execute(
-                    f"ALTER TABLE metadata_jobs ADD COLUMN {column} {column_type}"
                 )
 
     def get_book_by_relative_path(
