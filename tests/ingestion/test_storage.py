@@ -133,6 +133,9 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
             status="ingested",
             publisher=parsed.publisher,
             ingested_at=utc_now(),
+            chunk_started_at="2026-06-24T10:00:00+00:00",
+            chunk_completed_at="2026-06-24T10:00:01+00:00",
+            chunk_duration_seconds=1.25,
         )
         chunk_records = [
             ChunkRecord(
@@ -160,8 +163,12 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(stored.chunk_count, len(chunks))
 
         with sqlite3.connect(self.database_path) as connection:
-            title, authors_json, publisher = connection.execute(
-                "SELECT title, authors_json, publisher FROM books WHERE relative_path = ?",
+            title, authors_json, publisher, chunk_duration_seconds = connection.execute(
+                """
+                SELECT title, authors_json, publisher, chunk_duration_seconds
+                FROM books
+                WHERE relative_path = ?
+                """,
                 ("sample.epub",),
             ).fetchone()
             first_chunk = connection.execute(
@@ -172,6 +179,7 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(title, "The Clockwork Garden")
         self.assertIn("Test Author", authors_json)
         self.assertEqual(publisher, SAMPLE_PUBLISHER)
+        self.assertEqual(chunk_duration_seconds, 1.25)
         self.assertIn("The clockwork garden woke at dawn.", first_chunk)
 
     def test_summary_and_book_listing_support_read_clients(self) -> None:
@@ -447,6 +455,51 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertFalse(second_claim)
         self.assertEqual(running_jobs[0].attempts, 1)
         self.assertEqual(running_jobs[0].id, "summary-job-1")
+        self.assertIsNotNone(running_jobs[0].started_at)
+        self.assertIsNone(running_jobs[0].completed_at)
+        self.assertIsNone(running_jobs[0].duration_seconds)
+
+    def test_summary_jobs_record_completion_duration(self) -> None:
+        """Verify summary jobs persist elapsed time for completed runs.
+        Summarization is one of the slowest workflows, so storing per-book job
+        duration lets us compare models and spot regressions over time.
+        """
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/forward.epub",
+            relative_path="forward.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        job = SummaryJobRecord(
+            id="summary-job-1",
+            book_id="book-1",
+            provider="codex",
+            model="codex",
+            detail="medium",
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+            store.save_summary_job(job)
+            store.claim_summary_job("summary-job-1", attempts=1)
+            store.update_summary_job(
+                "summary-job-1",
+                status="completed",
+                attempts=1,
+                error_message=None,
+            )
+            completed_jobs = store.list_summary_jobs(status="completed")
+
+        self.assertIsNotNone(completed_jobs[0].started_at)
+        self.assertIsNotNone(completed_jobs[0].completed_at)
+        self.assertIsNotNone(completed_jobs[0].duration_seconds)
+        assert completed_jobs[0].duration_seconds is not None
+        self.assertGreaterEqual(completed_jobs[0].duration_seconds, 0.0)
 
     def test_summary_job_progress_can_be_persisted_for_running_workers(self) -> None:
         """Verify background summary workers can publish live progress.
@@ -541,7 +594,11 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertTrue(first_claim)
         self.assertFalse(second_claim)
         self.assertEqual(running_jobs[0].attempts, 1)
+        self.assertIsNotNone(running_jobs[0].started_at)
+        self.assertIsNone(running_jobs[0].duration_seconds)
         self.assertEqual(completed_jobs[0].status, "completed")
+        self.assertIsNotNone(completed_jobs[0].completed_at)
+        self.assertIsNotNone(completed_jobs[0].duration_seconds)
 
     def test_book_tags_can_be_saved_updated_filtered_and_deleted(self) -> None:
         """Verify book tags are stored with provenance and replace cleanly.

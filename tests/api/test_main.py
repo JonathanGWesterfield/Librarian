@@ -107,6 +107,9 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["chunking"]["status"], "complete")
         self.assertEqual(payload["chunking"]["completed_books"], 2)
         self.assertEqual(payload["chunking"]["details"]["total_chunks"], 2)
+        self.assertGreaterEqual(
+            payload["chunking"]["details"]["total_chunk_duration_seconds"], 0.0
+        )
         self.assertEqual(payload["summarizing"]["status"], "running")
         self.assertEqual(payload["summarizing"]["completed_books"], 1)
         self.assertEqual(payload["summarizing"]["pending_books"], 0)
@@ -120,6 +123,11 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["summarizing"]["active_jobs"][0]["stage"], "chapter")
         self.assertEqual(payload["summarizing"]["active_jobs"][0]["current"], 1)
         self.assertEqual(payload["summarizing"]["active_jobs"][0]["total"], 2)
+        self.assertIsNotNone(payload["summarizing"]["active_jobs"][0]["started_at"])
+        self.assertIsNotNone(payload["summarizing"]["active_jobs"][0]["duration_seconds"])
+        self.assertGreaterEqual(
+            payload["summarizing"]["active_jobs"][0]["duration_seconds"], 0.0
+        )
         self.assertEqual(payload["tagging"]["status"], "running")
         self.assertEqual(payload["tagging"]["completed_books"], 1)
         self.assertEqual(payload["tagging"]["pending_books"], 2)
@@ -129,6 +137,8 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["tagging"]["details"]["metadata_jobs_pending"], 1)
         self.assertEqual(payload["tagging"]["details"]["metadata_jobs_running"], 1)
         self.assertEqual(payload["tagging"]["active_jobs"][0]["job_type"], "genres")
+        self.assertIsNotNone(payload["tagging"]["active_jobs"][0]["started_at"])
+        self.assertIsNotNone(payload["tagging"]["active_jobs"][0]["duration_seconds"])
 
     def test_embedding_rebuild_endpoint_supports_noop_rebuilds(self) -> None:
         """Verify desktop clients can trigger embedding maintenance.

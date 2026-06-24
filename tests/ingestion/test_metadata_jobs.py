@@ -97,6 +97,9 @@ class MetadataJobTests(unittest.TestCase):
         self.assertEqual(result.completed, 2)
         self.assertEqual(result.failed, 0)
         self.assertEqual(len(completed_jobs), 2)
+        self.assertTrue(all(job.started_at is not None for job in completed_jobs))
+        self.assertTrue(all(job.completed_at is not None for job in completed_jobs))
+        self.assertTrue(all(job.duration_seconds is not None for job in completed_jobs))
         tag_generator.assert_called_once()
         genre_generator.assert_called_once()
 
@@ -134,6 +137,9 @@ class MetadataJobTests(unittest.TestCase):
         self.assertEqual(result.failed, 1)
         self.assertEqual(failed_jobs[0].attempts, 1)
         self.assertEqual(failed_jobs[0].error_message, "metadata model unavailable")
+        self.assertIsNotNone(failed_jobs[0].started_at)
+        self.assertIsNotNone(failed_jobs[0].completed_at)
+        self.assertIsNotNone(failed_jobs[0].duration_seconds)
 
     def test_metadata_job_worker_processes_until_idle(self) -> None:
         """Verify watch-mode metadata processing drains jobs then exits idle.
