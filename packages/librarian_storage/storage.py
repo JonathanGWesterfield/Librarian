@@ -11,6 +11,9 @@ from typing import Optional, Protocol
 from librarian_config.config import sqlite_path_from_url
 
 
+SECONDS_PER_DAY = 24 * 60 * 60
+
+
 @dataclass(frozen=True)
 class BookRecord:
     id: str
@@ -1640,12 +1643,12 @@ class SQLiteIngestionStore:
                     """
                     duration_seconds = CASE
                         WHEN started_at IS NULL THEN NULL
-                        ELSE CAST((julianday(?) - julianday(started_at)) * 86400.0 AS REAL)
+                        ELSE CAST((julianday(?) - julianday(started_at)) * ? AS REAL)
                     END
                     """,
                 ]
             )
-            parameters.extend([now, now])
+            parameters.extend([now, now, SECONDS_PER_DAY])
         parameters.append(job_id)
         with self._connection:
             self._connection.execute(
@@ -1849,12 +1852,12 @@ class SQLiteIngestionStore:
                     """
                     duration_seconds = CASE
                         WHEN started_at IS NULL THEN NULL
-                        ELSE CAST((julianday(?) - julianday(started_at)) * 86400.0 AS REAL)
+                        ELSE CAST((julianday(?) - julianday(started_at)) * ? AS REAL)
                     END
                     """,
                 ]
             )
-            parameters.extend([now, now])
+            parameters.extend([now, now, SECONDS_PER_DAY])
         parameters.append(job_id)
         with self._connection:
             self._connection.execute(
