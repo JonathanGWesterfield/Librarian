@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -126,6 +127,8 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                 )
                 continue
 
+            chunk_started_at = utc_now()
+            chunk_started_perf = time.perf_counter()
             try:
                 parsed = parse_epub(discovered.path)
                 duplicate = store.get_book_by_identity(
@@ -138,7 +141,10 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                     )
                     duplicate_book = _book_record(
                         discovered, parsed.title, parsed.authors, parsed.publisher,
-                        "duplicate", message
+                        "duplicate", message,
+                        chunk_started_at=chunk_started_at,
+                        chunk_completed_at=utc_now(),
+                        chunk_duration_seconds=_elapsed_seconds(chunk_started_perf),
                     )
                     store.save_book_with_chunks(duplicate_book, [])
                     duplicate_count += 1
@@ -148,6 +154,8 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                     continue
 
                 chunks = chunk_text(parsed.text)
+                chunk_completed_at = utc_now()
+                chunk_duration_seconds = _elapsed_seconds(chunk_started_perf)
                 book = _book_record(
                     discovered,
                     parsed.title,
@@ -155,6 +163,9 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                     parsed.publisher,
                     "ingested",
                     ingested_at=utc_now(),
+                    chunk_started_at=chunk_started_at,
+                    chunk_completed_at=chunk_completed_at,
+                    chunk_duration_seconds=chunk_duration_seconds,
                 )
                 chunk_records = [
                     ChunkRecord(
@@ -202,7 +213,17 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
             except Exception as error:
                 message = str(error)
                 failed_count += 1
-                failed_book = _book_record(discovered, None, [], None, "failed", message)
+                failed_book = _book_record(
+                    discovered,
+                    None,
+                    [],
+                    None,
+                    "failed",
+                    message,
+                    chunk_started_at=chunk_started_at,
+                    chunk_completed_at=utc_now(),
+                    chunk_duration_seconds=_elapsed_seconds(chunk_started_perf),
+                )
                 store.save_book_with_chunks(failed_book, [])
                 book_results.append(_book_result(discovered, "failed", message=message))
 
@@ -307,6 +328,9 @@ def _book_record(
     status: str,
     error_message: str | None = None,
     ingested_at: str | None = None,
+    chunk_started_at: str | None = None,
+    chunk_completed_at: str | None = None,
+    chunk_duration_seconds: float | None = None,
 ) -> BookRecord:
     book_id = discovered.sha256
     if status != "ingested":
@@ -324,7 +348,14 @@ def _book_record(
         status=status,
         error_message=error_message,
         ingested_at=ingested_at,
+        chunk_started_at=chunk_started_at,
+        chunk_completed_at=chunk_completed_at,
+        chunk_duration_seconds=chunk_duration_seconds,
     )
+
+
+def _elapsed_seconds(started_perf: float) -> float:
+    return max(0.0, time.perf_counter() - started_perf)
 
 
 def _book_result(

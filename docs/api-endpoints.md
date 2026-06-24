@@ -66,7 +66,9 @@ Example response:
     "percent_complete": 100.0,
     "details": {
       "ingested_books": 2,
-      "total_chunks": 42
+      "total_chunks": 42,
+      "total_chunk_duration_seconds": 3.42,
+      "avg_chunk_duration_seconds": 1.71
     }
   },
   "summarizing": {
@@ -101,6 +103,8 @@ Example response:
         "current": 4,
         "total": 18,
         "message": "Generating summary for Chunks 24-31.",
+        "started_at": "2026-06-23T11:58:00+00:00",
+        "duration_seconds": 120.0,
         "updated_at": "2026-06-23T12:00:00+00:00"
       }
     ]
@@ -159,6 +163,7 @@ Response fields:
   `complete`, or `failed`.
 - `percent_complete`: completed books divided by total books for that stage.
 - `details`: stage-specific counters useful for progress labels and debugging.
+  Chunking details include total and average chunking duration in seconds.
 - `active_jobs`: currently running background jobs for that stage. For
   summarization, this includes the active book, provider/model, current stage,
   progress counter, and latest worker message.

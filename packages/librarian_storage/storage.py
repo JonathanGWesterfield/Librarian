@@ -25,6 +25,9 @@ class BookRecord:
     error_message: Optional[str] = None
     discovered_at: str = field(default_factory=lambda: utc_now())
     ingested_at: Optional[str] = None
+    chunk_started_at: Optional[str] = None
+    chunk_completed_at: Optional[str] = None
+    chunk_duration_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,7 @@ class StoredBookRecord:
     status: str
     error_message: Optional[str]
     chunk_count: int
+    chunk_duration_seconds: float | None
 
 
 @dataclass(frozen=True)
@@ -164,6 +168,9 @@ class StoredSummaryJobRecord:
     total_steps: int | None
     progress_message: str | None
     progress_updated_at: str | None
+    started_at: str | None
+    completed_at: str | None
+    duration_seconds: float | None
     created_at: str
     updated_at: str
 
@@ -201,6 +208,9 @@ class StoredMetadataJobRecord:
     status: str
     attempts: int
     error_message: str | None
+    started_at: str | None
+    completed_at: str | None
+    duration_seconds: float | None
     created_at: str
     updated_at: str
 
@@ -320,7 +330,7 @@ class IngestionStageStatus:
     running_books: int
     failed_books: int
     percent_complete: float
-    details: dict[str, int] = field(default_factory=dict)
+    details: dict[str, object] = field(default_factory=dict)
     active_jobs: list[dict[str, object]] = field(default_factory=list)
 
 
@@ -577,6 +587,16 @@ class SQLiteIngestionStore:
             self._connection.execute("ALTER TABLE books ADD COLUMN publisher TEXT")
         if "identity_key" not in columns:
             self._connection.execute("ALTER TABLE books ADD COLUMN identity_key TEXT")
+        book_timing_columns = {
+            "chunk_started_at": "TEXT",
+            "chunk_completed_at": "TEXT",
+            "chunk_duration_seconds": "REAL",
+        }
+        for column, column_type in book_timing_columns.items():
+            if column not in columns:
+                self._connection.execute(
+                    f"ALTER TABLE books ADD COLUMN {column} {column_type}"
+                )
         self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_books_identity_key ON books(identity_key)"
         )
@@ -599,6 +619,7 @@ class SQLiteIngestionStore:
                     (identity_key, book_id),
                 )
         self._migrate_summary_jobs_schema()
+        self._migrate_metadata_jobs_schema()
 
     def _migrate_summary_jobs_schema(self) -> None:
         columns = {
@@ -613,11 +634,32 @@ class SQLiteIngestionStore:
             "total_steps": "INTEGER",
             "progress_message": "TEXT",
             "progress_updated_at": "TEXT",
+            "started_at": "TEXT",
+            "completed_at": "TEXT",
+            "duration_seconds": "REAL",
         }
         for column, column_type in progress_columns.items():
             if column not in columns:
                 self._connection.execute(
                     f"ALTER TABLE summary_jobs ADD COLUMN {column} {column_type}"
+                )
+
+    def _migrate_metadata_jobs_schema(self) -> None:
+        columns = {
+            row[1]
+            for row in self._connection.execute(
+                "PRAGMA table_info(metadata_jobs)"
+            ).fetchall()
+        }
+        timing_columns = {
+            "started_at": "TEXT",
+            "completed_at": "TEXT",
+            "duration_seconds": "REAL",
+        }
+        for column, column_type in timing_columns.items():
+            if column not in columns:
+                self._connection.execute(
+                    f"ALTER TABLE metadata_jobs ADD COLUMN {column} {column_type}"
                 )
 
     def get_book_by_relative_path(
@@ -710,9 +752,10 @@ class SQLiteIngestionStore:
                 INSERT INTO books (
                     id, source_path, relative_path, file_hash, size_bytes, title,
                     authors_json, publisher, identity_key, status, error_message, discovered_at,
-                    ingested_at, updated_at
+                    ingested_at, chunk_started_at, chunk_completed_at,
+                    chunk_duration_seconds, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(relative_path) DO UPDATE SET
                     id = excluded.id,
                     source_path = excluded.source_path,
@@ -725,6 +768,9 @@ class SQLiteIngestionStore:
                     status = excluded.status,
                     error_message = excluded.error_message,
                     ingested_at = excluded.ingested_at,
+                    chunk_started_at = excluded.chunk_started_at,
+                    chunk_completed_at = excluded.chunk_completed_at,
+                    chunk_duration_seconds = excluded.chunk_duration_seconds,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -741,6 +787,9 @@ class SQLiteIngestionStore:
                     book.error_message,
                     book.discovered_at,
                     book.ingested_at,
+                    book.chunk_started_at,
+                    book.chunk_completed_at,
+                    book.chunk_duration_seconds,
                     updated_at,
                 ),
             )
@@ -1027,6 +1076,8 @@ class SQLiteIngestionStore:
             details={
                 "ingested_books": ingested_books,
                 "total_chunks": self.count_chunks(),
+                "total_chunk_duration_seconds": self._sum_book_chunk_duration(),
+                "avg_chunk_duration_seconds": self._avg_book_chunk_duration(),
             },
         )
 
@@ -1150,6 +1201,10 @@ class SQLiteIngestionStore:
                 "total": job.total_steps,
                 "message": job.progress_message,
                 "updated_at": job.progress_updated_at,
+                "started_at": job.started_at,
+                "duration_seconds": job.duration_seconds
+                if job.duration_seconds is not None
+                else _elapsed_seconds(job.started_at),
             }
             for job in running_jobs
         ]
@@ -1175,6 +1230,10 @@ class SQLiteIngestionStore:
                 "total": 1,
                 "message": f"Generating {job.job_type} metadata.",
                 "updated_at": job.updated_at,
+                "started_at": job.started_at,
+                "duration_seconds": job.duration_seconds
+                if job.duration_seconds is not None
+                else _elapsed_seconds(job.started_at),
             }
             for job in running_jobs
         ]
@@ -1186,6 +1245,18 @@ class SQLiteIngestionStore:
 
     def _count_table_rows(self, table: str) -> int:
         return self._connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
+    def _sum_book_chunk_duration(self) -> float:
+        value = self._connection.execute(
+            "SELECT COALESCE(SUM(chunk_duration_seconds), 0.0) FROM books"
+        ).fetchone()[0]
+        return float(value)
+
+    def _avg_book_chunk_duration(self) -> float:
+        value = self._connection.execute(
+            "SELECT COALESCE(AVG(chunk_duration_seconds), 0.0) FROM books"
+        ).fetchone()[0]
+        return float(value)
 
     def list_books(
         self, *, status: str | None = None, limit: int = 100, offset: int = 0
@@ -1202,7 +1273,7 @@ class SQLiteIngestionStore:
             f"""
             SELECT books.id, books.relative_path, books.title, books.authors_json,
                    books.publisher, books.status, books.error_message,
-                   COUNT(chunks.id) AS chunk_count
+                   books.chunk_duration_seconds, COUNT(chunks.id) AS chunk_count
             FROM books
             LEFT JOIN chunks ON chunks.book_id = books.id
             {where}
@@ -1221,7 +1292,8 @@ class SQLiteIngestionStore:
                 publisher=row[4],
                 status=row[5],
                 error_message=row[6],
-                chunk_count=row[7],
+                chunk_duration_seconds=row[7],
+                chunk_count=row[8],
             )
             for row in rows
         ]
@@ -1491,6 +1563,9 @@ class SQLiteIngestionStore:
                     total_steps = NULL,
                     progress_message = NULL,
                     progress_updated_at = NULL,
+                    started_at = NULL,
+                    completed_at = NULL,
+                    duration_seconds = NULL,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -1533,8 +1608,9 @@ class SQLiteIngestionStore:
                    summary_jobs.attempts, summary_jobs.error_message,
                    summary_jobs.current_stage, summary_jobs.current_step,
                    summary_jobs.total_steps, summary_jobs.progress_message,
-                   summary_jobs.progress_updated_at, summary_jobs.created_at,
-                   summary_jobs.updated_at
+                   summary_jobs.progress_updated_at, summary_jobs.started_at,
+                   summary_jobs.completed_at, summary_jobs.duration_seconds,
+                   summary_jobs.created_at, summary_jobs.updated_at
             FROM summary_jobs
             JOIN books ON books.id = summary_jobs.book_id
             {where_sql}
@@ -1561,8 +1637,11 @@ class SQLiteIngestionStore:
                 total_steps=row[13],
                 progress_message=row[14],
                 progress_updated_at=row[15],
-                created_at=row[16],
-                updated_at=row[17],
+                started_at=row[16],
+                completed_at=row[17],
+                duration_seconds=row[18],
+                created_at=row[19],
+                updated_at=row[20],
             )
             for row in rows
         ]
@@ -1575,15 +1654,30 @@ class SQLiteIngestionStore:
         attempts: int | None = None,
         error_message: str | None = None,
     ) -> None:
+        normalized_status = status.strip().casefold()
+        now = utc_now()
         updates = ["status = ?", "error_message = ?", "updated_at = ?"]
         parameters: list[object] = [
-            status.strip().casefold(),
+            normalized_status,
             error_message,
-            utc_now(),
+            now,
         ]
         if attempts is not None:
             updates.insert(1, "attempts = ?")
             parameters.insert(1, attempts)
+        if normalized_status in {"completed", "failed"}:
+            updates.extend(
+                [
+                    "completed_at = ?",
+                    """
+                    duration_seconds = CASE
+                        WHEN started_at IS NULL THEN NULL
+                        ELSE CAST((julianday(?) - julianday(started_at)) * 86400.0 AS REAL)
+                    END
+                    """,
+                ]
+            )
+            parameters.extend([now, now])
         parameters.append(job_id)
         with self._connection:
             self._connection.execute(
@@ -1621,6 +1715,7 @@ class SQLiteIngestionStore:
             )
 
     def claim_summary_job(self, job_id: str, *, attempts: int) -> bool:
+        now = utc_now()
         with self._connection:
             cursor = self._connection.execute(
                 """
@@ -1628,6 +1723,7 @@ class SQLiteIngestionStore:
                 SET status = ?, attempts = ?, error_message = ?,
                     current_stage = ?, current_step = ?, total_steps = ?,
                     progress_message = ?, progress_updated_at = ?,
+                    started_at = ?, completed_at = ?, duration_seconds = ?,
                     updated_at = ?
                 WHERE id = ? AND status = ?
                 """,
@@ -1639,8 +1735,11 @@ class SQLiteIngestionStore:
                     0,
                     0,
                     "Summary job claimed by worker.",
-                    utc_now(),
-                    utc_now(),
+                    now,
+                    now,
+                    None,
+                    None,
+                    now,
                     job_id,
                     "pending",
                 ),
@@ -1720,7 +1819,9 @@ class SQLiteIngestionStore:
                    metadata_jobs.generation_provider,
                    metadata_jobs.generation_model, metadata_jobs.status,
                    metadata_jobs.attempts, metadata_jobs.error_message,
-                   metadata_jobs.created_at, metadata_jobs.updated_at
+                   metadata_jobs.started_at, metadata_jobs.completed_at,
+                   metadata_jobs.duration_seconds, metadata_jobs.created_at,
+                   metadata_jobs.updated_at
             FROM metadata_jobs
             JOIN books ON books.id = metadata_jobs.book_id
             {where_sql}
@@ -1745,8 +1846,11 @@ class SQLiteIngestionStore:
                 status=row[11],
                 attempts=row[12],
                 error_message=row[13],
-                created_at=row[14],
-                updated_at=row[15],
+                started_at=row[14],
+                completed_at=row[15],
+                duration_seconds=row[16],
+                created_at=row[17],
+                updated_at=row[18],
             )
             for row in rows
         ]
@@ -1759,15 +1863,30 @@ class SQLiteIngestionStore:
         attempts: int | None = None,
         error_message: str | None = None,
     ) -> None:
+        normalized_status = status.strip().casefold()
+        now = utc_now()
         updates = ["status = ?", "error_message = ?", "updated_at = ?"]
         parameters: list[object] = [
-            status.strip().casefold(),
+            normalized_status,
             error_message,
-            utc_now(),
+            now,
         ]
         if attempts is not None:
             updates.insert(1, "attempts = ?")
             parameters.insert(1, attempts)
+        if normalized_status in {"completed", "failed"}:
+            updates.extend(
+                [
+                    "completed_at = ?",
+                    """
+                    duration_seconds = CASE
+                        WHEN started_at IS NULL THEN NULL
+                        ELSE CAST((julianday(?) - julianday(started_at)) * 86400.0 AS REAL)
+                    END
+                    """,
+                ]
+            )
+            parameters.extend([now, now])
         parameters.append(job_id)
         with self._connection:
             self._connection.execute(
@@ -1776,14 +1895,17 @@ class SQLiteIngestionStore:
             )
 
     def claim_metadata_job(self, job_id: str, *, attempts: int) -> bool:
+        now = utc_now()
         with self._connection:
             cursor = self._connection.execute(
                 """
                 UPDATE metadata_jobs
-                SET status = ?, attempts = ?, error_message = ?, updated_at = ?
+                SET status = ?, attempts = ?, error_message = ?,
+                    started_at = ?, completed_at = ?, duration_seconds = ?,
+                    updated_at = ?
                 WHERE id = ? AND status = ?
                 """,
-                ("running", attempts, None, utc_now(), job_id, "pending"),
+                ("running", attempts, None, now, None, None, now, job_id, "pending"),
             )
         return cursor.rowcount == 1
 
@@ -2036,6 +2158,18 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _elapsed_seconds(started_at: str | None) -> float | None:
+    if started_at is None:
+        return None
+    try:
+        started = datetime.fromisoformat(started_at)
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return max(0.0, (datetime.now(timezone.utc) - started).total_seconds())
+
+
 def build_book_identity_key(
     title: Optional[str], authors: list[str], publisher: Optional[str]
 ) -> str | None:
@@ -2132,7 +2266,7 @@ def _stage_status(
     pending_books: int,
     running_books: int = 0,
     failed_books: int = 0,
-    details: dict[str, int] | None = None,
+    details: dict[str, object] | None = None,
     active_jobs: list[dict[str, object]] | None = None,
 ) -> IngestionStageStatus:
     if total_books <= 0:
@@ -2187,6 +2321,9 @@ CREATE TABLE IF NOT EXISTS books (
     error_message TEXT,
     discovered_at TEXT NOT NULL,
     ingested_at TEXT,
+    chunk_started_at TEXT,
+    chunk_completed_at TEXT,
+    chunk_duration_seconds REAL,
     updated_at TEXT NOT NULL
 );
 
@@ -2269,6 +2406,9 @@ CREATE TABLE IF NOT EXISTS summary_jobs (
     status TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     error_message TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    duration_seconds REAL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(book_id, provider, model, detail)
@@ -2292,6 +2432,9 @@ CREATE TABLE IF NOT EXISTS metadata_jobs (
     status TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     error_message TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    duration_seconds REAL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(
