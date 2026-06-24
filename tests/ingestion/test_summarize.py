@@ -144,6 +144,50 @@ class SummarizeBookTests(unittest.TestCase):
         self.assertEqual(rebuilt.generated_chapter_summaries, 2)
         self.assertEqual(len(rebuild_generator.calls), 3)
 
+    def test_summarize_book_persists_each_section_as_it_completes(self) -> None:
+        """Verify interrupted jobs can resume from completed section summaries.
+        Progress messages alone are not enough: each generated section must be
+        saved immediately so killing the worker does not force all chunks to
+        start over on the next run.
+        """
+        generator = _FailingSecondSectionGenerator()
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            return_value=generator,
+        ):
+            with self.assertRaises(RuntimeError):
+                summarize_book(
+                    SummarizeBookOptions(
+                        database_url=self.database_url,
+                        book_title="Forward",
+                        generation_provider="codex",
+                        generation_model="codex",
+                        chunks_per_section=1,
+                        max_parallel_chunk_summaries=1,
+                    )
+                )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            saved = store.get_chapter_summary(
+                book_id="forward-foundation",
+                chapter_key="chunk-window-001",
+                provider="codex",
+                model="codex",
+                detail="medium",
+            )
+            missing = store.get_chapter_summary(
+                book_id="forward-foundation",
+                chapter_key="chunk-window-002",
+                provider="codex",
+                model="codex",
+                detail="medium",
+            )
+
+        self.assertIsNotNone(saved)
+        assert saved is not None
+        self.assertEqual(saved.summary, "first section summary")
+        self.assertIsNone(missing)
+
     def test_delete_summaries_removes_matching_rows_without_summarizing(self) -> None:
         """Verify summary deletion is available as its own operation.
         A standalone delete hook lets development runs clear cached summaries
@@ -435,6 +479,22 @@ class _FakeCodexGenerator(CodexGenerator):
         self.calls.append(messages)
         self.timeouts.append(timeout_seconds)
         return f"Generated summary {len(self.calls)}"
+
+
+class _FailingSecondSectionGenerator:
+    provider = "codex"
+    model = "codex"
+
+    def __init__(self) -> None:
+        self.section_calls = 0
+
+    def generate(self, messages, *, response_format=None):
+        if "Section: Chunks" not in messages[-1].content:
+            return "book summary"
+        self.section_calls += 1
+        if self.section_calls == 1:
+            return "first section summary"
+        raise RuntimeError("second section failed")
 
 
 class _ParallelFakeCodexGenerator(CodexGenerator):

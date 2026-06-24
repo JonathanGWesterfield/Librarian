@@ -266,41 +266,16 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
             timeout_seconds=chunk_summary_timeout_seconds,
             max_parallel=max_parallel_chunk_summaries,
             progress_callback=options.progress_callback,
+            result_callback=lambda result: _save_generated_chapter_summary(
+                store=store,
+                book_id=book.id,
+                provider=generator.provider,
+                model=generator.model,
+                detail=detail,
+                chapter_summaries=chapter_summaries,
+                result=result,
+            ),
         )
-        for result in sorted(generated_results, key=lambda item: item.section_index):
-            section = result.section
-            summary_text = result.summary
-            source_hash = result.source_hash
-            chapter_summaries[result.section_index - 1] = ChapterSummary(
-                chapter_key=section.key,
-                chapter_title=section.title,
-                chunk_start_index=section.chunk_start_index,
-                chunk_end_index=section.chunk_end_index,
-                summary=summary_text,
-                source_hash=source_hash,
-                cached=False,
-            )
-            store.save_chapter_summary(
-                ChapterSummaryRecord(
-                    id=_summary_id(
-                        book.id,
-                        section.key,
-                        generator.provider,
-                        generator.model,
-                        detail,
-                    ),
-                    book_id=book.id,
-                    chapter_key=section.key,
-                    chapter_title=section.title,
-                    chunk_start_index=section.chunk_start_index,
-                    chunk_end_index=section.chunk_end_index,
-                    provider=generator.provider,
-                    model=generator.model,
-                    detail=detail,
-                    source_hash=source_hash,
-                    summary=summary_text,
-                )
-            )
 
         visible_chapter_summary_inputs = [
             summary for summary in chapter_summaries if summary is not None
@@ -425,6 +400,7 @@ def _generate_chunk_summary_tasks(
     timeout_seconds: float,
     max_parallel: int,
     progress_callback: Callable[[SummaryProgress], None] | None,
+    result_callback: Callable[[_SectionGenerationResult], None] | None = None,
 ) -> list[_SectionGenerationResult]:
     if not tasks:
         return []
@@ -444,12 +420,14 @@ def _generate_chunk_summary_tasks(
         results = []
         for completed, task in enumerate(tasks, start=1):
             results.append(
-                _run_section_generation_task(
+                result := _run_section_generation_task(
                     generator,
                     task,
                     timeout_seconds=timeout_seconds,
                 )
             )
+            if result_callback is not None:
+                result_callback(result)
             _emit_progress(
                 progress_callback,
                 stage="chapter",
@@ -475,6 +453,8 @@ def _generate_chunk_summary_tasks(
             task = futures[future]
             result = future.result()
             results.append(result)
+            if result_callback is not None:
+                result_callback(result)
             _emit_progress(
                 progress_callback,
                 stage="chapter",
@@ -483,6 +463,49 @@ def _generate_chunk_summary_tasks(
                 message=f"Completed summary for {task.section.title or task.section.key}.",
             )
     return results
+
+
+def _save_generated_chapter_summary(
+    *,
+    store,
+    book_id: str,
+    provider: str,
+    model: str,
+    detail: str,
+    chapter_summaries: list[ChapterSummary | None],
+    result: _SectionGenerationResult,
+) -> None:
+    section = result.section
+    chapter_summaries[result.section_index - 1] = ChapterSummary(
+        chapter_key=section.key,
+        chapter_title=section.title,
+        chunk_start_index=section.chunk_start_index,
+        chunk_end_index=section.chunk_end_index,
+        summary=result.summary,
+        source_hash=result.source_hash,
+        cached=False,
+    )
+    store.save_chapter_summary(
+        ChapterSummaryRecord(
+            id=_summary_id(
+                book_id,
+                section.key,
+                provider,
+                model,
+                detail,
+            ),
+            book_id=book_id,
+            chapter_key=section.key,
+            chapter_title=section.title,
+            chunk_start_index=section.chunk_start_index,
+            chunk_end_index=section.chunk_end_index,
+            provider=provider,
+            model=model,
+            detail=detail,
+            source_hash=result.source_hash,
+            summary=result.summary,
+        )
+    )
 
 
 def _run_section_generation_task(
