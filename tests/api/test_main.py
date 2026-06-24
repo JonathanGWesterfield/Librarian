@@ -116,6 +116,16 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["summarizing"]["running_books"], 1)
         self.assertEqual(payload["summarizing"]["details"]["summary_jobs_pending"], 0)
         self.assertEqual(payload["summarizing"]["details"]["summary_jobs_running"], 1)
+        self.assertEqual(payload["summarizing"]["details"]["summary_jobs_completed"], 1)
+        self.assertGreaterEqual(
+            payload["summarizing"]["details"]["total_summary_duration_seconds"], 0.0
+        )
+        self.assertGreaterEqual(
+            payload["summarizing"]["details"]["avg_summary_duration_seconds"], 0.0
+        )
+        self.assertGreaterEqual(
+            payload["summarizing"]["details"]["max_summary_duration_seconds"], 0.0
+        )
         self.assertEqual(
             payload["summarizing"]["active_jobs"][0]["title"],
             "API Sample Two",
@@ -136,6 +146,16 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["tagging"]["details"]["total_genres"], 1)
         self.assertEqual(payload["tagging"]["details"]["metadata_jobs_pending"], 1)
         self.assertEqual(payload["tagging"]["details"]["metadata_jobs_running"], 1)
+        self.assertEqual(payload["tagging"]["details"]["metadata_jobs_completed"], 1)
+        self.assertGreaterEqual(
+            payload["tagging"]["details"]["total_metadata_duration_seconds"], 0.0
+        )
+        self.assertGreaterEqual(
+            payload["tagging"]["details"]["avg_metadata_duration_seconds"], 0.0
+        )
+        self.assertGreaterEqual(
+            payload["tagging"]["details"]["max_metadata_duration_seconds"], 0.0
+        )
         self.assertEqual(payload["tagging"]["active_jobs"][0]["job_type"], "genres")
         self.assertIsNotNone(payload["tagging"]["active_jobs"][0]["started_at"])
         self.assertIsNotNone(payload["tagging"]["active_jobs"][0]["duration_seconds"])
@@ -573,6 +593,22 @@ class IngestionApiTests(unittest.TestCase):
             )
             store.save_summary_job(
                 SummaryJobRecord(
+                    id="api-book-1:summary-job",
+                    book_id="api-book-1",
+                    provider="codex",
+                    model="codex",
+                    detail="medium",
+                )
+            )
+            store.claim_summary_job("api-book-1:summary-job", attempts=1)
+            store.update_summary_job(
+                "api-book-1:summary-job",
+                status="completed",
+                attempts=1,
+                error_message=None,
+            )
+            store.save_summary_job(
+                SummaryJobRecord(
                     id="api-book-2:summary-job",
                     book_id="api-book-2",
                     provider="codex",
@@ -587,6 +623,25 @@ class IngestionApiTests(unittest.TestCase):
                 current_step=1,
                 total_steps=2,
                 message="Generating summary for Chunks 0-0.",
+            )
+            store.save_metadata_job(
+                MetadataJobRecord(
+                    id="api-book-1:metadata-tags",
+                    book_id="api-book-1",
+                    job_type="tags",
+                    source_summary_provider="codex",
+                    source_summary_model="codex",
+                    source_summary_detail="medium",
+                    generation_provider="codex",
+                    generation_model="codex",
+                )
+            )
+            store.claim_metadata_job("api-book-1:metadata-tags", attempts=1)
+            store.update_metadata_job(
+                "api-book-1:metadata-tags",
+                status="completed",
+                attempts=1,
+                error_message=None,
             )
             store.save_metadata_job(
                 MetadataJobRecord(

@@ -257,6 +257,9 @@
                           "summary_jobs_running": 1,
                           "summary_jobs_completed": 1,
                           "summary_jobs_failed": 0,
+                          "total_summary_duration_seconds": 420.5,
+                          "avg_summary_duration_seconds": 420.5,
+                          "max_summary_duration_seconds": 420.5,
                           "unqueued_books": 0
                         },
                         "active_jobs": [
@@ -295,8 +298,11 @@
                           "total_genres": 2,
                           "metadata_jobs_pending": 1,
                           "metadata_jobs_running": 1,
-                          "metadata_jobs_completed": 0,
-                          "metadata_jobs_failed": 0
+                          "metadata_jobs_completed": 1,
+                          "metadata_jobs_failed": 0,
+                          "total_metadata_duration_seconds": 38.4,
+                          "avg_metadata_duration_seconds": 38.4,
+                          "max_metadata_duration_seconds": 38.4
                         },
                         "active_jobs": [
                           {

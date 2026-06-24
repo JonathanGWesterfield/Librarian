@@ -86,6 +86,9 @@ Example response:
       "summary_jobs_running": 1,
       "summary_jobs_completed": 1,
       "summary_jobs_failed": 0,
+      "total_summary_duration_seconds": 420.5,
+      "avg_summary_duration_seconds": 420.5,
+      "max_summary_duration_seconds": 420.5,
       "unqueued_books": 0
     },
     "active_jobs": [
@@ -124,8 +127,11 @@ Example response:
       "total_genres": 2,
       "metadata_jobs_pending": 1,
       "metadata_jobs_running": 1,
-      "metadata_jobs_completed": 0,
-      "metadata_jobs_failed": 0
+      "metadata_jobs_completed": 1,
+      "metadata_jobs_failed": 0,
+      "total_metadata_duration_seconds": 38.4,
+      "avg_metadata_duration_seconds": 38.4,
+      "max_metadata_duration_seconds": 38.4
     },
     "active_jobs": [
       {
@@ -164,6 +170,8 @@ Response fields:
 - `percent_complete`: completed books divided by total books for that stage.
 - `details`: stage-specific counters useful for progress labels and debugging.
   Chunking details include total and average chunking duration in seconds.
+  Summarizing and tagging details include total, average, and maximum completed
+  job durations in seconds.
 - `active_jobs`: currently running background jobs for that stage. For
   summarization, this includes the active book, provider/model, current stage,
   progress counter, and latest worker message.
