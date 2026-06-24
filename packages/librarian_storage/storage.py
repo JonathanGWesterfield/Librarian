@@ -13,6 +13,8 @@ from librarian_config.config import sqlite_path_from_url
 
 SECONDS_PER_DAY = 24 * 60 * 60
 REQUEUEABLE_JOB_STATUSES = {"failed", "running"}
+JOB_DURATION_TABLES = {"summary_jobs", "metadata_jobs"}
+JOB_DURATION_AGGREGATES = {"SUM", "AVG", "MAX"}
 
 
 @dataclass(frozen=True)
@@ -1091,6 +1093,9 @@ class SQLiteIngestionStore:
                 "summary_jobs_running": running_books,
                 "summary_jobs_completed": status_counts.get("completed", 0),
                 "summary_jobs_failed": failed_books,
+                "total_summary_duration_seconds": self._sum_summary_job_duration(),
+                "avg_summary_duration_seconds": self._avg_summary_job_duration(),
+                "max_summary_duration_seconds": self._max_summary_job_duration(),
                 "unqueued_books": unqueued_books,
             },
             active_jobs=self._running_summary_job_progress(),
@@ -1128,6 +1133,9 @@ class SQLiteIngestionStore:
                 "metadata_jobs_running": running_books,
                 "metadata_jobs_completed": status_counts.get("completed", 0),
                 "metadata_jobs_failed": failed_books,
+                "total_metadata_duration_seconds": self._sum_metadata_job_duration(),
+                "avg_metadata_duration_seconds": self._avg_metadata_job_duration(),
+                "max_metadata_duration_seconds": self._max_metadata_job_duration(),
             },
             active_jobs=self._running_metadata_job_progress(),
         )
@@ -1244,6 +1252,38 @@ class SQLiteIngestionStore:
     def _avg_book_chunk_duration(self) -> float:
         value = self._connection.execute(
             "SELECT COALESCE(AVG(chunk_duration_seconds), 0.0) FROM books"
+        ).fetchone()[0]
+        return float(value)
+
+    def _sum_summary_job_duration(self) -> float:
+        return self._completed_job_duration("summary_jobs", "SUM")
+
+    def _avg_summary_job_duration(self) -> float:
+        return self._completed_job_duration("summary_jobs", "AVG")
+
+    def _max_summary_job_duration(self) -> float:
+        return self._completed_job_duration("summary_jobs", "MAX")
+
+    def _sum_metadata_job_duration(self) -> float:
+        return self._completed_job_duration("metadata_jobs", "SUM")
+
+    def _avg_metadata_job_duration(self) -> float:
+        return self._completed_job_duration("metadata_jobs", "AVG")
+
+    def _max_metadata_job_duration(self) -> float:
+        return self._completed_job_duration("metadata_jobs", "MAX")
+
+    def _completed_job_duration(self, table: str, aggregate: str) -> float:
+        if table not in JOB_DURATION_TABLES:
+            raise ValueError(f"unsupported job duration table: {table}")
+        if aggregate not in JOB_DURATION_AGGREGATES:
+            raise ValueError(f"unsupported job duration aggregate: {aggregate}")
+        value = self._connection.execute(
+            f"""
+            SELECT COALESCE({aggregate}(duration_seconds), 0.0)
+            FROM {table}
+            WHERE status = 'completed'
+            """
         ).fetchone()[0]
         return float(value)
 
