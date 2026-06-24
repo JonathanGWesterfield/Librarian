@@ -319,6 +319,32 @@ class SummarizeBookTests(unittest.TestCase):
         self.assertEqual(result.failed, 0)
         self.assertEqual(generator.calls, [])
 
+    def test_process_summary_jobs_recovers_interrupted_running_jobs(self) -> None:
+        """Verify restarted workers automatically retry interrupted jobs.
+        If a user kills the summary worker mid-book, the job remains running in
+        SQLite; the next worker pass should move it back to pending and process it.
+        """
+        self._seed_summary_job()
+        generator = _FakeGenerator()
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.claim_summary_job("summary-job-1", attempts=1)
+
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            return_value=generator,
+        ):
+            result = process_summary_jobs(
+                ProcessSummaryJobsOptions(database_url=self.database_url, limit=1)
+            )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            completed_jobs = store.list_summary_jobs(status="completed")
+
+        self.assertEqual(result.processed, 1)
+        self.assertEqual(result.completed, 1)
+        self.assertEqual(completed_jobs[0].id, "summary-job-1")
+        self.assertEqual(completed_jobs[0].attempts, 2)
+
     def test_summary_job_worker_processes_pending_jobs_until_idle(self) -> None:
         """Verify the worker loop drains jobs and exits after idle cycles.
         This locks in the app/runtime behavior we need for background summary

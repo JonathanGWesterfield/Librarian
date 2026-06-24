@@ -12,6 +12,7 @@ from librarian_config.config import sqlite_path_from_url
 
 
 SECONDS_PER_DAY = 24 * 60 * 60
+REQUEUEABLE_JOB_STATUSES = {"failed", "running"}
 
 
 @dataclass(frozen=True)
@@ -496,6 +497,14 @@ class IngestionStore(Protocol):
     def claim_summary_job(self, job_id: str, *, attempts: int) -> bool:
         ...
 
+    def requeue_summary_jobs(
+        self,
+        *,
+        statuses: list[str],
+        book_id: str | None = None,
+    ) -> int:
+        ...
+
     def save_metadata_job(self, job: MetadataJobRecord) -> None:
         ...
 
@@ -520,6 +529,15 @@ class IngestionStore(Protocol):
         ...
 
     def claim_metadata_job(self, job_id: str, *, attempts: int) -> bool:
+        ...
+
+    def requeue_metadata_jobs(
+        self,
+        *,
+        statuses: list[str],
+        job_type: str | None = None,
+        book_id: str | None = None,
+    ) -> int:
         ...
 
     def save_book_tags(self, tags: list[BookTagRecord]) -> None:
@@ -1717,6 +1735,47 @@ class SQLiteIngestionStore:
             )
         return cursor.rowcount == 1
 
+    def requeue_summary_jobs(
+        self,
+        *,
+        statuses: list[str],
+        book_id: str | None = None,
+    ) -> int:
+        normalized_statuses = _normalize_requeue_statuses(statuses)
+        where, parameters = _requeue_where(
+            normalized_statuses,
+            extra_conditions=["book_id = ?"] if book_id else None,
+            extra_parameters=[book_id] if book_id else None,
+        )
+        now = utc_now()
+        with self._connection:
+            cursor = self._connection.execute(
+                f"""
+                UPDATE summary_jobs
+                SET status = ?, error_message = ?,
+                    current_stage = ?, current_step = ?, total_steps = ?,
+                    progress_message = ?, progress_updated_at = ?,
+                    started_at = ?, completed_at = ?, duration_seconds = ?,
+                    updated_at = ?
+                WHERE {where}
+                """,
+                [
+                    "pending",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    now,
+                    *parameters,
+                ],
+            )
+        return cursor.rowcount
+
     def save_metadata_job(self, job: MetadataJobRecord) -> None:
         with self._connection:
             self._connection.execute(
@@ -1879,6 +1938,41 @@ class SQLiteIngestionStore:
                 ("running", attempts, None, now, None, None, now, job_id, "pending"),
             )
         return cursor.rowcount == 1
+
+    def requeue_metadata_jobs(
+        self,
+        *,
+        statuses: list[str],
+        job_type: str | None = None,
+        book_id: str | None = None,
+    ) -> int:
+        normalized_statuses = _normalize_requeue_statuses(statuses)
+        extra_conditions: list[str] = []
+        extra_parameters: list[object] = []
+        if job_type:
+            extra_conditions.append("job_type = ?")
+            extra_parameters.append(job_type.strip().casefold())
+        if book_id:
+            extra_conditions.append("book_id = ?")
+            extra_parameters.append(book_id)
+        where, parameters = _requeue_where(
+            normalized_statuses,
+            extra_conditions=extra_conditions,
+            extra_parameters=extra_parameters,
+        )
+        now = utc_now()
+        with self._connection:
+            cursor = self._connection.execute(
+                f"""
+                UPDATE metadata_jobs
+                SET status = ?, error_message = ?,
+                    started_at = ?, completed_at = ?, duration_seconds = ?,
+                    updated_at = ?
+                WHERE {where}
+                """,
+                ["pending", None, None, None, None, now, *parameters],
+            )
+        return cursor.rowcount
 
     def save_book_tags(self, tags: list[BookTagRecord]) -> None:
         if not tags:
@@ -2139,6 +2233,32 @@ def _elapsed_seconds(started_at: str | None) -> float | None:
     if started.tzinfo is None:
         started = started.replace(tzinfo=timezone.utc)
     return max(0.0, (datetime.now(timezone.utc) - started).total_seconds())
+
+
+def _normalize_requeue_statuses(statuses: list[str]) -> list[str]:
+    normalized = [status.strip().casefold() for status in statuses if status.strip()]
+    unknown = sorted(set(normalized) - REQUEUEABLE_JOB_STATUSES)
+    if unknown:
+        raise ValueError(f"unsupported requeue status: {', '.join(unknown)}")
+    if not normalized:
+        raise ValueError("at least one requeue status is required")
+    return sorted(set(normalized))
+
+
+def _requeue_where(
+    statuses: list[str],
+    *,
+    extra_conditions: list[str] | None = None,
+    extra_parameters: list[object] | None = None,
+) -> tuple[str, list[object]]:
+    placeholders = ", ".join("?" for _ in statuses)
+    conditions = [f"status IN ({placeholders})"]
+    parameters: list[object] = [*statuses]
+    if extra_conditions:
+        conditions.extend(extra_conditions)
+    if extra_parameters:
+        parameters.extend(extra_parameters)
+    return " AND ".join(conditions), parameters
 
 
 def build_book_identity_key(

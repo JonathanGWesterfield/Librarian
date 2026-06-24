@@ -124,6 +124,9 @@ def process_metadata_jobs(
     options = options or ProcessMetadataJobsOptions()
     database_url = resolve_database_url(options.database_url)
     requested_limit = max(1, options.limit)
+    recovered_running_jobs = _requeue_running_jobs(database_url, job_type=options.job_type)
+    if recovered_running_jobs:
+        logger.info("Recovered %s interrupted metadata job(s)", recovered_running_jobs)
     pending_jobs = _list_pending_jobs(
         database_url, limit=requested_limit, job_type=options.job_type
     )
@@ -384,6 +387,15 @@ def _list_pending_jobs(
         return store.list_metadata_jobs(
             status="pending", job_type=job_type, limit=limit
         )
+    finally:
+        store.close()
+
+
+def _requeue_running_jobs(database_url: str, *, job_type: str | None) -> int:
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        return store.requeue_metadata_jobs(statuses=["running"], job_type=job_type)
     finally:
         store.close()
 

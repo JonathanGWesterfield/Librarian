@@ -31,6 +31,11 @@ Run a polling worker until it observes three idle cycles:
       --watch \\
       --idle-exit-after 3
 
+Requeue failed metadata jobs so the next worker run can retry them:
+    python3 scripts/process_metadata_jobs.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --requeue-failed
+
 Emit machine-readable JSON for automation:
     python3 scripts/process_metadata_jobs.py \\
       --database-url sqlite:///data/librarian.db \\
@@ -49,7 +54,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import DATABASE_URL_ENV
+from librarian_config.config import DATABASE_URL_ENV, resolve_database_url
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_metadata.jobs import (
     METADATA_JOB_TYPE_GENRES,
@@ -59,6 +64,7 @@ from librarian_metadata.jobs import (
     process_metadata_jobs,
     run_metadata_job_worker,
 )
+from librarian_storage.storage import create_ingestion_store
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +121,40 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         help="Stop watch mode after this many polling cycles.",
     )
+    parser.add_argument(
+        "--requeue-failed",
+        action="store_true",
+        help=(
+            "Move failed metadata jobs back to pending instead of processing jobs. "
+            "Interrupted running jobs are recovered automatically when the worker starts."
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     configure_cli_logging(console=not args.json)
 
     try:
+        if args.requeue_failed:
+            requeued = _requeue_failed_jobs(
+                args.database_url,
+                job_type=args.job_type,
+            )
+            payload = {
+                "database_url": resolve_database_url(args.database_url),
+                "job_type": args.job_type,
+                "requeue_status": "failed",
+                "requeued": requeued,
+            }
+            if args.json:
+                emit_json(payload)
+            else:
+                logger.info("Librarian metadata job requeue")
+                logger.info("Database: %s", payload["database_url"])
+                logger.info("Job type: %s", args.job_type or "all")
+                logger.info("Requeue status: failed")
+                logger.info("Requeued: %s", requeued)
+            return 0
+
         if args.watch:
             result = run_metadata_job_worker(
                 MetadataJobWorkerOptions(
@@ -174,6 +209,23 @@ def main(argv: list[str] | None = None) -> int:
             message,
         )
     return 0
+
+
+def _requeue_failed_jobs(
+    database_url_override: str | None,
+    *,
+    job_type: str | None,
+) -> int:
+    database_url = resolve_database_url(database_url_override)
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        return store.requeue_metadata_jobs(
+            statuses=["failed"],
+            job_type=job_type,
+        )
+    finally:
+        store.close()
 
 
 if __name__ == "__main__":
