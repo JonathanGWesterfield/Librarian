@@ -141,6 +141,43 @@ class MetadataJobTests(unittest.TestCase):
         self.assertIsNotNone(failed_jobs[0].completed_at)
         self.assertIsNotNone(failed_jobs[0].duration_seconds)
 
+    def test_process_metadata_jobs_recovers_interrupted_running_jobs(self) -> None:
+        """Verify restarted metadata workers automatically retry interrupted jobs.
+        If tag or genre generation is killed mid-run, the next worker pass should
+        move the running job back to pending and process it.
+        """
+        enqueue_metadata_jobs(
+            EnqueueMetadataJobsOptions(
+                database_url=self.database_url,
+                book_id="book-1",
+                source_summary_provider="codex",
+                source_summary_model="codex",
+                source_summary_detail="medium",
+                generation_provider="codex",
+                generation_model="codex",
+                include_genres=False,
+            )
+        )
+        with SQLiteIngestionStore(self.database_path) as store:
+            job = store.list_metadata_jobs(status="pending")[0]
+            store.claim_metadata_job(job.id, attempts=1)
+
+        with patch(
+            "librarian_metadata.jobs.generate_book_tags",
+            return_value=_FakeTagResult(generated_tags=1, cached_tags=0),
+        ):
+            result = process_metadata_jobs(
+                ProcessMetadataJobsOptions(database_url=self.database_url, limit=1)
+            )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            completed_jobs = store.list_metadata_jobs(status="completed")
+
+        self.assertEqual(result.processed, 1)
+        self.assertEqual(result.completed, 1)
+        self.assertEqual(completed_jobs[0].job_type, "tags")
+        self.assertEqual(completed_jobs[0].attempts, 2)
+
     def test_metadata_job_worker_processes_until_idle(self) -> None:
         """Verify watch-mode metadata processing drains jobs then exits idle.
         This gives the future app runtime a tested loop for background tag and

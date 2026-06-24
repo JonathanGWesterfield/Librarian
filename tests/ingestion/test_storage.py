@@ -546,6 +546,48 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         )
         self.assertIsNotNone(running_jobs[0].progress_updated_at)
 
+    def test_failed_summary_jobs_can_be_requeued_for_retry(self) -> None:
+        """Verify failed summary jobs can be retried explicitly.
+        Failures are terminal until the user asks to retry them, so recovery
+        needs to move failed jobs back to pending without deleting them.
+        """
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/forward.epub",
+            relative_path="forward.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        failed_job = SummaryJobRecord(
+            id="summary-job-failed",
+            book_id="book-1",
+            provider="codex",
+            model="codex",
+            detail="medium",
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+            store.save_summary_job(failed_job)
+            store.update_summary_job(
+                "summary-job-failed",
+                status="failed",
+                attempts=2,
+                error_message="model unavailable",
+            )
+            requeued = store.requeue_summary_jobs(statuses=["failed"])
+            pending_jobs = store.list_summary_jobs(status="pending")
+
+        self.assertEqual(requeued, 1)
+        self.assertEqual([job.id for job in pending_jobs], ["summary-job-failed"])
+        self.assertTrue(all(job.error_message is None for job in pending_jobs))
+        self.assertTrue(all(job.started_at is None for job in pending_jobs))
+        self.assertTrue(all(job.duration_seconds is None for job in pending_jobs))
+
     def test_metadata_jobs_can_be_queued_claimed_and_updated(self) -> None:
         """Verify tag and genre work can be queued after summarization.
         Metadata generation needs the same durable worker handoff as summaries,
@@ -599,6 +641,51 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(completed_jobs[0].status, "completed")
         self.assertIsNotNone(completed_jobs[0].completed_at)
         self.assertIsNotNone(completed_jobs[0].duration_seconds)
+
+    def test_failed_metadata_jobs_can_be_requeued_for_retry(self) -> None:
+        """Verify failed metadata jobs can be retried explicitly.
+        Tag and genre generation is queued separately from summaries, so the
+        storage layer needs the same manual failed retry behavior as summaries.
+        """
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/forward.epub",
+            relative_path="forward.epub",
+            file_hash="book-1",
+            size_bytes=100,
+            title="Forward the Foundation",
+            authors=["Isaac Asimov"],
+            status="ingested",
+            ingested_at=utc_now(),
+        )
+        failed_job = MetadataJobRecord(
+            id="metadata-job-tags",
+            book_id="book-1",
+            job_type="tags",
+            source_summary_provider="codex",
+            source_summary_model="codex",
+            source_summary_detail="medium",
+            generation_provider="codex",
+            generation_model="codex",
+        )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [])
+            store.save_metadata_job(failed_job)
+            store.update_metadata_job(
+                "metadata-job-tags",
+                status="failed",
+                attempts=2,
+                error_message="metadata model unavailable",
+            )
+            requeued = store.requeue_metadata_jobs(statuses=["failed"])
+            pending_jobs = store.list_metadata_jobs(status="pending")
+
+        self.assertEqual(requeued, 1)
+        self.assertEqual([job.id for job in pending_jobs], ["metadata-job-tags"])
+        self.assertTrue(all(job.error_message is None for job in pending_jobs))
+        self.assertTrue(all(job.started_at is None for job in pending_jobs))
+        self.assertTrue(all(job.duration_seconds is None for job in pending_jobs))
 
     def test_book_tags_can_be_saved_updated_filtered_and_deleted(self) -> None:
         """Verify book tags are stored with provenance and replace cleanly.

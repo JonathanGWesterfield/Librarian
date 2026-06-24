@@ -93,6 +93,9 @@ def process_summary_jobs(
     options = options or ProcessSummaryJobsOptions()
     database_url = resolve_database_url(options.database_url)
     requested_limit = max(1, options.limit)
+    recovered_running_jobs = _requeue_running_jobs(database_url)
+    if recovered_running_jobs:
+        logger.info("Recovered %s interrupted summary job(s)", recovered_running_jobs)
     pending_jobs = _list_pending_jobs(database_url, limit=requested_limit)
 
     results: list[SummaryJobProcessResult] = []
@@ -303,6 +306,15 @@ def _list_pending_jobs(
     store.initialize()
     try:
         return store.list_summary_jobs(status="pending", limit=limit)
+    finally:
+        store.close()
+
+
+def _requeue_running_jobs(database_url: str) -> int:
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        return store.requeue_summary_jobs(statuses=["running"])
     finally:
         store.close()
 

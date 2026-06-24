@@ -25,6 +25,11 @@ Run a polling worker until it observes three idle cycles:
       --watch \\
       --idle-exit-after 3
 
+Requeue failed jobs so the next worker run can retry them:
+    python3 scripts/process_summary_jobs.py \\
+      --database-url sqlite:///data/librarian.db \\
+      --requeue-failed
+
 Process summaries without queuing tag/genre jobs afterward:
     python3 scripts/process_summary_jobs.py \\
       --database-url sqlite:///data/librarian.db \\
@@ -52,8 +57,10 @@ from librarian_config.config import (
     CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV,
     DATABASE_URL_ENV,
     MAX_PARALLEL_CHUNK_SUMMARIES_ENV,
+    resolve_database_url,
 )
 from librarian_logging import configure_cli_logging, emit_json
+from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.jobs import (
     ProcessSummaryJobsOptions,
     SummaryJobWorkerOptions,
@@ -100,6 +107,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Stop watch mode after this many polling cycles.",
     )
     parser.add_argument(
+        "--requeue-failed",
+        action="store_true",
+        help=(
+            "Move failed summary jobs back to pending instead of processing jobs. "
+            "Interrupted running jobs are recovered automatically when the worker starts."
+        ),
+    )
+    parser.add_argument(
         "--include-chapter-summaries",
         action="store_true",
         help="Include chapter summaries in worker result payloads.",
@@ -130,6 +145,22 @@ def main(argv: list[str] | None = None) -> int:
     configure_cli_logging(console=not args.json)
 
     try:
+        if args.requeue_failed:
+            requeued = _requeue_failed_jobs(args.database_url)
+            payload = {
+                "database_url": resolve_database_url(args.database_url),
+                "requeue_status": "failed",
+                "requeued": requeued,
+            }
+            if args.json:
+                emit_json(payload)
+            else:
+                logger.info("Librarian summary job requeue")
+                logger.info("Database: %s", payload["database_url"])
+                logger.info("Requeue status: failed")
+                logger.info("Requeued: %s", requeued)
+            return 0
+
         if args.watch:
             result = run_summary_job_worker(
                 SummaryJobWorkerOptions(
@@ -186,6 +217,16 @@ def main(argv: list[str] | None = None) -> int:
             message,
         )
     return 0
+
+
+def _requeue_failed_jobs(database_url_override: str | None) -> int:
+    database_url = resolve_database_url(database_url_override)
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        return store.requeue_summary_jobs(statuses=["failed"])
+    finally:
+        store.close()
 
 
 if __name__ == "__main__":
