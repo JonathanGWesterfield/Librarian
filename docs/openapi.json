@@ -525,6 +525,66 @@
         }
       }
     },
+    "/search/hybrid": {
+      "post": {
+        "tags": ["retrieval"],
+        "operationId": "hybridSearchChunks",
+        "summary": "Search chunks with OpenSearch hybrid retrieval",
+        "description": "Embeds a user query, sends keyword and vector retrieval requests to OpenSearch, merges the ranked hits, and returns the same chunk response shape as /search.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HybridSearchRequest"
+              },
+              "examples": {
+                "default": {
+                  "summary": "Hybrid search with default local OpenSearch",
+                  "value": {
+                    "query": "psychohistory and empire",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "limit": 10
+                  }
+                },
+                "metadataFiltered": {
+                  "summary": "Hybrid search filtered by generated metadata",
+                  "value": {
+                    "query": "political science fiction",
+                    "opensearch_url": "http://localhost:9200",
+                    "index_name": "librarian-chunks",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "genre": "Science Fiction",
+                    "tag": "politics",
+                    "limit": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked chunk matches from OpenSearch hybrid retrieval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
     "/chat": {
       "post": {
         "tags": ["chat"],
@@ -1632,6 +1692,60 @@
           }
         }
       },
+      "HybridSearchRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "User search/query text. Must not be empty."
+          },
+          "opensearch_url": {
+            "type": ["string", "null"],
+            "example": "http://localhost:9200"
+          },
+          "index_name": {
+            "type": ["string", "null"],
+            "example": "librarian-chunks"
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          },
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "minimum": 1
+          },
+          "book_id": {
+            "type": ["string", "null"],
+            "description": "Restrict search to one exact stored book id."
+          },
+          "book_title": {
+            "type": ["string", "null"],
+            "description": "Restrict search to stored books whose title contains this text."
+          },
+          "author": {
+            "type": ["string", "null"],
+            "description": "Restrict search to stored books whose author metadata contains this text."
+          },
+          "genre": {
+            "type": ["string", "null"],
+            "description": "Restrict search to documents with a generated genre."
+          },
+          "tag": {
+            "type": ["string", "null"],
+            "description": "Restrict search to documents with a generated topic tag."
+          }
+        }
+      },
       "SearchResponse": {
         "type": "object",
         "required": [
@@ -1683,6 +1797,12 @@
             "type": "string"
           },
           "author": {
+            "type": "string"
+          },
+          "genre": {
+            "type": "string"
+          },
+          "tag": {
             "type": "string"
           }
         },

@@ -48,6 +48,14 @@ Search within one author or book:
       --author "Erich Maria Remarque" \\
       --limit 10
 
+Run OpenSearch-backed hybrid retrieval after indexing chunks:
+    python3 scripts/play/librarian.py \\
+      hybrid-search "psychohistory and empire" \\
+      --opensearch-url http://localhost:9200 \\
+      --embedding-provider ollama \\
+      --embedding-model all-minilm \\
+      --genre "Science Fiction"
+
 Ask for book-level recommendations using retrieval plus generated metadata:
     python3 scripts/play/librarian.py \\
       --database-url sqlite:///data/librarian.db \\
@@ -89,6 +97,7 @@ from librarian_recommendations.recommendations import (
     RecommendationOptions,
     recommend_books,
 )
+from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 
@@ -239,6 +248,42 @@ def main(argv: list[str] | None = None) -> int:
     search_parser.add_argument("--author", help="Restrict search to matching author names.")
     _add_json_flag(search_parser)
 
+    hybrid_parser = subparsers.add_parser(
+        "hybrid-search",
+        help="Search chunks through OpenSearch keyword plus vector retrieval.",
+    )
+    hybrid_parser.add_argument("query", help="Natural-language search query.")
+    hybrid_parser.add_argument("--opensearch-url", help="OpenSearch URL override.")
+    hybrid_parser.add_argument("--index-name", help="OpenSearch index override.")
+    hybrid_parser.add_argument(
+        "--embedding-provider",
+        choices=["noop", "ollama"],
+        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+    )
+    hybrid_parser.add_argument(
+        "--embedding-model",
+        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+    )
+    hybrid_parser.add_argument(
+        "--ollama-base-url",
+        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+    )
+    hybrid_parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum ranked chunks to show.",
+    )
+    hybrid_parser.add_argument("--book-id", help="Restrict search to one stored book id.")
+    hybrid_parser.add_argument(
+        "--book-title",
+        help="Restrict search to matching book titles.",
+    )
+    hybrid_parser.add_argument("--author", help="Restrict search to matching author names.")
+    hybrid_parser.add_argument("--genre", help="Restrict search to a generated genre.")
+    hybrid_parser.add_argument("--tag", help="Restrict search to a generated topic tag.")
+    _add_json_flag(hybrid_parser)
+
     recommend_parser = subparsers.add_parser(
         "recommend",
         help="Recommend books by aggregating retrieved chunks and book metadata.",
@@ -368,6 +413,29 @@ def main(argv: list[str] | None = None) -> int:
                     book_id=args.book_id,
                     book_title=args.book_title,
                     author=args.author,
+                )
+            )
+            payload = result.to_dict()
+            if args.json:
+                _log_payload(payload, args.json)
+            else:
+                _log_search_response(payload)
+            return 0
+        if args.command == "hybrid-search":
+            result = hybrid_search_chunks(
+                HybridSearchOptions(
+                    query=args.query,
+                    opensearch_url=args.opensearch_url,
+                    index_name=args.index_name,
+                    embedding_provider=args.embedding_provider,
+                    embedding_model=args.embedding_model,
+                    ollama_base_url=args.ollama_base_url,
+                    limit=args.limit,
+                    book_id=args.book_id,
+                    book_title=args.book_title,
+                    author=args.author,
+                    genre=args.genre,
+                    tag=args.tag,
                 )
             )
             payload = result.to_dict()

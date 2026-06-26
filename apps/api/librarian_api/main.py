@@ -29,6 +29,7 @@ from librarian_recommendations.recommendations import (
     RecommendationOptions,
     recommend_books,
 )
+from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
@@ -82,6 +83,21 @@ class SearchRequest(BaseModel):
     book_id: Optional[str] = None
     book_title: Optional[str] = None
     author: Optional[str] = None
+
+
+class HybridSearchRequest(BaseModel):
+    query: str
+    opensearch_url: Optional[str] = None
+    index_name: Optional[str] = None
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    limit: int = 10
+    book_id: Optional[str] = None
+    book_title: Optional[str] = None
+    author: Optional[str] = None
+    genre: Optional[str] = None
+    tag: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -267,6 +283,30 @@ def search_endpoint(request: SearchRequest) -> dict[str, object]:
                 book_id=request.book_id,
                 book_title=request.book_title,
                 author=request.author,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.post("/search/hybrid")
+def hybrid_search_endpoint(request: HybridSearchRequest) -> dict[str, object]:
+    try:
+        result = hybrid_search_chunks(
+            HybridSearchOptions(
+                query=request.query,
+                opensearch_url=request.opensearch_url,
+                index_name=request.index_name,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+                ollama_base_url=request.ollama_base_url,
+                limit=request.limit,
+                book_id=request.book_id,
+                book_title=request.book_title,
+                author=request.author,
+                genre=request.genre,
+                tag=request.tag,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
