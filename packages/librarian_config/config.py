@@ -11,6 +11,8 @@ EMBEDDING_MODEL_ENV = "LIBRARIAN_EMBEDDING_MODEL"
 GENERATION_PROVIDER_ENV = "LIBRARIAN_GENERATION_PROVIDER"
 GENERATION_MODEL_ENV = "LIBRARIAN_GENERATION_MODEL"
 OLLAMA_BASE_URL_ENV = "LIBRARIAN_OLLAMA_BASE_URL"
+OPENSEARCH_URL_ENV = "LIBRARIAN_OPENSEARCH_URL"
+OPENSEARCH_INDEX_ENV = "LIBRARIAN_OPENSEARCH_INDEX"
 CODEX_EXECUTABLE_ENV = "LIBRARIAN_CODEX_EXECUTABLE"
 CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV = "LIBRARIAN_CHUNK_SUMMARY_TIMEOUT_SECONDS"
 MAX_PARALLEL_CHUNK_SUMMARIES_ENV = "LIBRARIAN_MAX_PARALLEL_CHUNK_SUMMARIES"
@@ -22,6 +24,8 @@ DEFAULT_EMBEDDING_MODEL = "all-minilm"
 DEFAULT_GENERATION_PROVIDER = "noop"
 DEFAULT_GENERATION_MODEL = "llama3.2:3b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_OPENSEARCH_URL = "http://localhost:9200"
+DEFAULT_OPENSEARCH_INDEX = "librarian-chunks"
 DEFAULT_CODEX_EXECUTABLE = "codex"
 DEFAULT_CHUNK_SUMMARY_TIMEOUT_SECONDS = 240.0
 DEFAULT_MAX_PARALLEL_CHUNK_SUMMARIES = 1
@@ -121,6 +125,32 @@ def resolve_ollama_base_url(
     return source_env.get(OLLAMA_BASE_URL_ENV, DEFAULT_OLLAMA_BASE_URL).rstrip("/")
 
 
+def resolve_opensearch_url(
+    opensearch_url: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    if opensearch_url:
+        return opensearch_url.rstrip("/")
+
+    source_env = env if env is not None else os.environ
+    return source_env.get(OPENSEARCH_URL_ENV, DEFAULT_OPENSEARCH_URL).rstrip("/")
+
+
+def resolve_opensearch_index(
+    opensearch_index: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    if opensearch_index:
+        return _validate_opensearch_index(opensearch_index)
+
+    source_env = env if env is not None else os.environ
+    return _validate_opensearch_index(
+        source_env.get(OPENSEARCH_INDEX_ENV, DEFAULT_OPENSEARCH_INDEX)
+    )
+
+
 def resolve_codex_executable(
     codex_executable: str | None = None,
     *,
@@ -195,3 +225,12 @@ def sqlite_path_from_url(database_url: str) -> Path:
     if path.startswith("/"):
         return Path(path)
     return Path(path).expanduser()
+
+
+def _validate_opensearch_index(index_name: str) -> str:
+    cleaned = index_name.strip().casefold()
+    if not cleaned:
+        raise ValueError("OpenSearch index name must not be empty")
+    if any(character.isspace() for character in cleaned):
+        raise ValueError("OpenSearch index name must not contain whitespace")
+    return cleaned
