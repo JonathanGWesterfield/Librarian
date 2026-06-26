@@ -33,6 +33,10 @@
       "description": "Grounded answer synthesis over retrieved chunks."
     },
     {
+      "name": "recommendations",
+      "description": "Book-level recommendation queries over retrieved chunks and generated metadata."
+    },
+    {
       "name": "summaries",
       "description": "On-demand chapter and book summarization workflows."
     },
@@ -568,6 +572,70 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/recommendations": {
+      "post": {
+        "tags": ["recommendations"],
+        "operationId": "recommendBooks",
+        "summary": "Recommend books from the local library",
+        "description": "Embeds a reader request, retrieves matching chunks, groups them by book, enriches candidates with generated tags and genres, and returns ranked book recommendations with evidence.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendationRequest"
+              },
+              "examples": {
+                "scienceFiction": {
+                  "summary": "Recommend science fiction books",
+                  "value": {
+                    "query": "I want a thoughtful science fiction book about politics",
+                    "database_url": "sqlite:///data/librarian.db",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "generation_provider": "codex",
+                    "generation_model": "codex",
+                    "limit": 5,
+                    "retrieval_limit": 40,
+                    "genre": "Science Fiction"
+                  }
+                },
+                "ollamaOnly": {
+                  "summary": "Recommend with Ollama generation",
+                  "value": {
+                    "query": "I want something about memory and identity",
+                    "database_url": "sqlite:///data/librarian.db",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "generation_provider": "ollama",
+                    "generation_model": "llama3.2:3b",
+                    "tag": "memory"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked book recommendations with generated explanation text and supporting evidence.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendationResponse"
                 }
               }
             }
@@ -2192,6 +2260,227 @@
             "items": {
               "type": "string"
             }
+          },
+          "chunk_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "RecommendationRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Reader recommendation request. Must not be empty."
+          },
+          "database_url": {
+            "type": ["string", "null"],
+            "example": "sqlite:///data/librarian.db"
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "generation_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", "codex", null]
+          },
+          "generation_model": {
+            "type": ["string", "null"],
+            "example": "codex"
+          },
+          "ollama_base_url": {
+            "type": ["string", "null"]
+          },
+          "limit": {
+            "type": "integer",
+            "default": 5,
+            "minimum": 1
+          },
+          "retrieval_limit": {
+            "type": "integer",
+            "default": 40,
+            "minimum": 1
+          },
+          "book_id": {
+            "type": ["string", "null"],
+            "description": "Restrict retrieval to one exact stored book id."
+          },
+          "book_title": {
+            "type": ["string", "null"],
+            "description": "Restrict retrieval to stored books whose title contains this text."
+          },
+          "author": {
+            "type": ["string", "null"],
+            "description": "Restrict retrieval to stored books whose author metadata contains this text."
+          },
+          "genre": {
+            "type": ["string", "null"],
+            "description": "Require a stored generated genre containing this text."
+          },
+          "tag": {
+            "type": ["string", "null"],
+            "description": "Require a stored generated topic tag containing this text."
+          }
+        }
+      },
+      "RecommendationResponse": {
+        "type": "object",
+        "required": [
+          "query",
+          "answer",
+          "embedding_provider",
+          "embedding_model",
+          "generation_provider",
+          "generation_model",
+          "retrieval_limit",
+          "candidate_count",
+          "filters",
+          "recommendations"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "embedding_provider": {
+            "type": "string"
+          },
+          "embedding_model": {
+            "type": "string"
+          },
+          "generation_provider": {
+            "type": "string"
+          },
+          "generation_model": {
+            "type": "string"
+          },
+          "retrieval_limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "candidate_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "filters": {
+            "$ref": "#/components/schemas/RecommendationFilters"
+          },
+          "recommendations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BookRecommendation"
+            }
+          }
+        }
+      },
+      "RecommendationFilters": {
+        "type": "object",
+        "properties": {
+          "book_id": {
+            "type": "string"
+          },
+          "book_title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "genre": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BookRecommendation": {
+        "type": "object",
+        "required": [
+          "rank",
+          "score",
+          "book_id",
+          "relative_path",
+          "title",
+          "authors",
+          "publisher",
+          "tags",
+          "genres",
+          "evidence"
+        ],
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "score": {
+            "type": "number",
+            "format": "float"
+          },
+          "book_id": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"]
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publisher": {
+            "type": ["string", "null"]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecommendationEvidence"
+            }
+          }
+        }
+      },
+      "RecommendationEvidence": {
+        "type": "object",
+        "required": ["source_id", "score", "chunk_id", "chunk_index", "text"],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "example": "R1.1"
+          },
+          "score": {
+            "type": "number",
+            "format": "float"
+          },
+          "chunk_id": {
+            "type": "string"
           },
           "chunk_index": {
             "type": "integer",

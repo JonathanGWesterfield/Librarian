@@ -10,6 +10,11 @@ sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from librarian_chat.chat import ChatResponse, ChatSource
 from librarian_metadata.genres import BookGenreGenerationResult, GeneratedBookGenre
+from librarian_recommendations.recommendations import (
+    BookRecommendation,
+    RecommendationEvidence,
+    RecommendationResponse,
+)
 from librarian_storage.storage import (
     BookGenreRecord,
     BookRecord,
@@ -295,6 +300,70 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["generation_model"], "llama3.2:3b")
         self.assertEqual(payload["filters"], {"book_title": "All Quiet"})
         self.assertEqual(payload["sources"][0]["source_id"], "S1")
+
+    def test_recommendations_endpoint_returns_book_level_recommendations(self) -> None:
+        """Verify desktop clients can ask for book-level recommendations.
+        The route should expose ranked books, metadata filters, generated
+        explanation text, and retrieved evidence in one response.
+        """
+        fake_response = RecommendationResponse(
+            query="thoughtful science fiction",
+            answer="Try The Clockwork Garden because it matches the request. [R1.1]",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="ollama",
+            generation_model="llama3.2:3b",
+            retrieval_limit=20,
+            candidate_count=1,
+            filters={"genre": "Science Fiction"},
+            recommendations=[
+                BookRecommendation(
+                    rank=1,
+                    score=1.05,
+                    book_id="api-book",
+                    relative_path="api-sample.epub",
+                    title="API Sample Book",
+                    authors=["Test Author"],
+                    publisher="Fixture Press",
+                    tags=["clockwork garden"],
+                    genres=["Science Fiction"],
+                    evidence=[
+                        RecommendationEvidence(
+                            source_id="R1.1",
+                            score=0.99,
+                            chunk_id="api-book:0",
+                            chunk_index=0,
+                            text="The clockwork garden woke at dawn.",
+                        )
+                    ],
+                )
+            ],
+        )
+        with patch("librarian_api.main.recommend_books", return_value=fake_response):
+            response = self.client.post(
+                "/recommendations",
+                json={
+                    "query": "thoughtful science fiction",
+                    "database_url": self.database_url,
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "generation_provider": "ollama",
+                    "generation_model": "llama3.2:3b",
+                    "retrieval_limit": 20,
+                    "genre": "Science Fiction",
+                },
+            )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["answer"], fake_response.answer)
+        self.assertEqual(payload["filters"], {"genre": "Science Fiction"})
+        self.assertEqual(payload["recommendations"][0]["rank"], 1)
+        self.assertEqual(
+            payload["recommendations"][0]["evidence"][0]["source_id"],
+            "R1.1",
+        )
 
     def test_book_summary_endpoint_returns_on_demand_summary(self) -> None:
         """Verify desktop clients can request a first-class book summary.

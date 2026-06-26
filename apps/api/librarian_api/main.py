@@ -25,6 +25,10 @@ from librarian_metadata.genres import (
     generate_book_genres,
     list_book_genres,
 )
+from librarian_recommendations.recommendations import (
+    RecommendationOptions,
+    recommend_books,
+)
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
@@ -92,6 +96,23 @@ class ChatRequest(BaseModel):
     book_id: Optional[str] = None
     book_title: Optional[str] = None
     author: Optional[str] = None
+
+
+class RecommendationRequest(BaseModel):
+    query: str
+    database_url: Optional[str] = None
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    generation_provider: Optional[str] = None
+    generation_model: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    limit: int = 5
+    retrieval_limit: int = 40
+    book_id: Optional[str] = None
+    book_title: Optional[str] = None
+    author: Optional[str] = None
+    genre: Optional[str] = None
+    tag: Optional[str] = None
 
 
 class BookSummaryRequest(BaseModel):
@@ -269,6 +290,32 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
                 book_id=request.book_id,
                 book_title=request.book_title,
                 author=request.author,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.post("/recommendations")
+def recommendations_endpoint(request: RecommendationRequest) -> dict[str, object]:
+    try:
+        result = recommend_books(
+            RecommendationOptions(
+                query=request.query,
+                database_url=request.database_url or settings.database_url,
+                embedding_provider=request.embedding_provider,
+                embedding_model=request.embedding_model,
+                generation_provider=request.generation_provider,
+                generation_model=request.generation_model,
+                ollama_base_url=request.ollama_base_url,
+                limit=request.limit,
+                retrieval_limit=request.retrieval_limit,
+                book_id=request.book_id,
+                book_title=request.book_title,
+                author=request.author,
+                genre=request.genre,
+                tag=request.tag,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
