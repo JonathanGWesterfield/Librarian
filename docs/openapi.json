@@ -530,7 +530,7 @@
         "tags": ["retrieval"],
         "operationId": "hybridSearchChunks",
         "summary": "Search chunks with OpenSearch hybrid retrieval",
-        "description": "Embeds a user query, sends keyword and vector retrieval requests to OpenSearch, merges the ranked hits, and returns the same chunk response shape as /search.",
+        "description": "Embeds a user query, sends keyword and vector retrieval requests to OpenSearch, reranks a wider candidate pool with exact phrase and metadata signals, and returns the same chunk response shape as /search.",
         "requestBody": {
           "required": true,
           "content": {
