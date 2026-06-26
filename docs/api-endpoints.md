@@ -247,6 +247,74 @@ Response:
 - `books`: per-book ingestion results.
 - `discovered`: optional discovered EPUB metadata when `list_epubs` is true.
 
+## Hybrid Retrieval
+
+### Indexing OpenSearch
+
+OpenSearch is a rebuildable query index. SQLite remains the source of truth for
+books, raw chunks, embeddings, tags, genres, summaries, and jobs. After ingesting
+books and generating embeddings, index chunks into OpenSearch:
+
+```bash
+python3 scripts/index_opensearch.py \
+  --database-url sqlite:///data/librarian.db \
+  --opensearch-url http://localhost:9200 \
+  --index-name librarian-chunks \
+  --embedding-provider ollama \
+  --embedding-model all-minilm \
+  --reset
+```
+
+The index document includes chunk text, vector, book metadata, generated tags,
+and generated genres. Re-run indexing after re-chunking, rebuilding embeddings,
+or regenerating tags/genres.
+
+### `POST /search/hybrid`
+
+Runs OpenSearch-backed hybrid retrieval. The endpoint embeds the query, sends
+both keyword and vector retrieval requests to OpenSearch, merges those results,
+and returns the same response shape as `/search`.
+
+Request fields:
+
+- `query`: user search text. Must not be empty.
+- `opensearch_url`: optional OpenSearch URL. Defaults to
+  `LIBRARIAN_OPENSEARCH_URL`.
+- `index_name`: optional OpenSearch index name. Defaults to
+  `LIBRARIAN_OPENSEARCH_INDEX`.
+- `embedding_provider`: embedding provider used for the query vector.
+- `embedding_model`: embedding model used for the query vector.
+- `ollama_base_url`: optional Ollama URL override.
+- `limit`: maximum ranked chunks to return.
+- `book_id`: optional exact stored book id filter.
+- `book_title`: optional title contains filter.
+- `author`: optional author filter.
+- `genre`: optional generated genre filter.
+- `tag`: optional generated topic tag filter.
+
+Example payload:
+
+```json
+{
+  "query": "psychohistory and empire",
+  "opensearch_url": "http://localhost:9200",
+  "index_name": "librarian-chunks",
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "genre": "Science Fiction",
+  "limit": 10
+}
+```
+
+Response:
+
+- `query`: normalized search text.
+- `embedding_provider`, `embedding_model`, `dimensions`: query embedding
+  metadata.
+- `candidate_count`: OpenSearch hybrid hits returned after merge.
+- `filters`: book, author, tag, or genre filters applied.
+- `results`: ranked chunks with score, book metadata, chunk id, and text.
+
 ## Recommendations
 
 ### `POST /recommendations`

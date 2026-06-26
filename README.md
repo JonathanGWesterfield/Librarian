@@ -135,8 +135,10 @@ packages/              Local Python packages:
   librarian_config      Shared environment/default resolution
   librarian_storage     SQLite storage adapter and storage records
   librarian_ingestion   EPUB parsing, chunking, and ingestion workflow
-  librarian_search      Query embedding and vector search
+  librarian_search      Query embedding, vector search, and hybrid retrieval
   librarian_chat        Grounded answer orchestration and generation providers
+  librarian_recommendations
+                        Book-level recommendation queries
   librarian_evaluation  Retrieval and answer-quality evaluation utilities
 books/                 Optional local EPUB input folder, ignored by Git
 Epub-Books/            Local test EPUB folder, ignored by Git
@@ -154,22 +156,20 @@ scripts/               Developer helper scripts
 
 ## Current Status
 
-Librarian is currently in Phase 5: Better Book Intelligence. The core
-local RAG loop is working end to end: EPUB ingestion, chunk storage, local
-embeddings through Ollama, SQLite-backed vector search, a FastAPI surface, and
-a standalone chat CLI.
+Librarian is moving into Phase 6: Hybrid Retrieval. The core local RAG loop is
+working end to end: EPUB ingestion, chunk storage, local embeddings through
+Ollama, SQLite-backed vector search, a FastAPI surface, a standalone chat CLI,
+and book-level recommendation queries.
 
 The repo now has deterministic retrieval and answer-quality smoke reports for
 CI, optional live reports that run the golden corpus against an ingested local
 SQLite database, scoped retrieval by book and author, on-demand chapter/book
 summaries, topic tags, genre metadata, and recommendation-oriented book queries.
 
-The current engineering focus is strengthening ingestion so chapter and book
-summaries can be generated asynchronously after EPUB parsing/chunking. Summaries
-started as an on-demand workflow, but they are now foundational inputs for
-tags, genres, recommendations, and future book-level retrieval. With the first
-recommendation endpoint and playground command in place, the next major focus is
-Phase 6 hybrid retrieval.
+The current engineering focus is replacing the slow all-SQLite vector scan with
+OpenSearch-backed hybrid retrieval. SQLite remains the source of truth for book
+records, raw text, summaries, tags, genres, and job status, while OpenSearch
+will become the query index for faster vector, keyword, and filtered retrieval.
 
 ## Roadmap
 
@@ -232,10 +232,12 @@ See the evaluation north star:
 - Add genre classification from stored book summaries.
 - Add asynchronous chapter/book summary generation after ingestion.
 - Add recommendation-oriented queries.
-- Add saved searches or reading lists.
+- Add saved searches or reading lists later as product polish.
 
 ### Phase 6: Hybrid Retrieval
 
+- Add OpenSearch as a local search service.
+- Index chunks and book metadata into OpenSearch.
 - Add keyword/BM25 search.
 - Combine vector and lexical retrieval.
 - Add reranking.
@@ -318,6 +320,10 @@ Or start the container stack:
 docker compose up --build
 ```
 
+The container stack includes the API and local OpenSearch. Ollama still runs
+natively by default so it can use local model storage and Apple Silicon
+acceleration.
+
 Runtime logs are written to stdout and to the file configured by
 `LIBRARIAN_LOG_FILE`. With the default Docker environment, inspect live output
 with `docker compose logs api` and the persisted file at `data/librarian.log`.
@@ -357,6 +363,27 @@ python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db emb
 python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db embeddings --limit 3
 python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db search "How brutal and terrible is war?" --embedding-provider ollama --embedding-model all-minilm --limit 10
 python3 scripts/play/librarian.py --database-url sqlite:///data/librarian.db state
+```
+
+After embeddings exist, rebuild the OpenSearch index and try hybrid retrieval:
+
+```bash
+python3 scripts/index_opensearch.py \
+  --database-url sqlite:///data/librarian.db \
+  --opensearch-url http://localhost:9200 \
+  --index-name librarian-chunks \
+  --embedding-provider ollama \
+  --embedding-model all-minilm \
+  --reset
+
+python3 scripts/play/librarian.py \
+  hybrid-search "psychohistory and empire" \
+  --opensearch-url http://localhost:9200 \
+  --index-name librarian-chunks \
+  --embedding-provider ollama \
+  --embedding-model all-minilm \
+  --genre "Science Fiction" \
+  --limit 10
 ```
 
 Scripts under `scripts/play/` are development/operator tools. They are useful
@@ -472,6 +499,9 @@ POST /embeddings/query     body: query, embedding_provider, embedding_model,
                             ollama_base_url
 POST /search               body: query, database_url, embedding_provider,
                             embedding_model, ollama_base_url, limit
+POST /search/hybrid        body: query, opensearch_url, index_name,
+                            embedding_provider, embedding_model,
+                            ollama_base_url, limit, genre, tag
 POST /chat                 body: question, database_url, embedding_provider,
                             embedding_model, generation_provider,
                             generation_model, ollama_base_url, retrieval_limit

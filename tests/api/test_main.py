@@ -15,6 +15,7 @@ from librarian_recommendations.recommendations import (
     RecommendationEvidence,
     RecommendationResponse,
 )
+from librarian_search.search import SearchResponse, SearchResult
 from librarian_storage.storage import (
     BookGenreRecord,
     BookRecord,
@@ -248,6 +249,37 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["chunk_id"], "api-book:0")
         self.assertAlmostEqual(payload["results"][0]["score"], 1.0, places=6)
         self.assertIn("clockwork garden", payload["results"][0]["text"])
+
+    def test_hybrid_search_endpoint_returns_ranked_chunks(self) -> None:
+        """Verify clients can run OpenSearch-backed hybrid retrieval.
+        Hybrid search should preserve the normal search response shape while
+        adding OpenSearch-specific metadata filters such as genre and tag.
+        """
+        self._seed_search_fixture()
+
+        with patch(
+            "librarian_api.main.hybrid_search_chunks",
+            return_value=_fake_search_response(filters={"genre": "Science Fiction"}),
+        ):
+            response = self.client.post(
+                "/search/hybrid",
+                json={
+                    "query": "clockwork garden",
+                    "opensearch_url": "http://localhost:9200",
+                    "index_name": "librarian-chunks",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "genre": "Science Fiction",
+                    "limit": 2,
+                },
+            )
+
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["query"], "clockwork garden")
+        self.assertEqual(payload["filters"], {"genre": "Science Fiction"})
+        self.assertEqual(payload["results"][0]["chunk_id"], "api-book:0")
 
     def test_chat_endpoint_returns_answer_with_sources(self) -> None:
         """Verify desktop clients can request grounded answer synthesis.
@@ -771,3 +803,30 @@ class _FakeQueryEmbedder:
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [[1.0, 0.0] for _text in texts]
+
+
+def _fake_search_response(*, filters: dict[str, str]) -> SearchResponse:
+    return SearchResponse(
+        query="clockwork garden",
+        embedding_provider="ollama",
+        embedding_model="all-minilm",
+        dimensions=2,
+        candidate_count=1,
+        filters=filters,
+        results=[
+            SearchResult(
+                score=1.0,
+                chunk_id="api-book:0",
+                book_id="api-book",
+                relative_path="api-sample.epub",
+                title="API Sample Book",
+                authors=["Test Author"],
+                publisher="Fixture Press",
+                chunk_index=0,
+                text="The clockwork garden woke at dawn.",
+                embedding_provider="ollama",
+                embedding_model="all-minilm",
+                dimensions=2,
+            )
+        ],
+    )
