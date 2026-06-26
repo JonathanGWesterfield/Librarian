@@ -273,7 +273,8 @@ or regenerating tags/genres.
 
 Runs OpenSearch-backed hybrid retrieval. The endpoint embeds the query, sends
 both keyword and vector retrieval requests to OpenSearch, merges those results,
-and returns the same response shape as `/search`.
+reranks a slightly wider candidate pool with exact phrase and metadata match
+signals, and returns the same response shape as `/search`.
 
 Request fields:
 
@@ -311,7 +312,8 @@ Response:
 - `query`: normalized search text.
 - `embedding_provider`, `embedding_model`, `dimensions`: query embedding
   metadata.
-- `candidate_count`: OpenSearch hybrid hits returned after merge.
+- `candidate_count`: OpenSearch hybrid hits considered before final reranking
+  and trimming to `limit`.
 - `filters`: book, author, tag, or genre filters applied.
 - `results`: ranked chunks with score, book metadata, chunk id, and text.
 
