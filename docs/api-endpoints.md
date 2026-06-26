@@ -247,6 +247,81 @@ Response:
 - `books`: per-book ingestion results.
 - `discovered`: optional discovered EPUB metadata when `list_epubs` is true.
 
+## Recommendations
+
+### `POST /recommendations`
+
+Returns book-level recommendations by embedding the reader request, retrieving
+matching chunks, grouping those chunks by book, enriching each book with stored
+tags and genres, and asking the configured generator for a concise
+recommendation explanation.
+
+This endpoint is different from `/search`: search returns individual chunks,
+while recommendations return ranked books with supporting evidence.
+
+Request fields:
+
+- `query`: reader recommendation request. Must not be empty.
+- `database_url`: optional SQLite database URL. Defaults to
+  `LIBRARIAN_DATABASE_URL`.
+- `embedding_provider`: embedding provider for retrieval, such as `ollama` or
+  `noop`.
+- `embedding_model`: embedding model name.
+- `generation_provider`: generator for the recommendation explanation, such as
+  `codex`, `ollama`, or `noop`.
+- `generation_model`: generation model name.
+- `ollama_base_url`: optional Ollama URL override.
+- `limit`: maximum books to recommend.
+- `retrieval_limit`: maximum chunks to retrieve before grouping by book.
+- `book_id`: optional exact stored book id filter.
+- `book_title`: optional title contains filter.
+- `author`: optional author contains filter.
+- `genre`: optional generated genre contains filter.
+- `tag`: optional generated topic tag contains filter.
+
+Example payload:
+
+```json
+{
+  "query": "I want a thoughtful science fiction book about politics",
+  "database_url": "sqlite:///data/librarian.db",
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "generation_provider": "codex",
+  "generation_model": "codex",
+  "limit": 5,
+  "retrieval_limit": 40,
+  "genre": "Science Fiction"
+}
+```
+
+Ollama-only example:
+
+```json
+{
+  "query": "I want something about memory and identity",
+  "database_url": "sqlite:///data/librarian.db",
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "generation_provider": "ollama",
+  "generation_model": "llama3.2:3b",
+  "tag": "memory"
+}
+```
+
+Response:
+
+- `query`: normalized reader request.
+- `answer`: generated recommendation explanation.
+- `embedding_provider`, `embedding_model`: retrieval embedding settings.
+- `generation_provider`, `generation_model`: explanation generation settings.
+- `retrieval_limit`: chunks considered before book aggregation.
+- `candidate_count`: number of book candidates after metadata filters.
+- `filters`: applied book, author, tag, or genre filters.
+- `recommendations`: ranked books. Each recommendation includes `rank`,
+  `score`, book identity fields, stored `tags`, stored `genres`, and `evidence`
+  chunks with source ids such as `R1.1`.
+
 ## Book Summaries
 
 ### `POST /books/{book_id}/summary`

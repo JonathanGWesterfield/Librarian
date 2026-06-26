@@ -47,6 +47,13 @@ Search within one author or book:
       search "How brutal and terrible is war?" \\
       --author "Erich Maria Remarque" \\
       --limit 10
+
+Ask for book-level recommendations using retrieval plus generated metadata:
+    python3 scripts/play/librarian.py \\
+      --database-url sqlite:///data/librarian.db \\
+      recommend "I want a thoughtful science fiction book" \\
+      --genre "Science Fiction" \\
+      --limit 5
 """
 from __future__ import annotations
 
@@ -78,6 +85,10 @@ from librarian_ingestion.embedding_ops import (
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
 from librarian_logging import configure_cli_logging, emit_json
+from librarian_recommendations.recommendations import (
+    RecommendationOptions,
+    recommend_books,
+)
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 
@@ -228,6 +239,61 @@ def main(argv: list[str] | None = None) -> int:
     search_parser.add_argument("--author", help="Restrict search to matching author names.")
     _add_json_flag(search_parser)
 
+    recommend_parser = subparsers.add_parser(
+        "recommend",
+        help="Recommend books by aggregating retrieved chunks and book metadata.",
+    )
+    recommend_parser.add_argument("query", help="Natural-language recommendation request.")
+    recommend_parser.add_argument(
+        "--embedding-provider",
+        choices=["noop", "ollama"],
+        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+    )
+    recommend_parser.add_argument(
+        "--embedding-model",
+        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+    )
+    recommend_parser.add_argument(
+        "--generation-provider",
+        choices=["noop", "ollama", "codex"],
+        help=f"Generation provider override instead of {GENERATION_PROVIDER_ENV}.",
+    )
+    recommend_parser.add_argument(
+        "--generation-model",
+        help=f"Generation model override instead of {GENERATION_MODEL_ENV}.",
+    )
+    recommend_parser.add_argument(
+        "--ollama-base-url",
+        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+    )
+    recommend_parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum books to recommend.",
+    )
+    recommend_parser.add_argument(
+        "--retrieval-limit",
+        type=int,
+        default=40,
+        help="Maximum retrieved chunks to aggregate into book recommendations.",
+    )
+    recommend_parser.add_argument("--book-id", help="Restrict to one stored book id.")
+    recommend_parser.add_argument(
+        "--book-title",
+        help="Restrict to matching book titles.",
+    )
+    recommend_parser.add_argument("--author", help="Restrict to matching author names.")
+    recommend_parser.add_argument(
+        "--genre",
+        help="Require a stored generated genre containing this text.",
+    )
+    recommend_parser.add_argument(
+        "--tag",
+        help="Require a stored generated topic tag containing this text.",
+    )
+    _add_json_flag(recommend_parser)
+
     args = parser.parse_args(argv)
     configure_cli_logging(console=not getattr(args, "json", False))
     database_url = resolve_database_url(args.database_url)
@@ -309,6 +375,31 @@ def main(argv: list[str] | None = None) -> int:
                 _log_payload(payload, args.json)
             else:
                 _log_search_response(payload)
+            return 0
+        if args.command == "recommend":
+            result = recommend_books(
+                RecommendationOptions(
+                    query=args.query,
+                    database_url=database_url,
+                    embedding_provider=args.embedding_provider,
+                    embedding_model=args.embedding_model,
+                    generation_provider=args.generation_provider,
+                    generation_model=args.generation_model,
+                    ollama_base_url=args.ollama_base_url,
+                    limit=args.limit,
+                    retrieval_limit=args.retrieval_limit,
+                    book_id=args.book_id,
+                    book_title=args.book_title,
+                    author=args.author,
+                    genre=args.genre,
+                    tag=args.tag,
+                )
+            )
+            payload = result.to_dict()
+            if args.json:
+                _log_payload(payload, args.json)
+            else:
+                _log_recommendation_response(payload)
             return 0
     except (EpubSourceError, ValueError, NotImplementedError, RuntimeError) as error:
         logger.error("Error: %s", error)
@@ -491,6 +582,55 @@ def _log_search_response(payload: dict[str, object]) -> None:
             "\ttext: %s\n",
             _single_line(str(result["text"]), max_length=360),
         )
+
+
+def _log_recommendation_response(payload: dict[str, object]) -> None:
+    logger.info("Librarian recommendations")
+    logger.info("Query: %s", payload["query"])
+    logger.info("Answer:")
+    logger.info("%s", payload["answer"])
+    logger.info(
+        "\nModels: "
+        f"embedding={payload['embedding_provider']}/{payload['embedding_model']}, "
+        f"generation={payload['generation_provider']}/{payload['generation_model']}"
+    )
+    logger.info("Book candidates: %s", payload["candidate_count"])
+    filters = payload.get("filters")
+    if isinstance(filters, dict) and filters:
+        logger.info("Filters: %s", filters)
+
+    recommendations = payload["recommendations"]
+    if not isinstance(recommendations, list) or not recommendations:
+        logger.info("No matching books found.")
+        return
+
+    for item in recommendations:
+        if not isinstance(item, dict):
+            continue
+        title = item["title"] or item["relative_path"]
+        authors = item["authors"]
+        author_text = ", ".join(authors) if isinstance(authors, list) else authors
+        logger.info(
+            "#%s score=%.4f %s",
+            item["rank"],
+            float(item["score"]),
+            title,
+        )
+        if author_text:
+            logger.info("\tauthors: %s", author_text)
+        if item.get("genres"):
+            logger.info("\tgenres: %s", ", ".join(str(value) for value in item["genres"]))
+        if item.get("tags"):
+            logger.info("\ttags: %s", ", ".join(str(value) for value in item["tags"]))
+        evidence = item.get("evidence")
+        if isinstance(evidence, list):
+            for source in evidence[:2]:
+                if isinstance(source, dict):
+                    logger.info(
+                        "\t[%s] %s",
+                        source["source_id"],
+                        _single_line(str(source["text"]), max_length=240),
+                    )
 
 
 def _single_line(text: str, *, max_length: int) -> str:

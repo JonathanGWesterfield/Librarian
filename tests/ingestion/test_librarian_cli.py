@@ -14,7 +14,12 @@ sys.path.insert(0, str(REPO_ROOT / "scripts" / "play"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from librarian import main
-from librarian_storage.storage import EmbeddingRecord, create_ingestion_store
+from librarian_storage.storage import (
+    BookGenreRecord,
+    BookTagRecord,
+    EmbeddingRecord,
+    create_ingestion_store,
+)
 
 
 class LibrarianCliTests(unittest.TestCase):
@@ -104,6 +109,55 @@ class LibrarianCliTests(unittest.TestCase):
         self.assertAlmostEqual(search["results"][0]["score"], 1.0, places=6)
         self.assertIn("The clockwork garden woke at dawn.", search["results"][0]["text"])
 
+    def test_cli_recommend_returns_book_level_results(self) -> None:
+        """Verify the playground can surface recommendation queries.
+        Recommendations should be book-level rather than chunk-level, and the
+        command should carry generated tags and genres into JSON output for
+        local inspection.
+        """
+        self._run_cli(
+            [
+                "--database-url",
+                self.database_url,
+                "ingest",
+                "--books-dir",
+                str(self.books_dir),
+                "--json",
+            ]
+        )
+        self._seed_embedding()
+        self._seed_metadata()
+
+        with patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            recommendations = self._run_json(
+                [
+                    "--database-url",
+                    self.database_url,
+                    "recommend",
+                    "thoughtful science fiction",
+                    "--embedding-provider",
+                    "ollama",
+                    "--embedding-model",
+                    "all-minilm",
+                    "--generation-provider",
+                    "noop",
+                    "--genre",
+                    "Science Fiction",
+                ]
+            )
+
+        self.assertEqual(recommendations["candidate_count"], 1)
+        self.assertEqual(len(recommendations["recommendations"]), 1)
+        self.assertEqual(
+            recommendations["recommendations"][0]["title"],
+            "The Clockwork Garden",
+        )
+        self.assertIn("clockwork garden", recommendations["recommendations"][0]["tags"])
+        self.assertIn("Science Fiction", recommendations["recommendations"][0]["genres"])
+
     def test_cli_resolves_books_dir_relative_to_repo_root_from_play_dir(self) -> None:
         """Verify playground commands remain usable from inside scripts/play.
         Developers often run `python3 librarian.py` from that folder, so a
@@ -137,6 +191,44 @@ class LibrarianCliTests(unittest.TestCase):
                         model="all-minilm",
                         vector=[1.0, 0.0],
                         dimensions=2,
+                    )
+                ]
+            )
+        finally:
+            store.close()
+
+    def _seed_metadata(self) -> None:
+        store = create_ingestion_store(self.database_url)
+        store.initialize()
+        try:
+            book = store.list_books(limit=1, offset=0)[0]
+            store.save_book_tags(
+                [
+                    BookTagRecord(
+                        id=f"{book.id}:tag",
+                        book_id=book.id,
+                        tag="clockwork garden",
+                        tag_type="topic",
+                        source="llm",
+                        confidence=0.9,
+                        provider="noop",
+                        model="noop",
+                        rationale="Fixture topic.",
+                    )
+                ]
+            )
+            store.save_book_genres(
+                [
+                    BookGenreRecord(
+                        id=f"{book.id}:genre",
+                        book_id=book.id,
+                        genre="Science Fiction",
+                        genre_role="primary",
+                        source="llm",
+                        confidence=0.9,
+                        provider="noop",
+                        model="noop",
+                        rationale="Fixture genre.",
                     )
                 ]
             )
