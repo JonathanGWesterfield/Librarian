@@ -394,6 +394,47 @@ The `ingest` step parses EPUB files and stores chunked raw text. The `embed`
 step reads those stored chunks and writes vectors into `chunk_embeddings`
 without deleting `books`, `chunks`, or raw text.
 
+### Stage-Specific Ollama Models
+
+Embedding and summarization are configured separately. This is important on
+small local machines because embedding models are usually tiny, while summary
+generation models can easily exceed available RAM and make the worker look
+stalled.
+
+Use embedding settings for chunk/query vectors:
+
+```bash
+LIBRARIAN_EMBEDDING_PROVIDER=ollama
+LIBRARIAN_EMBEDDING_MODEL=all-minilm
+```
+
+Use generation settings for chat, summarization, tags, genres, and
+recommendation text:
+
+```bash
+LIBRARIAN_GENERATION_PROVIDER=ollama
+LIBRARIAN_GENERATION_MODEL=llama3.2:3b
+```
+
+When ingesting books, summary jobs can be queued with a model that is different
+from the embedding model:
+
+```bash
+python3 scripts/play/ingest_epubs.py \
+  --books-dir ./Epub-Books \
+  --database-url sqlite:///data/librarian.db \
+  --embed \
+  --embedding-provider ollama \
+  --embedding-model all-minilm \
+  --enqueue-summaries \
+  --summary-generation-provider ollama \
+  --summary-generation-model llama3.2:3b
+```
+
+The selected summary provider/model/detail are stored on each queued summary
+job, so changing `LIBRARIAN_GENERATION_MODEL` later only affects newly queued
+jobs or explicit rebuild/reset operations.
+
 For grounded answer synthesis, use the standalone chat CLI:
 
 ```bash
