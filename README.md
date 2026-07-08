@@ -413,7 +413,7 @@ recommendation text:
 
 ```bash
 LIBRARIAN_GENERATION_PROVIDER=ollama
-LIBRARIAN_GENERATION_MODEL=llama3.2:3b
+LIBRARIAN_GENERATION_MODEL=qwen2.5:1.5b
 ```
 
 When ingesting books, summary jobs can be queued with a model that is different
@@ -428,7 +428,7 @@ python3 scripts/play/ingest_epubs.py \
   --embedding-model all-minilm \
   --enqueue-summaries \
   --summary-generation-provider ollama \
-  --summary-generation-model llama3.2:3b
+  --summary-generation-model qwen2.5:1.5b
 ```
 
 The selected summary provider/model/detail are stored on each queued summary
@@ -443,7 +443,7 @@ python3 scripts/chat.py \
   --embedding-provider ollama \
   --embedding-model all-minilm \
   --generation-provider ollama \
-  --generation-model llama3.2:3b \
+  --generation-model qwen2.5:1.5b \
   --retrieval-limit 30 \
   "How brutal and terrible is war?"
 ```
@@ -477,7 +477,7 @@ python3 scripts/summarize.py \
   --book-title "Forward the Foundation" \
   --author "Isaac Asimov" \
   --generation-provider ollama \
-  --generation-model llama3.2:3b \
+  --generation-model qwen2.5:1.5b \
   --detail medium \
   --reset
 ```

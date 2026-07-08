@@ -31,7 +31,7 @@ Reset and rebuild genres with Ollama:
       --book-title "Forward the Foundation" \\
       --author "Isaac Asimov" \\
       --generation-provider ollama \\
-      --generation-model llama3.2:3b \\
+      --generation-model qwen2.5:1.5b \\
       --reset
 
 List stored genres for one book:
