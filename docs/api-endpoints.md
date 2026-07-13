@@ -99,7 +99,7 @@ Example response:
         "title": "Forward the Foundation",
         "authors": ["Isaac Asimov"],
         "provider": "ollama",
-        "model": "llama3.2:3b",
+        "model": "qwen2.5:1.5b",
         "detail": "medium",
         "attempts": 1,
         "stage": "chapter",
@@ -142,10 +142,10 @@ Example response:
         "authors": ["Isaac Asimov"],
         "job_type": "genres",
         "source_summary_provider": "ollama",
-        "source_summary_model": "llama3.2:3b",
+        "source_summary_model": "qwen2.5:1.5b",
         "source_summary_detail": "medium",
         "provider": "ollama",
-        "model": "llama3.2:3b",
+        "model": "qwen2.5:1.5b",
         "attempts": 1,
         "stage": "metadata",
         "current": 0,
@@ -231,7 +231,7 @@ Ingest, embed, and queue summaries:
   "embedding_model": "all-minilm",
   "enqueue_summaries": true,
   "summary_generation_provider": "ollama",
-  "summary_generation_model": "llama3.2:3b"
+  "summary_generation_model": "qwen2.5:1.5b"
 }
 ```
 
@@ -374,7 +374,7 @@ Ollama-only example:
   "embedding_provider": "ollama",
   "embedding_model": "all-minilm",
   "generation_provider": "ollama",
-  "generation_model": "llama3.2:3b",
+  "generation_model": "qwen2.5:1.5b",
   "tag": "memory"
 }
 ```
@@ -442,7 +442,7 @@ Reset and rebuild with Ollama:
 {
   "database_url": "sqlite:///data/librarian.db",
   "generation_provider": "ollama",
-  "generation_model": "llama3.2:3b",
+  "generation_model": "qwen2.5:1.5b",
   "detail": "medium",
   "reset": true,
   "chunks_per_section": 8,
@@ -507,7 +507,7 @@ Reset and rebuild with Ollama:
   "source_summary_provider": "codex",
   "source_summary_model": "codex",
   "generation_provider": "ollama",
-  "generation_model": "llama3.2:3b",
+  "generation_model": "qwen2.5:1.5b",
   "reset": true
 }
 ```

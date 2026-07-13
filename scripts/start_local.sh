@@ -9,14 +9,14 @@
 # Examples:
 #   scripts/start_local.sh
 #   LIBRARIAN_EMBEDDING_MODEL=all-minilm scripts/start_local.sh
-#   LIBRARIAN_GENERATION_MODEL=llama3.2:3b scripts/start_local.sh
+#   LIBRARIAN_GENERATION_MODEL=qwen2.5:1.5b scripts/start_local.sh
 #   LIBRARIAN_PULL_GENERATION_MODEL=false scripts/start_local.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OLLAMA_HOST_URL="${LIBRARIAN_LOCAL_OLLAMA_URL:-http://localhost:11434}"
 OLLAMA_MODEL="${LIBRARIAN_EMBEDDING_MODEL:-all-minilm}"
-OLLAMA_GENERATION_MODEL="${LIBRARIAN_GENERATION_MODEL:-llama3.2:3b}"
+OLLAMA_GENERATION_MODEL="${LIBRARIAN_GENERATION_MODEL:-qwen2.5:1.5b}"
 PULL_MODEL="${LIBRARIAN_PULL_EMBEDDING_MODEL:-true}"
 PULL_GENERATION_MODEL="${LIBRARIAN_PULL_GENERATION_MODEL:-true}"
 HOMEBREW_DOCKER_PLUGIN_DIR="/opt/homebrew/lib/docker/cli-plugins"
