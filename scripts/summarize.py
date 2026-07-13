@@ -39,7 +39,7 @@ Reset and rebuild summaries with an Ollama model:
       --book-title "Forward the Foundation" \\
       --author "Isaac Asimov" \\
       --generation-provider ollama \\
-      --generation-model llama3.2:3b \\
+      --generation-model qwen2.5:1.5b \\
       --detail medium \\
       --reset
 

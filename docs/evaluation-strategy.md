@@ -134,7 +134,7 @@ python3 scripts/evaluate_retrieval.py --live --live-answers --llm-judge \
   --embedding-provider ollama \
   --embedding-model all-minilm \
   --generation-provider ollama \
-  --generation-model llama3.2:3b
+  --generation-model qwen2.5:1.5b
 ```
 
 The default judge provider is `codex`. The default fallback provider is
@@ -144,7 +144,7 @@ The default judge provider is `codex`. The default fallback provider is
 python3 scripts/evaluate_retrieval.py --llm-judge \
   --judge-provider codex \
   --judge-fallback-provider ollama \
-  --judge-fallback-model llama3.2:3b
+  --judge-fallback-model qwen2.5:1.5b
 ```
 
 Use `--judge-fallback-provider none` to fail fast when Codex is unavailable.
@@ -275,7 +275,7 @@ python3 scripts/evaluate_retrieval.py --live --live-answers \
   --embedding-provider ollama \
   --embedding-model all-minilm \
   --generation-provider ollama \
-  --generation-model llama3.2:3b \
+  --generation-model qwen2.5:1.5b \
   --retrieval-limit 30
 ```
 

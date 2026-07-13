@@ -29,7 +29,7 @@ Start an interactive prompt:
     python3 scripts/chat.py \\
       --database-url sqlite:///data/librarian.db \\
       --generation-provider ollama \\
-      --generation-model llama3.2:3b
+      --generation-model qwen2.5:1.5b
 
 Return machine-readable JSON for automation:
     python3 scripts/chat.py \\

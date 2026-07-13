@@ -195,7 +195,7 @@ def main() -> int:
     parser.add_argument(
         "--judge-fallback-model",
         default=None,
-        help="Fallback LLM judge model. Defaults to --generation-model or llama3.2:3b.",
+        help="Fallback LLM judge model. Defaults to --generation-model or qwen2.5:1.5b.",
     )
     parser.add_argument(
         "--database-url",
@@ -254,7 +254,7 @@ def main() -> int:
     fallback_judge = _create_optional_fallback_judge(
         enabled=args.llm_judge,
         provider=args.judge_fallback_provider,
-        model=args.judge_fallback_model or args.generation_model or "llama3.2:3b",
+        model=args.judge_fallback_model or args.generation_model or "qwen2.5:1.5b",
         ollama_base_url=args.ollama_base_url,
     )
 
