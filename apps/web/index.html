@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A citation-first demo of Librarian, a local-first RAG system for EPUB collections." />
+    <title>Librarian — Citation-first book discovery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <nav class="topbar" aria-label="Primary navigation">
+        <a class="brand" href="#explore" aria-label="Librarian home">
+          <span class="brand-mark" aria-hidden="true">L</span>
+          <span>Librarian</span>
+        </a>
+        <div class="nav-links">
+          <a class="active" href="#explore">Explore</a>
+          <a href="#library">Library</a>
+          <a href="#how-it-works">How it works</a>
+        </div>
+        <a class="github-link" href="https://github.com/JonathanGWesterfield/Librarian" target="_blank" rel="noreferrer">View source <span aria-hidden="true">↗</span></a>
+      </nav>
+
+      <section id="explore" class="hero">
+        <p class="eyebrow">A public demonstration of local-first RAG</p>
+        <h1>Ask the library.<br /><em>See the evidence.</em></h1>
+        <p class="hero-copy">Librarian helps readers discover and understand books with grounded answers that link directly back to the passages that support them.</p>
+
+        <form id="question-form" class="question-form">
+          <label class="sr-only" for="question">Ask a question about the sample library</label>
+          <input id="question" autocomplete="off" placeholder="What would I learn about ambition and isolation?" />
+          <button type="submit">Ask <span aria-hidden="true">→</span></button>
+        </form>
+
+        <div class="starter-row" aria-label="Suggested questions">
+          <span>Try a question</span>
+          <button data-prompt="What would I learn about ambition and isolation?">Ambition &amp; isolation</button>
+          <button data-prompt="Which book should I read for an adventure at sea?">A sea adventure</button>
+          <button data-prompt="Find a story about second chances.">Second chances</button>
+        </div>
+      </section>
+
+      <section class="workspace" aria-labelledby="answer-heading">
+        <aside class="filters">
+          <div class="filter-heading"><span>Refine this search</span><button id="clear-filters" type="button">Clear</button></div>
+          <fieldset>
+            <legend>Collection</legend>
+            <label><input type="radio" name="collection" value="all" checked /> All books <span>4</span></label>
+            <label><input type="radio" name="collection" value="fiction" /> Fiction <span>4</span></label>
+          </fieldset>
+          <fieldset>
+            <legend>Topics</legend>
+            <label><input type="checkbox" name="topic" value="identity" /> Identity</label>
+            <label><input type="checkbox" name="topic" value="adventure" /> Adventure</label>
+            <label><input type="checkbox" name="topic" value="society" /> Society</label>
+            <label><input type="checkbox" name="topic" value="ambition" /> Ambition</label>
+          </fieldset>
+          <div class="demo-note"><span class="note-icon">i</span><p>This is a rights-safe sample corpus. Personal libraries stay local.</p></div>
+        </aside>
+
+        <div class="answer-area">
+          <div class="answer-meta">
+            <p id="answer-heading" class="eyebrow">Grounded answer</p>
+            <span id="result-count">3 supporting passages</span>
+          </div>
+          <article class="answer-card" aria-live="polite">
+            <div class="answer-number">01</div>
+            <div>
+              <p id="question-label" class="asked-question">What would I learn about ambition and isolation?</p>
+              <p id="answer-text" class="answer-text">Frankenstein treats ambition as a force that becomes dangerous when it outruns responsibility. Victor's desire to defeat death isolates him from family, community, and finally from the being he creates. The novel argues that knowledge is not inherently destructive—but pursuing it without care for its human consequences can be.</p>
+              <div id="answer-tags" class="tag-row"><span>ambition</span><span>responsibility</span><span>isolation</span></div>
+            </div>
+          </article>
+
+          <div class="citations-header"><div><p class="eyebrow">Traceable sources</p><h2>Read the passages</h2></div><span id="citation-count">3 citations</span></div>
+          <div id="citations" class="citations"></div>
+        </div>
+      </section>
+
+      <section id="library" class="library-section">
+        <div class="section-heading"><div><p class="eyebrow">Sample collection</p><h2>A small library, made explorable.</h2></div><p>Four public-domain books. One evidence-first interface.</p></div>
+        <div id="book-grid" class="book-grid"></div>
+      </section>
+
+      <section id="how-it-works" class="how-section">
+        <div><p class="eyebrow">Under the hood</p><h2>Designed for answers you can inspect.</h2></div>
+        <ol class="pipeline">
+          <li><span>01</span><strong>Ingest</strong><p>Parse EPUBs into structured, source-aware chunks.</p></li>
+          <li><span>02</span><strong>Retrieve</strong><p>Combine semantic and keyword search with useful filters.</p></li>
+          <li><span>03</span><strong>Ground</strong><p>Build answers only from the passages the system found.</p></li>
+          <li><span>04</span><strong>Evaluate</strong><p>Measure retrieval and answer quality with a golden corpus.</p></li>
+        </ol>
+      </section>
+
+      <footer><p>Built as an AI engineering portfolio project.</p><p>© 2026 Librarian <span aria-hidden="true">·</span> <a href="https://github.com/JonathanGWesterfield/Librarian" target="_blank" rel="noreferrer">GitHub ↗</a></p></footer>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
