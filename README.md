@@ -273,56 +273,94 @@ See the evaluation north star:
 
 ## Local Development
 
-System dependencies that cannot live in this repository:
+### Standard Docker Compose path
 
-- Python 3.12+
-- Docker runtime: Docker Desktop, or Homebrew Docker CLI plus Colima
-- Docker Compose plugin
-- Ollama for local embedding models
-
-Run the setup helper to check system dependencies and install Python packages:
-
-```bash
-scripts/setup_local.sh
-```
-
-To let the helper install Homebrew-managed CLI dependencies where possible:
-
-```bash
-scripts/setup_local.sh --install-system-deps
-```
-
-The setup helper will not silently install Docker Desktop or other GUI apps. If
-you use Homebrew Docker instead of Docker Desktop, install Colima as the Docker
-runtime:
-
-```bash
-brew install docker docker-compose colima ollama
-```
-
-Install Python dependencies:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e "apps/api[dev]" -e "apps/codex_broker[dev]" -e "packages[dev]"
-```
-
-Start the API:
-
-```bash
-uvicorn librarian_api.main:app --app-dir apps/api --reload
-```
-
-Or start the container stack:
+Install and start a Docker runtime with Docker Compose v2, then run this command
+from the repository root:
 
 ```bash
 docker compose up --build
 ```
 
-The container stack includes the API and local OpenSearch. Ollama still runs
-natively by default so it can use local model storage and Apple Silicon
-acceleration.
+This is the supported onboarding command on Windows, Linux, and macOS wherever
+Docker Compose runs. It builds the API image for the host architecture (the
+image pins Python 3.12), starts OpenSearch and Ollama, and pulls the configured
+embedding and generation models before starting the API. Model files live in
+the named `ollama-models` Docker volume, so they survive container restarts.
+The first run needs network access for container images and model downloads and
+can take several minutes.
+
+No host Python, virtual environment, Homebrew, or native Ollama installation is
+required for this normal app path. A virtual environment cannot change a host
+Python version; the container image owns that runtime instead.
+
+The command runs in the foreground. To start it in the background, use:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Open <http://localhost:8000/docs> after `api` is healthy. The optional summary
+worker is intentionally separate because it can consume generation resources:
+
+```bash
+docker compose --profile workers up --build
+```
+
+The Bash convenience helpers are available for macOS/Linux, or Windows through
+WSL/Git Bash; they are not native Windows PowerShell or Command Prompt scripts:
+
+```bash
+scripts/bootstrap_local.sh
+scripts/start_local.sh --with-workers
+scripts/stop_local.sh
+```
+
+`bootstrap_local.sh` only checks the Compose configuration and delegates to
+`start_local.sh`. It does not install host tooling. To validate the Compose file
+without starting containers, run `scripts/setup_local.sh` (or directly run
+`docker compose config`).
+
+### Configuration and optional native Ollama override
+
+The defaults are in [`.env.example`](.env.example). Compose works without a
+`.env` file. To change model names or the EPUB source directory, create a local
+`.env` file with only the values to override, for example:
+
+```dotenv
+LIBRARIAN_HOST_BOOKS_DIR=/absolute/path/to/epubs
+LIBRARIAN_EMBEDDING_MODEL=all-minilm
+LIBRARIAN_GENERATION_MODEL=qwen2.5:1.5b
+```
+
+The normal container setting is
+`LIBRARIAN_OLLAMA_BASE_URL=http://ollama:11434`; API and worker containers use
+the Compose service hostname rather than a host-specific address.
+
+Native Ollama is an optional performance/developer override, not a prerequisite.
+Start native Ollama and pull the required models yourself, set
+`LIBRARIAN_OLLAMA_BASE_URL=http://host.docker.internal:11434`, then start
+OpenSearch and the API without its Compose dependencies:
+
+```bash
+docker compose up -d opensearch
+LIBRARIAN_OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  docker compose up --build --no-deps api
+```
+
+`host.docker.internal` works with Docker Desktop; this Compose file also maps it
+on Linux. This override skips the container model-initialization guard, so model
+availability is the developer's responsibility.
+
+Stop the normal stack without deleting models or search data:
+
+```bash
+docker compose down
+```
+
+Deliberately deleting named volumes with `docker compose down --volumes` also
+deletes downloaded Ollama models and OpenSearch data.
 
 Runtime logs are written to stdout and to the file configured by
 `LIBRARIAN_LOG_FILE`. With the default Docker environment, inspect live output
@@ -591,39 +629,12 @@ Current embedding configuration:
 ```bash
 LIBRARIAN_EMBEDDING_PROVIDER=ollama
 LIBRARIAN_EMBEDDING_MODEL=all-minilm
-LIBRARIAN_OLLAMA_BASE_URL=http://localhost:11434
+LIBRARIAN_OLLAMA_BASE_URL=http://ollama:11434
 ```
 
-For local development on macOS, run Ollama natively and let Dockerized
-Librarian call it through `host.docker.internal`. Start the local stack with:
-
-```bash
-scripts/start_local.sh
-```
-
-The startup script opens Docker Desktop when needed, starts native Ollama when
-it is not already running, pulls the configured embedding model, then runs
-`docker compose up -d`.
-
-Stop the local Docker Compose services with:
-
-```bash
-scripts/stop_local.sh
-```
-
-By default this leaves native Ollama and the Docker runtime running. To stop
-native Ollama too:
-
-```bash
-scripts/stop_local.sh --ollama
-```
-
-On macOS, Docker can be provided either by Docker Desktop or by Homebrew's
-Docker CLI plus a runtime such as Colima. If Homebrew installs Docker Compose
-as a CLI plugin, `scripts/start_local.sh` will add
-`/opt/homebrew/lib/docker/cli-plugins` to `~/.docker/config.json` when needed.
-If Docker Desktop is not installed, the script will try `colima start` when the
-`colima` command is available.
+For the default Compose path, model availability is handled by the `ollama-init`
+service before the API or optional worker starts. See the local-development
+section above for the intentionally manual native-Ollama override.
 
 To rebuild embeddings without deleting raw book text or chunks:
 

@@ -1,11 +1,26 @@
+x-librarian-environment: &librarian_environment
+  LIBRARIAN_DATABASE_URL: ${LIBRARIAN_DATABASE_URL:-sqlite:///data/librarian.db}
+  LIBRARIAN_LOG_FILE: ${LIBRARIAN_LOG_FILE:-/data/librarian.log}
+  LIBRARIAN_BOOKS_DIR: ${LIBRARIAN_BOOKS_DIR:-/books}
+  LIBRARIAN_HOST_BOOKS_DIR: ${LIBRARIAN_HOST_BOOKS_DIR:-./Epub-Books}
+  LIBRARIAN_CODEX_BROKER_URL: ${LIBRARIAN_CODEX_BROKER_URL:-http://host.docker.internal:8787}
+  LIBRARIAN_ENABLE_CODEX_BROKER: ${LIBRARIAN_ENABLE_CODEX_BROKER:-false}
+  LIBRARIAN_EMBEDDING_PROVIDER: ${LIBRARIAN_EMBEDDING_PROVIDER:-ollama}
+  LIBRARIAN_EMBEDDING_MODEL: ${LIBRARIAN_EMBEDDING_MODEL:-all-minilm}
+  LIBRARIAN_GENERATION_PROVIDER: ${LIBRARIAN_GENERATION_PROVIDER:-ollama}
+  LIBRARIAN_GENERATION_MODEL: ${LIBRARIAN_GENERATION_MODEL:-qwen2.5:1.5b}
+  LIBRARIAN_OLLAMA_BASE_URL: ${LIBRARIAN_OLLAMA_BASE_URL:-http://ollama:11434}
+  LIBRARIAN_OPENSEARCH_URL: ${LIBRARIAN_OPENSEARCH_URL:-http://opensearch:9200}
+  LIBRARIAN_OPENSEARCH_INDEX: ${LIBRARIAN_OPENSEARCH_INDEX:-librarian-chunks}
+
 services:
   opensearch:
     image: opensearchproject/opensearch:2.15.0
     environment:
-      - discovery.type=single-node
-      - DISABLE_SECURITY_PLUGIN=true
-      - bootstrap.memory_lock=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
     ulimits:
       memlock:
         soft: -1
@@ -23,22 +38,65 @@ services:
       timeout: 5s
       retries: 30
 
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: ollama:11434
+      LIBRARIAN_EMBEDDING_MODEL: ${LIBRARIAN_EMBEDDING_MODEL:-all-minilm}
+      LIBRARIAN_GENERATION_MODEL: ${LIBRARIAN_GENERATION_MODEL:-qwen2.5:1.5b}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        pull_model() {
+          if [ "$$1" != "noop" ]; then
+            ollama pull "$$1"
+          fi
+        }
+        pull_model "$$LIBRARIAN_EMBEDDING_MODEL"
+        if [ "$$LIBRARIAN_GENERATION_MODEL" != "$$LIBRARIAN_EMBEDDING_MODEL" ]; then
+          pull_model "$$LIBRARIAN_GENERATION_MODEL"
+        fi
+    restart: "no"
+
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file:
-      - .env.example
+    environment: *librarian_environment
     ports:
       - "8000:8000"
     volumes:
       - ${LIBRARIAN_HOST_BOOKS_DIR:-./Epub-Books}:/books:ro
       - ./data:/data
+    # Enables the explicitly documented native-Ollama developer override on Linux.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       opensearch:
         condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://localhost:8000/health', timeout=2).read()\""]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   summary-worker:
     profiles:
@@ -46,8 +104,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file:
-      - .env.example
+    environment: *librarian_environment
     command:
       - python
       - scripts/process_summary_jobs.py
@@ -58,9 +115,16 @@ services:
       - "10"
     volumes:
       - ./data:/data
+    # Enables the explicitly documented native-Ollama developer override on Linux.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:
   opensearch-data:
+  ollama-models:
