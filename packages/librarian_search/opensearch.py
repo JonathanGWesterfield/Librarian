@@ -200,6 +200,33 @@ class OpenSearchClient:
             raise OpenSearchError("OpenSearch bulk indexing reported errors")
         return len(documents)
 
+    def existing_chunk_ids(
+        self, index_name: str, chunk_ids: list[str]
+    ) -> set[str]:
+        """Return the chunk IDs already present in an OpenSearch index."""
+        if not chunk_ids:
+            return set()
+        response = self._request(
+            "POST",
+            f"/{index_name}/_mget",
+            {
+                "docs": [
+                    {"_id": chunk_id, "_source": False}
+                    for chunk_id in chunk_ids
+                ]
+            },
+        )
+        documents = response.get("docs", [])
+        if not isinstance(documents, list):
+            raise OpenSearchError("OpenSearch mget returned an unexpected payload")
+        return {
+            str(document["_id"])
+            for document in documents
+            if isinstance(document, dict)
+            and document.get("found") is True
+            and "_id" in document
+        }
+
     def refresh_index(self, index_name: str) -> None:
         """Make completed bulk writes visible to immediate search requests."""
         self._request("POST", f"/{index_name}/_refresh")
@@ -413,22 +440,52 @@ def index_chunks(options: OpenSearchIndexOptions) -> OpenSearchIndexResult:
     database_url = resolve_database_url(options.database_url)
     opensearch_url = resolve_opensearch_url(options.opensearch_url)
     index_name = resolve_opensearch_index(options.index_name)
-    documents = _load_index_documents(
-        database_url,
-        provider=options.embedding_provider,
-        model=options.embedding_model,
-    )
-    dimensions = documents[0].dimensions if documents else 0
     client = OpenSearchClient(opensearch_url)
     if options.reset:
         client.delete_index(index_name)
-    if dimensions:
-        client.create_chunk_index(index_name, dimensions=dimensions)
-
-    indexed = 0
     batch_size = max(1, options.batch_size)
-    for start in range(0, len(documents), batch_size):
-        indexed += client.bulk_index_chunks(index_name, documents[start : start + batch_size])
+    dimensions = 0
+    documents_seen = 0
+    indexed = 0
+    store = create_ingestion_store(database_url)
+    store.initialize()
+    try:
+        tags_by_book = _metadata_by_book(store.list_book_tags())
+        genres_by_book = _metadata_by_book(store.list_book_genres())
+        for records in store.iter_search_embeddings(
+            provider=options.embedding_provider,
+            model=options.embedding_model,
+            batch_size=batch_size,
+        ):
+            documents = [
+                OpenSearchChunkDocument.from_search_embedding(
+                    record,
+                    tags=tags_by_book.get(record.book_id, []),
+                    genres=genres_by_book.get(record.book_id, []),
+                )
+                for record in records
+            ]
+            documents_seen += len(documents)
+            if not dimensions and documents:
+                dimensions = documents[0].dimensions
+                client.create_chunk_index(index_name, dimensions=dimensions)
+            existing_ids = (
+                set()
+                if options.reset
+                else client.existing_chunk_ids(
+                    index_name, [document.chunk_id for document in documents]
+                )
+            )
+            indexed += client.bulk_index_chunks(
+                index_name,
+                [
+                    document
+                    for document in documents
+                    if document.chunk_id not in existing_ids
+                ],
+            )
+    finally:
+        store.close()
     if indexed:
         client.refresh_index(index_name)
 
@@ -439,39 +496,20 @@ def index_chunks(options: OpenSearchIndexOptions) -> OpenSearchIndexResult:
         embedding_provider=options.embedding_provider,
         embedding_model=options.embedding_model,
         dimensions=dimensions,
-        documents_seen=len(documents),
+        documents_seen=documents_seen,
         documents_indexed=indexed,
         reset=options.reset,
     )
 
 
-def _load_index_documents(
-    database_url: str,
-    *,
-    provider: str,
-    model: str,
-) -> list[OpenSearchChunkDocument]:
-    store = create_ingestion_store(database_url)
-    store.initialize()
-    try:
-        records = store.list_search_embeddings(provider=provider, model=model)
-        tags_by_book: dict[str, list[str]] = {}
-        for tag in store.list_book_tags():
-            tags_by_book.setdefault(tag.book_id, []).append(tag.tag)
-        genres_by_book: dict[str, list[str]] = {}
-        for genre in store.list_book_genres():
-            genres_by_book.setdefault(genre.book_id, []).append(genre.genre)
-    finally:
-        store.close()
-
-    return [
-        OpenSearchChunkDocument.from_search_embedding(
-            record,
-            tags=tags_by_book.get(record.book_id, []),
-            genres=genres_by_book.get(record.book_id, []),
-        )
-        for record in records
-    ]
+def _metadata_by_book(records: list[object]) -> dict[str, list[str]]:
+    metadata_by_book: dict[str, list[str]] = {}
+    for record in records:
+        book_id = getattr(record, "book_id")
+        value = getattr(record, "tag", None) or getattr(record, "genre", None)
+        if isinstance(book_id, str) and isinstance(value, str):
+            metadata_by_book.setdefault(book_id, []).append(value)
+    return metadata_by_book
 
 
 def _opensearch_filters(

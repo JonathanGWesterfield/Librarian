@@ -4,10 +4,11 @@ from dataclasses import asdict
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from librarian_api.config import settings
 from librarian_chat.chat import ChatOptions, answer_question
+from librarian_config.config import resolve_embedding_model, resolve_embedding_provider
 from librarian_ingestion.embedding_ops import (
     EmbedQueryOptions,
     RebuildEmbeddingsOptions,
@@ -30,6 +31,7 @@ from librarian_recommendations.recommendations import (
     recommend_books,
 )
 from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
+from librarian_search.opensearch import OpenSearchIndexOptions, index_chunks
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
@@ -98,6 +100,16 @@ class HybridSearchRequest(BaseModel):
     author: Optional[str] = None
     genre: Optional[str] = None
     tag: Optional[str] = None
+
+
+class SearchIndexRequest(BaseModel):
+    database_url: Optional[str] = None
+    opensearch_url: Optional[str] = None
+    index_name: Optional[str] = None
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    batch_size: int = Field(default=250, ge=1)
+    reset: bool = False
 
 
 class ChatRequest(BaseModel):
@@ -307,6 +319,28 @@ def hybrid_search_endpoint(request: HybridSearchRequest) -> dict[str, object]:
                 author=request.author,
                 genre=request.genre,
                 tag=request.tag,
+            )
+        )
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result.to_dict()
+
+
+@app.post("/search/index")
+def index_search_endpoint(request: SearchIndexRequest) -> dict[str, object]:
+    """Rebuild or incrementally update the OpenSearch retrieval index."""
+    try:
+        result = index_chunks(
+            OpenSearchIndexOptions(
+                database_url=request.database_url or settings.database_url,
+                opensearch_url=request.opensearch_url,
+                index_name=request.index_name,
+                embedding_provider=resolve_embedding_provider(
+                    request.embedding_provider
+                ),
+                embedding_model=resolve_embedding_model(request.embedding_model),
+                batch_size=request.batch_size,
+                reset=request.reset,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:

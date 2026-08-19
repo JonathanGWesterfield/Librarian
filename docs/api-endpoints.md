@@ -266,8 +266,56 @@ python3 scripts/index_opensearch.py \
 ```
 
 The index document includes chunk text, vector, book metadata, generated tags,
-and generated genres. Re-run indexing after re-chunking, rebuilding embeddings,
-or regenerating tags/genres.
+and generated genres. Run indexing with `--reset` after re-chunking, rebuilding
+embeddings, or regenerating tags/genres.
+
+### `POST /search/index`
+
+Deliberately indexes stored chunks into OpenSearch so clients can wait for this
+response before claiming newly ingested books are searchable. It is not an
+implicit ingestion side effect. The default `reset: false` preserves the
+existing index and indexes only chunks that are not already present; set
+`reset: true` only when intentionally deleting and recreating the configured
+index. Use an explicit reset after re-chunking, rebuilding embeddings, or
+regenerating tags/genres so existing documents are replaced.
+
+Request fields:
+
+- `database_url`: optional SQLite source-of-truth URL. Defaults to
+  `LIBRARIAN_DATABASE_URL`.
+- `opensearch_url`: optional OpenSearch URL. Defaults to
+  `LIBRARIAN_OPENSEARCH_URL`.
+- `index_name`: optional index name. Defaults to `LIBRARIAN_OPENSEARCH_INDEX`.
+- `embedding_provider`, `embedding_model`: optional embedding identity to
+  index. Defaults to the configured Librarian values.
+- `batch_size`: documents per OpenSearch bulk request; default `250`.
+- `reset`: whether to delete and recreate the index first; default `false`.
+
+Example incremental update (adds only missing chunks):
+
+```json
+{
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm"
+}
+```
+
+Example explicit rebuild:
+
+```json
+{
+  "database_url": "sqlite:///data/librarian.db",
+  "opensearch_url": "http://localhost:9200",
+  "index_name": "librarian-chunks",
+  "embedding_provider": "ollama",
+  "embedding_model": "all-minilm",
+  "reset": true
+}
+```
+
+Response fields include `documents_seen`, `documents_indexed`, `dimensions`,
+the resolved database/OpenSearch/index values, embedding provider/model, and
+whether `reset` was applied.
 
 ### `POST /search/hybrid`
 
