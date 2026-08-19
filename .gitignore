@@ -31,3 +31,6 @@ models/*
 .DS_Store
 .idea/
 .vscode/
+
+# Local Codex agent configuration
+.codex/
