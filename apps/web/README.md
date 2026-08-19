@@ -1,20 +1,24 @@
 # Librarian Demo UI
 
-A static, dependency-free portfolio frontend for Librarian. It demonstrates the
+A React + TypeScript portfolio frontend for Librarian. It demonstrates the
 core interaction—ask a question, receive a grounded answer, and inspect the
 supporting citations—using a small public-domain sample corpus.
 
 ## Run locally
 
 ```bash
-python3 -m http.server 4173 --directory apps/web
+cd apps/web
+npm install
+npm run dev
+npm test
 ```
 
-Then visit `http://localhost:4173`.
+Then visit the Vite URL shown in the terminal. Run `npm run build` before
+deploying; its static output is written to `dist/`.
 
 ## Deploy
 
-Deploy `apps/web` as the static build/output directory on Cloudflare Pages. No
-build command is required. The UI is intentionally static for a fast, free,
-reliable demo; a future API client can replace the data in `app.js` without
-changing the interaction design.
+Deploy `apps/web` to Cloudflare Pages with `npm run build` and `dist/` as the
+output directory. The UI intentionally keeps its rights-safe demo data local;
+a future API client can replace the React demo data without changing the
+interaction design.
