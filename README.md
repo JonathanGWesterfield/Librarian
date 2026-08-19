@@ -156,20 +156,21 @@ scripts/               Developer helper scripts
 
 ## Current Status
 
-Librarian is moving into Phase 6: Hybrid Retrieval. The core local RAG loop is
+Librarian has completed Phase 6: Hybrid Retrieval. The core local RAG loop is
 working end to end: EPUB ingestion, chunk storage, local embeddings through
-Ollama, SQLite-backed vector search, a FastAPI surface, a standalone chat CLI,
-and book-level recommendation queries.
+Ollama, SQLite-backed vector search, OpenSearch-backed hybrid retrieval, a
+FastAPI surface, a standalone chat CLI, and book-level recommendation queries.
 
 The repo now has deterministic retrieval and answer-quality smoke reports for
 CI, optional live reports that run the golden corpus against an ingested local
 SQLite database, scoped retrieval by book and author, on-demand chapter/book
 summaries, topic tags, genre metadata, and recommendation-oriented book queries.
 
-The current engineering focus is replacing the slow all-SQLite vector scan with
-OpenSearch-backed hybrid retrieval. SQLite remains the source of truth for book
-records, raw text, summaries, tags, genres, and job status, while OpenSearch
-will become the query index for faster vector, keyword, and filtered retrieval.
+SQLite remains the source of truth for book records, raw text, summaries, tags,
+genres, and job status. OpenSearch is the rebuildable query index for vector,
+keyword/BM25, and filtered retrieval; its hybrid rank fusion improves exact
+term, name, and phrase matches alongside semantic search. The next planned
+feature phase is the user interface.
 
 ## Roadmap
 
@@ -234,15 +235,15 @@ See the evaluation north star:
 - Add recommendation-oriented queries.
 - Add saved searches or reading lists later as product polish.
 
-### Phase 6: Hybrid Retrieval
+### Phase 6: Hybrid Retrieval (Complete)
 
-- Add OpenSearch as a local search service.
-- Index chunks and book metadata into OpenSearch.
-- Add keyword/BM25 search.
-- Combine vector and lexical retrieval.
-- Add reranking.
-- Improve exact phrase, name, and technical-term search.
-- Evaluate retrieval quality with a small benchmark set.
+- [x] Add OpenSearch as a local search service.
+- [x] Index chunks and book metadata into OpenSearch.
+- [x] Add keyword/BM25 search.
+- [x] Combine vector and lexical retrieval with weighted rank fusion.
+- [x] Add hybrid reranking through normalized lexical and vector scores.
+- [x] Improve exact phrase, name, and technical-term search.
+- [x] Evaluate retrieval quality with a small benchmark set.
 
 ### Phase 7: User Interface
 

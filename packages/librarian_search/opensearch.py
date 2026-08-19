@@ -156,6 +156,15 @@ class OpenSearchClient:
                             "vector": {
                                 "type": "knn_vector",
                                 "dimension": dimensions,
+                                "method": {
+                                    "name": "hnsw",
+                                    "space_type": "cosinesimil",
+                                    # OpenSearch 2.15's Faiss HNSW implementation
+                                    # does not support cosinesimil.  Lucene HNSW does,
+                                    # retaining the cosine-based retrieval semantics used
+                                    # by the local search fallback.
+                                    "engine": "lucene",
+                                },
                             },
                         }
                     },
