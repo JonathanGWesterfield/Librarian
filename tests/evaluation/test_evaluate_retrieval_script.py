@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
@@ -11,6 +12,7 @@ sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatResponse, ChatSource
 from librarian_evaluation.llm_judge import StaticJudge
+from librarian_search.hybrid import HybridSearchOptions
 from librarian_search.search import SearchResponse, SearchResult
 
 SCRIPT_PATH = REPO_ROOT / "scripts/evaluate_retrieval.py"
@@ -58,8 +60,8 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
                 search_fn=_fake_search,
             )
 
-        self.assertEqual(document["benchmark"]["mode"], "live_search")
-        self.assertEqual(document["run"]["mode"], "live_search")
+        self.assertEqual(document["benchmark"]["mode"], "live_hybrid_search")
+        self.assertEqual(document["run"]["mode"], "live_hybrid_search")
         self.assertEqual(document["run"]["embedding_provider"], "ollama")
         self.assertEqual(document["run"]["embedding_model"], "all-minilm")
         self.assertEqual(document["run"]["embedding_dimensions"], 2)
@@ -69,6 +71,108 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         self.assertEqual(document["retrieval"]["aggregate"]["case_count"], 1)
         self.assertEqual(document["retrieval"]["aggregate"]["hit_rate_at_k"][1], 1.0)
         self.assertEqual(document["retrieval"]["aggregate"]["mean_recall_at_k"][2], 1.0)
+
+    def test_generate_live_report_document_calls_hybrid_api_when_requested(
+        self,
+    ) -> None:
+        """Verify Compose evaluation uses the runtime API hybrid endpoint.
+
+        This is intentionally a protocol-level test: the evaluator must not
+        fall back to the local SQLite vector scan when an API URL is supplied.
+        """
+        module = _load_script_module()
+        with TemporaryDirectory() as temp_dir:
+            corpus_path = Path(temp_dir) / "golden.json"
+            corpus_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "unit-api"},
+                        "k_values": [1],
+                        "primary_k": 1,
+                        "cases": [
+                            {
+                                "id": "garden",
+                                "query": "clockwork garden",
+                                "relevant_relative_paths": ["sample.epub"],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            response = _FakeHTTPResponse(
+                {
+                    "query": "clockwork garden",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "dimensions": 2,
+                    "candidate_count": 1,
+                    "filters": {},
+                    "results": [
+                        {
+                            "score": 0.9,
+                            "chunk_id": "sample:0",
+                            "book_id": "sample",
+                            "relative_path": "sample.epub",
+                            "title": "Sample",
+                            "authors": ["Fixture Author"],
+                            "publisher": None,
+                            "chunk_index": 0,
+                            "text": "The clockwork garden woke at dawn.",
+                            "embedding_provider": "ollama",
+                            "embedding_model": "all-minilm",
+                            "dimensions": 2,
+                        }
+                    ],
+                }
+            )
+            with patch.object(module.request, "urlopen", return_value=response) as urlopen:
+                document = module.generate_live_report_document(
+                    corpus_path,
+                    api_url="http://runtime-api:8000/",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                )
+
+        sent_request = urlopen.call_args.args[0]
+        self.assertEqual(sent_request.full_url, "http://runtime-api:8000/search/hybrid")
+        self.assertEqual(json.loads(sent_request.data), {
+            "query": "clockwork garden",
+            "embedding_provider": "ollama",
+            "embedding_model": "all-minilm",
+            "ollama_base_url": None,
+            "limit": 10,
+        })
+        self.assertEqual(document["benchmark"]["mode"], "live_api_hybrid")
+        self.assertEqual(document["run"]["mode"], "live_api_hybrid")
+        self.assertEqual(document["retrieval"]["aggregate"]["hit_rate_at_k"][1], 1.0)
+
+    def test_live_evaluator_uses_hybrid_options_by_default(self) -> None:
+        """Verify direct live evaluation no longer passes SQLite search options."""
+        module = _load_script_module()
+        with TemporaryDirectory() as temp_dir:
+            corpus_path = Path(temp_dir) / "golden.json"
+            corpus_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "unit-hybrid"},
+                        "k_values": [1],
+                        "primary_k": 1,
+                        "cases": [{"id": "garden", "query": "clockwork garden"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            received_options = []
+            module.generate_live_report_document(
+                corpus_path,
+                opensearch_url="http://opensearch:9200",
+                search_fn=lambda options: received_options.append(options) or _fake_search(options),
+            )
+
+        self.assertEqual(len(received_options), 1)
+        self.assertIsInstance(received_options[0], HybridSearchOptions)
+        self.assertEqual(received_options[0].opensearch_url, "http://opensearch:9200")
 
     def test_generate_live_report_document_can_score_live_chat_answers(
         self,
@@ -295,6 +399,20 @@ def _fake_search(_options) -> SearchResponse:
             )
         ],
     )
+
+
+class _FakeHTTPResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._payload
 
 
 def _fake_answer(options) -> ChatResponse:

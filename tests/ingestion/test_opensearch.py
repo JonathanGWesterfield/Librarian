@@ -77,6 +77,11 @@ class OpenSearchIndexingTests(unittest.TestCase):
         self.assertEqual(document["vector"], [1.0, 0.0])
         self.assertEqual(document["tags"], ["clockwork garden"])
         self.assertEqual(document["genres"], ["Science Fiction"])
+        self.assertEqual(transport.requests[3]["method"], "POST")
+        self.assertEqual(
+            transport.requests[3]["url"],
+            "http://fake-opensearch.local/librarian-test/_refresh",
+        )
 
     def _seed_book(self) -> None:
         book = BookRecord(
@@ -169,6 +174,8 @@ class _FakeOpenSearchTransport:
             return _FakeResponse({"acknowledged": True})
         if http_request.full_url.endswith("/_bulk"):
             return _FakeResponse({"errors": False, "items": []})
+        if http_request.full_url.endswith("/_refresh"):
+            return _FakeResponse({"_shards": {"successful": 1}})
         raise AssertionError(f"unexpected OpenSearch request: {http_request.full_url}")
 
 

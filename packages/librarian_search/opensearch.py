@@ -200,6 +200,10 @@ class OpenSearchClient:
             raise OpenSearchError("OpenSearch bulk indexing reported errors")
         return len(documents)
 
+    def refresh_index(self, index_name: str) -> None:
+        """Make completed bulk writes visible to immediate search requests."""
+        self._request("POST", f"/{index_name}/_refresh")
+
     def search_hybrid(
         self,
         index_name: str,
@@ -425,6 +429,8 @@ def index_chunks(options: OpenSearchIndexOptions) -> OpenSearchIndexResult:
     batch_size = max(1, options.batch_size)
     for start in range(0, len(documents), batch_size):
         indexed += client.bulk_index_chunks(index_name, documents[start : start + batch_size])
+    if indexed:
+        client.refresh_index(index_name)
 
     return OpenSearchIndexResult(
         database_url=database_url,

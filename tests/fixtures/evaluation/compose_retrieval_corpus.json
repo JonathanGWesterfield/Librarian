@@ -1,0 +1,18 @@
+{
+  "benchmark": {
+    "name": "compose-hybrid-fixture",
+    "description": "Rights-safe committed sample EPUB used to verify the runtime API's OpenSearch-backed hybrid retrieval path.",
+    "mode": "compose_api_hybrid",
+    "corpus_source": "tests/fixtures/epubs/sample.epub"
+  },
+  "k_values": [1],
+  "primary_k": 1,
+  "label_granularity": "book",
+  "cases": [
+    {
+      "id": "clockwork-garden",
+      "query": "clockwork garden brass robin silver seeds",
+      "relevant_relative_paths": ["sample.epub"]
+    }
+  ]
+}

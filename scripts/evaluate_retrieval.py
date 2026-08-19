@@ -2,8 +2,8 @@
 """Generate Librarian retrieval and answer-quality evaluation reports.
 
 This script is the main evaluation runner for CI and local benchmarking. It can
-run deterministic fixture-based checks, live retrieval against the local SQLite
-database, live answer generation through the current chat stack, optional
+run deterministic fixture-based checks, live OpenSearch-backed hybrid retrieval,
+live answer generation through the current chat stack, optional
 LLM-as-judge scoring, and run-over-run comparison metadata. It writes both
 machine-readable JSON and human-readable Markdown reports.
 
@@ -22,12 +22,17 @@ Generate deterministic JSON and Markdown reports:
       --output docs/evaluation-retrieval-report.json \\
       --markdown-output docs/evaluation-report.md
 
-Run live retrieval against the local SQLite database:
+Run live OpenSearch-backed hybrid retrieval directly:
     python3 scripts/evaluate_retrieval.py \\
       --live \\
-      --database-url sqlite:///data/librarian.db \\
+      --opensearch-url http://localhost:9200 \\
       --embedding-provider ollama \\
       --embedding-model all-minilm
+
+Run live retrieval through a running API container:
+    python3 scripts/evaluate_retrieval.py \\
+      --live --api-url http://localhost:8000 \\
+      --golden-corpus tests/fixtures/evaluation/compose_retrieval_corpus.json
 
 Run live answer evaluation with Codex as the generator and LLM judge:
     python3 scripts/evaluate_retrieval.py \\
@@ -50,6 +55,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib import error, request
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGES_DIR = REPO_ROOT / "packages"
@@ -79,7 +85,8 @@ from librarian_evaluation.retrieval import (
     evaluate_retrieval_cases,
 )
 from librarian_logging import configure_cli_logging
-from librarian_search.search import SearchOptions, SearchResponse, search_chunks
+from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
+from librarian_search.search import SearchResponse, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +116,7 @@ def main() -> int:
     parser.add_argument(
         "--live",
         action="store_true",
-        help="Run the golden corpus through live search against the local database.",
+        help="Run the golden corpus through live OpenSearch-backed hybrid retrieval.",
     )
     parser.add_argument(
         "--benchmark",
@@ -200,7 +207,22 @@ def main() -> int:
     parser.add_argument(
         "--database-url",
         default=None,
-        help="Database URL for live retrieval. Defaults to Librarian config.",
+        help="Database URL recorded for direct live retrieval metadata only.",
+    )
+    parser.add_argument(
+        "--opensearch-url",
+        default=None,
+        help="OpenSearch URL for direct live hybrid retrieval.",
+    )
+    parser.add_argument(
+        "--index-name",
+        default=None,
+        help="OpenSearch index name for direct live hybrid retrieval.",
+    )
+    parser.add_argument(
+        "--api-url",
+        default=None,
+        help="Run live retrieval through this API's /search/hybrid endpoint.",
     )
     parser.add_argument(
         "--embedding-provider",
@@ -269,6 +291,9 @@ def main() -> int:
             live_answer_corpus_path=args.answer_corpus,
             live_answers=args.live_answers,
             database_url=args.database_url,
+            opensearch_url=args.opensearch_url,
+            index_name=args.index_name,
+            api_url=args.api_url,
             embedding_provider=args.embedding_provider,
             embedding_model=args.embedding_model,
             generation_provider=args.generation_provider,
@@ -389,6 +414,9 @@ def generate_live_report_document(
     live_answer_corpus_path: Path | None = None,
     live_answers: bool = False,
     database_url: str | None = None,
+    opensearch_url: str | None = None,
+    index_name: str | None = None,
+    api_url: str | None = None,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     generation_provider: str | None = None,
@@ -396,7 +424,7 @@ def generate_live_report_document(
     ollama_base_url: str | None = None,
     limit: int = 10,
     retrieval_limit: int = 30,
-    search_fn=search_chunks,
+    search_fn=hybrid_search_chunks,
     answer_fn=answer_question,
     judge: LLMJudge | None = None,
     fallback_judge: LLMJudge | None = None,
@@ -409,22 +437,33 @@ def generate_live_report_document(
 
     for case in cases:
         search_started = time.perf_counter()
-        response = search_fn(
-            SearchOptions(
+        if api_url:
+            response = _api_hybrid_search(
+                api_url,
                 query=case.query,
-                database_url=database_url,
                 embedding_provider=embedding_provider,
                 embedding_model=embedding_model,
                 ollama_base_url=ollama_base_url,
                 limit=limit,
             )
-        )
+        else:
+            response = search_fn(
+                HybridSearchOptions(
+                    query=case.query,
+                    opensearch_url=opensearch_url,
+                    index_name=index_name,
+                    embedding_provider=embedding_provider,
+                    embedding_model=embedding_model,
+                    ollama_base_url=ollama_base_url,
+                    limit=limit,
+                )
+            )
         search_latencies_seconds.append(time.perf_counter() - search_started)
         responses.append(response)
         ranked_results_by_case[case.id] = response.results
 
     benchmark = dict(corpus_data.get("benchmark", {}))
-    benchmark["mode"] = "live_search"
+    benchmark["mode"] = "live_api_hybrid" if api_url else "live_hybrid_search"
     report = evaluate_retrieval_cases(
         cases,
         ranked_results_by_case,
@@ -433,6 +472,8 @@ def generate_live_report_document(
     run_metadata = _live_run_metadata(
         responses,
         database_url=database_url,
+        api_url=api_url,
+        opensearch_url=opensearch_url,
         limit=limit,
         search_latencies_seconds=search_latencies_seconds,
     )
@@ -477,6 +518,73 @@ def generate_live_report_document(
         llm_judge=llm_judge,
     )
     return document.to_dict()
+
+
+def _api_hybrid_search(
+    api_url: str,
+    *,
+    query: str,
+    embedding_provider: str | None,
+    embedding_model: str | None,
+    ollama_base_url: str | None,
+    limit: int,
+) -> SearchResponse:
+    payload = {
+        "query": query,
+        "embedding_provider": embedding_provider,
+        "embedding_model": embedding_model,
+        "ollama_base_url": ollama_base_url,
+        "limit": limit,
+    }
+    http_request = request.Request(
+        f"{api_url.rstrip('/')}/search/hybrid",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(http_request, timeout=60) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Hybrid API request failed ({exc.code}): {detail}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"Could not reach hybrid API at {api_url}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("Hybrid API returned an unexpected response")
+    return _search_response_from_api(data)
+
+
+def _search_response_from_api(data: dict[str, Any]) -> SearchResponse:
+    try:
+        results = [
+            SearchResult(
+                score=float(item["score"]),
+                chunk_id=str(item["chunk_id"]),
+                book_id=str(item["book_id"]),
+                relative_path=str(item["relative_path"]),
+                title=item.get("title"),
+                authors=[str(author) for author in item.get("authors", [])],
+                publisher=item.get("publisher"),
+                chunk_index=int(item["chunk_index"]),
+                text=str(item["text"]),
+                embedding_provider=str(item["embedding_provider"]),
+                embedding_model=str(item["embedding_model"]),
+                dimensions=int(item["dimensions"]),
+            )
+            for item in data.get("results", [])
+        ]
+        return SearchResponse(
+            query=str(data["query"]),
+            embedding_provider=str(data["embedding_provider"]),
+            embedding_model=str(data["embedding_model"]),
+            dimensions=int(data["dimensions"]),
+            candidate_count=int(data["candidate_count"]),
+            filters={str(key): str(value) for key, value in data.get("filters", {}).items()},
+            results=results,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Hybrid API returned an invalid search response") from exc
 
 
 def _case_from_json(data: dict[str, Any]) -> RetrievalEvaluationCase:
@@ -703,13 +811,17 @@ def _live_run_metadata(
     responses: list[SearchResponse],
     *,
     database_url: str | None,
+    api_url: str | None,
+    opensearch_url: str | None,
     limit: int,
     search_latencies_seconds: list[float],
 ) -> dict[str, Any]:
     first_response = responses[0] if responses else None
     return {
-        "mode": "live_search",
+        "mode": "live_api_hybrid" if api_url else "live_hybrid_search",
         "database_url": database_url or "configured default",
+        "api_url": api_url,
+        "opensearch_url": opensearch_url or "configured default",
         "embedding_provider": (
             first_response.embedding_provider if first_response else "unknown"
         ),
