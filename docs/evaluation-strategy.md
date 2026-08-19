@@ -234,15 +234,22 @@ base branch's committed report. The comparison shows metric deltas for
 retrieval, answer quality, and available latency fields so reviewers can see
 whether a change improved, regressed, or left evaluation quality unchanged.
 
-Live golden-corpus reports are generated locally from the ingested SQLite
-database and live query embeddings. They are written separately so CI can keep
-using the deterministic smoke report:
+Live golden-corpus reports run OpenSearch-backed hybrid retrieval with live
+query embeddings. They are written separately so CI can keep using the
+deterministic smoke report:
 
 ```bash
 python3 scripts/evaluate_retrieval.py --live \
-  --database-url sqlite:///data/librarian.db \
+  --opensearch-url http://localhost:9200 \
   --embedding-provider ollama \
   --embedding-model all-minilm
+```
+
+Use the one-shot Compose verifier for the end-to-end runtime API path. It uses
+only the committed rights-safe fixture, not a local EPUB library or `data/`:
+
+```bash
+scripts/run_compose_verification.sh
 ```
 
 The live machine-readable report is written to

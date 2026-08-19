@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
 
 jobs:
   python:
@@ -22,6 +25,12 @@ jobs:
 
       - name: Install Python packages
         run: python -m pip install -e "packages[dev]" -e "apps/api[dev]"
+
+      - name: Build runtime image target
+        run: docker build -f apps/api/Dockerfile --target runtime -t librarian-runtime:${{ github.sha }} .
+
+      - name: Build test image target
+        run: docker build -f apps/api/Dockerfile --target test -t librarian-test:${{ github.sha }} .
 
       - name: Run checks
         run: scripts/check.sh
@@ -41,3 +50,16 @@ jobs:
           path: |
             docs/evaluation-retrieval-report.json
             docs/evaluation-report.md
+
+  compose-verification:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Verify Docker VM capacity
+        run: scripts/verify_preflight.sh --minimum-gb 4
+
+      - name: Run runtime API Compose verification
+        run: scripts/run_compose_verification.sh

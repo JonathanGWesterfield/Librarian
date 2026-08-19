@@ -291,6 +291,10 @@ the named `ollama-models` Docker volume, so they survive container restarts.
 The first run needs network access for container images and model downloads and
 can take several minutes.
 
+The normal command builds and runs only the lean `runtime` image. It never
+starts evaluation automatically; the test/evaluation harness is a separate
+Docker target behind a one-shot `verify` profile.
+
 No host Python, virtual environment, Homebrew, or native Ollama installation is
 required for this normal app path. A virtual environment cannot change a host
 Python version; the container image owns that runtime instead.
@@ -335,6 +339,15 @@ LIBRARIAN_EMBEDDING_MODEL=all-minilm
 LIBRARIAN_GENERATION_MODEL=qwen2.5:1.5b
 ```
 
+The Compose database default is `sqlite:////data/librarian.db`, which is the
+absolute path of its bind-mounted `data/` directory. Commands run from the host
+repository continue to use `sqlite:///data/librarian.db`.
+
+OpenSearch defaults to a `-Xms192m -Xmx192m` JVM heap so the full local stack
+fits in Docker Desktop's common 2 GB VM allocation. If Docker has more memory
+available, set `LIBRARIAN_OPENSEARCH_JAVA_OPTS` in `.env` to raise both values,
+for example `-Xms512m -Xmx512m`.
+
 The normal container setting is
 `LIBRARIAN_OLLAMA_BASE_URL=http://ollama:11434`; API and worker containers use
 the Compose service hostname rather than a host-specific address.
@@ -353,6 +366,33 @@ LIBRARIAN_OLLAMA_BASE_URL=http://host.docker.internal:11434 \
 `host.docker.internal` works with Docker Desktop; this Compose file also maps it
 on Linux. This override skips the container model-initialization guard, so model
 availability is the developer's responsibility.
+
+### Full Compose verification
+
+The full verification path exercises the same runtime API image used above,
+plus Compose Ollama and OpenSearch. Its short-lived `verifier` container uses
+the separate `test` target, ingests only the committed rights-safe
+`tests/fixtures/epubs/sample.epub`, rebuilds OpenSearch, and calls the runtime
+API's `/search/hybrid` endpoint. It does not mount `Epub-Books/` or local
+`data/`.
+
+Verification needs at least 4 GB (decimal, 4,000,000,000 bytes) assigned to
+Docker's VM. Check that first,
+then run the isolated verifier:
+
+```bash
+scripts/run_compose_verification.sh
+```
+
+Use `LIBRARIAN_VERIFY_MIN_MEMORY_GB=6 scripts/verify_preflight.sh` (or
+`--minimum-gb 6`) for a higher threshold. If the check fails, increase Docker
+Desktop memory in **Resources**, or restart Colima with a larger allocation
+such as `colima start --memory 4`. This is Docker VM runtime memory, not the
+on-disk image size. The runner creates an isolated `librarian-verify` Compose
+project, starts the runtime dependencies with `--wait`, then explicitly runs
+the profile-gated verifier; `ollama-init` cannot abort it. Its EXIT trap removes
+only that project's fixture SQLite, OpenSearch, and Ollama model volumes. Set
+`LIBRARIAN_VERIFY_PROJECT` to choose a different isolated project name.
 
 Stop the normal stack without deleting models or search data:
 

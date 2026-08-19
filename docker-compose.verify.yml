@@ -1,0 +1,48 @@
+services:
+  opensearch:
+    ports: !reset []
+    volumes:
+      - verify-opensearch-data:/usr/share/opensearch/data
+
+  api:
+    ports: !reset []
+    environment:
+      LIBRARIAN_DATABASE_URL: sqlite:////data/librarian.db
+    volumes:
+      - verify-data:/data
+      - ./tests/fixtures/epubs:/books:ro
+
+  verifier:
+    profiles:
+      - verify
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    command:
+      - python
+      - scripts/verify_compose.py
+      - --api-url
+      - http://api:8000
+      - --books-dir
+      - /books
+      - --database-url
+      - sqlite:////verify-data/librarian.db
+      - --opensearch-url
+      - http://opensearch:9200
+      - --ollama-base-url
+      - http://ollama:11434
+    volumes:
+      - verify-data:/verify-data
+    depends_on:
+      api:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+volumes:
+  verify-data:
+  verify-opensearch-data:

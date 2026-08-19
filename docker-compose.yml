@@ -1,5 +1,5 @@
 x-librarian-environment: &librarian_environment
-  LIBRARIAN_DATABASE_URL: ${LIBRARIAN_DATABASE_URL:-sqlite:///data/librarian.db}
+  LIBRARIAN_DATABASE_URL: ${LIBRARIAN_DATABASE_URL:-sqlite:////data/librarian.db}
   LIBRARIAN_LOG_FILE: ${LIBRARIAN_LOG_FILE:-/data/librarian.log}
   LIBRARIAN_BOOKS_DIR: ${LIBRARIAN_BOOKS_DIR:-/books}
   LIBRARIAN_HOST_BOOKS_DIR: ${LIBRARIAN_HOST_BOOKS_DIR:-./Epub-Books}
@@ -19,12 +19,13 @@ services:
     environment:
       discovery.type: single-node
       DISABLE_SECURITY_PLUGIN: "true"
-      bootstrap.memory_lock: "true"
-      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+      # Allow the Docker VM to reclaim inactive pages on the constrained default
+      # local stack instead of pinning OpenSearch's entire native footprint.
+      bootstrap.memory_lock: "false"
+      # Keep the default stack within Docker Desktop's common 2 GB VM budget;
+      # override this when the local Docker VM has more memory available.
+      OPENSEARCH_JAVA_OPTS: ${LIBRARIAN_OPENSEARCH_JAVA_OPTS:--Xms192m -Xmx192m}
     ulimits:
-      memlock:
-        soft: -1
-        hard: -1
       nofile:
         soft: 65536
         hard: 65536
@@ -78,6 +79,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      target: runtime
     environment: *librarian_environment
     ports:
       - "8000:8000"
@@ -104,6 +106,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      target: runtime
     environment: *librarian_environment
     command:
       - python
