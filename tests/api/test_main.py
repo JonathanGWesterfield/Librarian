@@ -16,6 +16,7 @@ from librarian_recommendations.recommendations import (
     RecommendationResponse,
 )
 from librarian_search.search import SearchResponse, SearchResult
+from librarian_search.opensearch import OpenSearchIndexResult
 from librarian_storage.storage import (
     BookGenreRecord,
     BookRecord,
@@ -280,6 +281,71 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["query"], "clockwork garden")
         self.assertEqual(payload["filters"], {"genre": "Science Fiction"})
         self.assertEqual(payload["results"][0]["chunk_id"], "api-book:0")
+
+    def test_search_index_endpoint_rebuilds_on_explicit_request(self) -> None:
+        """Verify clients can report index completion after a deliberate action.
+
+        The route must not make indexing an implicit side effect of ingestion;
+        it forwards overrides to the shared OpenSearch indexer and keeps its
+        destructive reset flag opt-in.
+        """
+        indexed = OpenSearchIndexResult(
+            database_url=self.database_url,
+            opensearch_url="http://localhost:9200",
+            index_name="librarian-chunks",
+            embedding_provider="noop",
+            embedding_model="all-minilm",
+            dimensions=0,
+            documents_seen=2,
+            documents_indexed=2,
+            reset=True,
+        )
+        with patch("librarian_api.main.index_chunks", return_value=indexed) as index:
+            response = self.client.post(
+                "/search/index",
+                json={
+                    "database_url": self.database_url,
+                    "opensearch_url": "http://localhost:9200",
+                    "index_name": "librarian-chunks",
+                    "embedding_provider": "noop",
+                    "embedding_model": "all-minilm",
+                    "batch_size": 25,
+                    "reset": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["documents_indexed"], 2)
+        self.assertTrue(response.json()["reset"])
+        options = index.call_args.args[0]
+        self.assertEqual(options.database_url, self.database_url)
+        self.assertEqual(options.batch_size, 25)
+        self.assertTrue(options.reset)
+
+    def test_search_index_endpoint_defaults_to_non_destructive_update(self) -> None:
+        """Verify an omitted reset field cannot erase an existing search index."""
+        indexed = OpenSearchIndexResult(
+            database_url=self.database_url,
+            opensearch_url="http://localhost:9200",
+            index_name="librarian-chunks",
+            embedding_provider="noop",
+            embedding_model="all-minilm",
+            dimensions=0,
+            documents_seen=0,
+            documents_indexed=0,
+            reset=False,
+        )
+        with patch("librarian_api.main.index_chunks", return_value=indexed) as index:
+            response = self.client.post("/search/index", json={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(index.call_args.args[0].reset)
+
+    def test_search_index_endpoint_rejects_invalid_batch_size(self) -> None:
+        """Verify the endpoint rejects batch sizes outside its API contract."""
+        response = self.client.post("/search/index", json={"batch_size": 0})
+
+        self.assertEqual(response.status_code, 422)
 
     def test_chat_endpoint_returns_answer_with_sources(self) -> None:
         """Verify desktop clients can request grounded answer synthesis.

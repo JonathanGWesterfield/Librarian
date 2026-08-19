@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Iterator, Optional, Protocol
 
 from librarian_config.config import sqlite_path_from_url
 
@@ -400,6 +400,11 @@ class IngestionStore(Protocol):
         book_title: str | None = None,
         author: str | None = None,
     ) -> list[SearchEmbeddingRecord]:
+        ...
+
+    def iter_search_embeddings(
+        self, *, provider: str, model: str, batch_size: int
+    ) -> Iterator[list[SearchEmbeddingRecord]]:
         ...
 
     def count_books(self) -> int:
@@ -966,6 +971,32 @@ class SQLiteIngestionStore:
         book_title: str | None = None,
         author: str | None = None,
     ) -> list[SearchEmbeddingRecord]:
+        rows = self._search_embedding_cursor(
+            provider=provider,
+            model=model,
+            book_id=book_id,
+            book_title=book_title,
+            author=author,
+        ).fetchall()
+        return [_search_embedding_from_row(row) for row in rows]
+
+    def iter_search_embeddings(
+        self, *, provider: str, model: str, batch_size: int
+    ) -> Iterator[list[SearchEmbeddingRecord]]:
+        """Yield compatible embeddings in bounded SQLite result pages."""
+        cursor = self._search_embedding_cursor(provider=provider, model=model)
+        while rows := cursor.fetchmany(max(1, batch_size)):
+            yield [_search_embedding_from_row(row) for row in rows]
+
+    def _search_embedding_cursor(
+        self,
+        *,
+        provider: str,
+        model: str,
+        book_id: str | None = None,
+        book_title: str | None = None,
+        author: str | None = None,
+    ) -> sqlite3.Cursor:
         # Only compare vectors produced by the same provider/model. Different
         # embedding models do not share a meaningful vector space.
         where = [
@@ -983,7 +1014,7 @@ class SQLiteIngestionStore:
             where.append("LOWER(books.authors_json) LIKE ?")
             parameters.append(f"%{author.strip().casefold()}%")
 
-        rows = self._connection.execute(
+        return self._connection.execute(
             f"""
             SELECT chunk_embeddings.chunk_id, chunks.book_id, books.relative_path,
                    books.title, books.authors_json, books.publisher,
@@ -997,24 +1028,7 @@ class SQLiteIngestionStore:
             ORDER BY books.relative_path ASC, chunks.chunk_index ASC
             """,
             parameters,
-        ).fetchall()
-        return [
-            SearchEmbeddingRecord(
-                chunk_id=row[0],
-                book_id=row[1],
-                relative_path=row[2],
-                title=row[3],
-                authors=_decode_authors(row[4]),
-                publisher=row[5],
-                chunk_index=row[6],
-                text=row[7],
-                provider=row[8],
-                model=row[9],
-                dimensions=row[10],
-                vector=_decode_vector(row[11]),
-            )
-            for row in rows
-        ]
+        )
 
     def count_books(self) -> int:
         return self._connection.execute("SELECT COUNT(*) FROM books").fetchone()[0]
@@ -2361,6 +2375,23 @@ def _decode_authors(authors_json: str) -> list[str]:
     if not isinstance(authors, list):
         return []
     return [author for author in authors if isinstance(author, str)]
+
+
+def _search_embedding_from_row(row: sqlite3.Row | tuple[object, ...]) -> SearchEmbeddingRecord:
+    return SearchEmbeddingRecord(
+        chunk_id=str(row[0]),
+        book_id=str(row[1]),
+        relative_path=str(row[2]),
+        title=row[3] if isinstance(row[3], str) else None,
+        authors=_decode_authors(str(row[4])),
+        publisher=row[5] if isinstance(row[5], str) else None,
+        chunk_index=int(row[6]),
+        text=str(row[7]),
+        provider=str(row[8]),
+        model=str(row[9]),
+        dimensions=int(row[10]),
+        vector=_decode_vector(str(row[11])),
+    )
 
 
 def _decode_vector_sample(vector_json: str, sample_size: int = 5) -> list[float]:

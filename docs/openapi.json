@@ -525,6 +525,61 @@
         }
       }
     },
+    "/search/index": {
+      "post": {
+        "tags": ["retrieval"],
+        "operationId": "indexSearchChunks",
+        "summary": "Index stored chunks into OpenSearch",
+        "description": "Deliberately adds missing chunks to the OpenSearch retrieval index after ingestion. Set reset to true only to delete and recreate the index when existing documents must be replaced.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchIndexRequest"
+              },
+              "examples": {
+                "incremental": {
+                  "summary": "Add missing chunks to the existing index",
+                  "value": {
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm"
+                  }
+                },
+                "reset": {
+                  "summary": "Explicitly recreate the index",
+                  "value": {
+                    "opensearch_url": "http://localhost:9200",
+                    "index_name": "librarian-chunks",
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "reset": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed indexing counts and resolved index metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenSearchIndexResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
     "/search/hybrid": {
       "post": {
         "tags": ["retrieval"],
@@ -1690,6 +1745,56 @@
             "type": ["string", "null"],
             "description": "Restrict search to stored books whose author metadata contains this text."
           }
+        }
+      },
+      "SearchIndexRequest": {
+        "type": "object",
+        "properties": {
+          "database_url": {
+            "type": ["string", "null"],
+            "example": "sqlite:///data/librarian.db"
+          },
+          "opensearch_url": {
+            "type": ["string", "null"],
+            "example": "http://localhost:9200"
+          },
+          "index_name": {
+            "type": ["string", "null"],
+            "example": "librarian-chunks"
+          },
+          "embedding_provider": {
+            "type": ["string", "null"],
+            "enum": ["noop", "ollama", null]
+          },
+          "embedding_model": {
+            "type": ["string", "null"],
+            "example": "all-minilm"
+          },
+          "batch_size": {
+            "type": "integer",
+            "default": 250,
+            "minimum": 1
+          },
+          "reset": {
+            "type": "boolean",
+            "default": false,
+            "description": "Delete and recreate the OpenSearch index before indexing."
+          }
+        }
+      },
+      "OpenSearchIndexResult": {
+        "type": "object",
+        "required": ["database_url", "opensearch_url", "index_name", "embedding_provider", "embedding_model", "dimensions", "documents_seen", "documents_indexed", "reset"],
+        "properties": {
+          "database_url": { "type": "string" },
+          "opensearch_url": { "type": "string" },
+          "index_name": { "type": "string" },
+          "embedding_provider": { "type": "string" },
+          "embedding_model": { "type": "string" },
+          "dimensions": { "type": "integer", "minimum": 0 },
+          "documents_seen": { "type": "integer", "minimum": 0 },
+          "documents_indexed": { "type": "integer", "minimum": 0 },
+          "reset": { "type": "boolean" }
         }
       },
       "HybridSearchRequest": {
