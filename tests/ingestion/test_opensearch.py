@@ -59,7 +59,18 @@ class OpenSearchIndexingTests(unittest.TestCase):
         self.assertEqual(transport.requests[0]["method"], "DELETE")
         self.assertEqual(transport.requests[1]["method"], "PUT")
         vector_mapping = transport.requests[1]["payload"]["mappings"]["properties"]["vector"]
-        self.assertEqual(vector_mapping["dimension"], 2)
+        self.assertEqual(
+            vector_mapping,
+            {
+                "type": "knn_vector",
+                "dimension": 2,
+                "method": {
+                    "name": "hnsw",
+                    "space_type": "cosinesimil",
+                    "engine": "lucene",
+                },
+            },
+        )
         bulk_lines = transport.requests[2]["raw_body"].strip().splitlines()
         document = json.loads(bulk_lines[1])
         self.assertEqual(document["chunk_id"], "book-1:0")
