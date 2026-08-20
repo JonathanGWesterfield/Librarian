@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { askChat, getBooks, type ChatResponse, type LibraryBook } from "./api";
+import { ActivitySection } from "./activity";
 import "../styles.css";
 
 const starterPrompts = [
@@ -94,7 +95,7 @@ export function App() {
   return <main className="app-shell">
     <nav className="topbar" aria-label="Primary navigation">
       <a className="brand" href="#explore" aria-label="Librarian home"><span className="brand-mark" aria-hidden="true">L</span><span>Librarian</span></a>
-      <div className="nav-links"><a className="active" href="#explore">Explore</a><a href="#library">Library</a><a href="#how-it-works">How it works</a></div>
+      <div className="nav-links"><a className="active" href="#explore">Explore</a><a href="#library">Library</a><a href="#activity">Activity</a><a href="#how-it-works">How it works</a></div>
       <a className="github-link" href="https://github.com/JonathanGWesterfield/Librarian" target="_blank" rel="noreferrer">View source <span aria-hidden="true">↗</span></a>
     </nav>
 
@@ -133,6 +134,8 @@ export function App() {
     </section>
 
     <section id="library" className="library-section"><div className="section-heading"><div><p className="eyebrow">Your collection</p><h2>Your books, made explorable.</h2></div><p>{booksLoading ? "Loading your local library…" : `${books.length} ${books.length === 1 ? "book" : "books"} available to search.`}</p></div><div className="book-grid">{booksLoading ? <p className="library-state" role="status">Loading your library…</p> : booksError ? <div className="library-state" role="alert"><p>{booksError}</p><button type="button" onClick={() => void loadBooks()}>Retry loading library</button></div> : books.length ? books.map((book, index) => <BookCard key={book.id} book={book} index={index} selected={book.id === selectedBookId} onChoose={chooseBook} />) : <p className="library-state">No books are available yet. Add EPUBs and run ingestion, then refresh this page.</p>}</div></section>
+
+    <ActivitySection onLibraryUpdated={loadBooks} />
 
     <section id="how-it-works" className="how-section"><div><p className="eyebrow">Under the hood</p><h2>Designed for answers you can inspect.</h2></div><ol className="pipeline">{[["Ingest", "Parse EPUBs into structured, source-aware chunks."], ["Retrieve", "Find passages relevant to your question and selected scope."], ["Ground", "Build answers only from the passages the system found."], ["Inspect", "Open citations to read the source passages in full."]].map(([title, description], index) => <li key={title}><span>0{index + 1}</span><strong>{title}</strong><p>{description}</p></li>)}</ol></section>
     <footer><p>Built as an AI engineering portfolio project.</p><p>© 2026 Librarian <span aria-hidden="true">·</span> <a href="https://github.com/JonathanGWesterfield/Librarian" target="_blank" rel="noreferrer">GitHub ↗</a></p></footer>
