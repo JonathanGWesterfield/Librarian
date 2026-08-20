@@ -35,6 +35,11 @@ export type ChatResponse = {
   sources: ChatSource[];
 };
 
+export type ChatScopeFilter =
+  | { bookId: string; author?: never }
+  | { author: string; bookId?: never }
+  | { bookId?: never; author?: never };
+
 export type IngestionActiveJob = {
   job_id: string;
   book_id: string;
@@ -152,13 +157,14 @@ export async function refreshSearchIndex(): Promise<SearchIndexResponse> {
   });
 }
 
-export async function askChat(question: string, bookId?: string): Promise<ChatResponse> {
+export async function askChat(question: string, scope: ChatScopeFilter = {}): Promise<ChatResponse> {
   return request<ChatResponse>("/chat", {
     method: "POST",
     body: JSON.stringify({
       question,
       retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT,
-      ...(bookId ? { book_id: bookId } : {}),
+      ...(scope.bookId ? { book_id: scope.bookId } : {}),
+      ...(scope.author ? { author: scope.author } : {}),
     }),
   });
 }

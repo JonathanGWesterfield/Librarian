@@ -1,10 +1,13 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI_CHAT_RETRIEVAL_LIMIT } from "./api";
 import { App } from "./main";
 
-vi.mock("./activity", () => ({ ActivitySection: () => null }));
+vi.mock("./activity", () => ({
+  ActivitySection: ({ onLibraryUpdated }: { onLibraryUpdated: () => Promise<void> }) =>
+    <button type="button" onClick={() => void onLibraryUpdated()}>Test refresh library</button>,
+}));
 
 const books = [
   {
@@ -17,6 +20,18 @@ const books = [
     error_message: null,
     chunk_count: 42,
     chunk_duration_seconds: 1.2,
+  },
+];
+
+const authorBooks = [
+  books[0],
+  {
+    ...books[0],
+    id: "isaac asimov",
+    relative_path: "caves-of-steel.epub",
+    title: "The Caves of Steel",
+    authors: ["isaac asimov"],
+    chunk_count: 37,
   },
 ];
 
@@ -65,8 +80,10 @@ describe("Librarian live API interactions", () => {
     render(<App />);
 
     expect(screen.getByRole("status").textContent).toContain("Loading your library");
-    expect(await screen.findByRole("heading", { name: "Foundation" })).toBeTruthy();
-    expect(screen.getByText("Isaac Asimov", { exact: false })).toBeTruthy();
+    const heading = await screen.findByRole("heading", { name: "Foundation" });
+    const card = heading.closest("article");
+    if (!card) throw new Error("book card was not rendered");
+    expect(within(card).getByText("Isaac Asimov", { exact: false })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith("/api/books", expect.any(Object));
   });
 
@@ -140,7 +157,7 @@ describe("Librarian live API interactions", () => {
 
     await user.click(within(card).getByRole("button", { name: /Ask about this book/ }));
 
-    expect((screen.getByRole("combobox", { name: "Search scope" }) as HTMLSelectElement).value).toBe("book-1");
+    expect((screen.getByRole("combobox", { name: "Search scope" }) as HTMLSelectElement).value).toBe("scope:book:book-1");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
@@ -151,6 +168,38 @@ describe("Librarian live API interactions", () => {
       "/api/chat",
       expect.objectContaining({
         body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, book_id: "book-1" }),
+      }),
+    ]);
+  });
+
+  it("offers normalized author choices and sends exactly an author-scoped request", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(authorBooks))
+      .mockResolvedValueOnce(jsonResponse(chatResponse));
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Foundation" });
+    const scope = screen.getByRole("combobox", { name: "Search scope" });
+    const authorOption = within(scope).getByRole("option", { name: "Isaac Asimov (2 books)" }) as HTMLOptionElement;
+    const collidingBookOption = within(scope).getByRole("option", { name: "The Caves of Steel" }) as HTMLOptionElement;
+
+    expect(authorOption.value).toBe("scope:author:isaac%20asimov");
+    expect(collidingBookOption.value).toBe("scope:book:isaac%20asimov");
+    await user.selectOptions(scope, authorOption);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Answers will use books credited to Isaac Asimov.")).toBeTruthy();
+    expect(screen.getByText("2 books")).toBeTruthy();
+
+    await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await screen.findByText(chatResponse.answer);
+
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/chat",
+      expect.objectContaining({
+        body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, author: "Isaac Asimov" }),
       }),
     ]);
   });
@@ -189,7 +238,7 @@ describe("Librarian live API interactions", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
     expect(await screen.findByText(chatResponse.answer)).toBeTruthy();
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "Search scope" }), "book-1");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Search scope" }), "scope:book:book-1");
 
     expect(screen.queryByText(chatResponse.answer)).toBeNull();
     expect(screen.queryByText(chatResponse.sources[0].text)).toBeNull();
@@ -218,7 +267,7 @@ describe("Librarian live API interactions", () => {
     expect(screen.getByRole("status").textContent).toContain("Searching your local library");
 
     await user.click(within(card).getByRole("button", { name: /Ask about this book/ }));
-    expect((screen.getByRole("combobox", { name: "Search scope" }) as HTMLSelectElement).value).toBe("book-1");
+    expect((screen.getByRole("combobox", { name: "Search scope" }) as HTMLSelectElement).value).toBe("scope:book:book-1");
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByRole("button", { name: "Ask" }).hasAttribute("disabled")).toBe(false);
 
@@ -232,6 +281,60 @@ describe("Librarian live API interactions", () => {
 
     await user.click(screen.getByRole("button", { name: "Ask" }));
     expect(await screen.findByText(scopedChatResponse.answer)).toBeTruthy();
+  });
+
+  it("ignores a pending old-scope response after switching to an author", async () => {
+    const pendingWholeLibraryChat = deferred<Response>();
+    const authorChatResponse = {
+      ...chatResponse,
+      answer: "Across Asimov's books, systems shape the choices available to individuals [S1].",
+    };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(authorBooks))
+      .mockReturnValueOnce(pendingWholeLibraryChat.promise)
+      .mockResolvedValueOnce(jsonResponse(authorChatResponse));
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Foundation" });
+    await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Search scope" }), "scope:author:isaac%20asimov");
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("button", { name: "Ask" }).hasAttribute("disabled")).toBe(false);
+
+    await act(async () => pendingWholeLibraryChat.resolve(jsonResponse(chatResponse)));
+    expect(screen.queryByText(chatResponse.answer)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByText(authorChatResponse.answer)).toBeTruthy();
+    expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({
+      body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, author: "Isaac Asimov" }),
+    }));
+  });
+
+  it("falls back to the whole library and clears stale results when a refresh removes the active author", async () => {
+    const refreshedBooks = [{ ...books[0], id: "earthsea", title: "A Wizard of Earthsea", authors: ["Ursula K. Le Guin"] }];
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(authorBooks))
+      .mockResolvedValueOnce(jsonResponse(chatResponse))
+      .mockResolvedValueOnce(jsonResponse(refreshedBooks));
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Foundation" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Search scope" }), "scope:author:isaac%20asimov");
+    await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByText(chatResponse.answer)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Test refresh library" }));
+
+    await screen.findByRole("heading", { name: "A Wizard of Earthsea" });
+    await waitFor(() => expect((screen.getByRole("combobox", { name: "Search scope" }) as HTMLSelectElement).value).toBe("scope:library"));
+    expect(screen.queryByText(chatResponse.answer)).toBeNull();
+    expect(screen.getByText("Answers search your entire local library.")).toBeTruthy();
   });
 });
 

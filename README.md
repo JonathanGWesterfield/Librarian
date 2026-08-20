@@ -169,8 +169,10 @@ summaries, topic tags, genre metadata, and recommendation-oriented book queries.
 SQLite remains the source of truth for book records, raw text, summaries, tags,
 genres, and job status. OpenSearch is the rebuildable query index for vector,
 keyword/BM25, and filtered retrieval; its hybrid rank fusion improves exact
-term, name, and phrase matches alongside semantic search. The next planned
-feature phase is the user interface.
+term, name, and phrase matches alongside semantic search. The responsive React
+UI now supports library browsing, processing status, inspectable citations, and
+whole-library, author, or book chat scopes. Operational polish is the next
+planned phase.
 
 ## Roadmap
 
@@ -245,13 +247,13 @@ See the evaluation north star:
 - [x] Improve exact phrase, name, and technical-term search.
 - [x] Evaluate retrieval quality with a small benchmark set.
 
-### Phase 7: User Interface
+### Phase 7: User Interface (Complete)
 
-- Add a simple web UI.
-- Support library browsing.
-- Show ingestion progress.
-- Show citations and source passages.
-- Support scoped chat over one book, one author, or the whole library.
+- [x] Add a simple web UI.
+- [x] Support library browsing.
+- [x] Show ingestion progress.
+- [x] Show citations and source passages.
+- [x] Support scoped chat over one book, one author, or the whole library.
 
 ### Phase 8: Operational Polish
 
