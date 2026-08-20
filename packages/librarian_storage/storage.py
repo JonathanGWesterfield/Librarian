@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Optional, Protocol
+from typing import Callable, Iterator, Optional, Protocol
 
 from librarian_config.config import sqlite_path_from_url
 
@@ -77,6 +77,38 @@ class StoredBookSnapshot:
     file_hash: str
     status: str
     chunk_count: int
+
+
+@dataclass(frozen=True)
+class AppliedSchemaMigration:
+    version: int
+    name: str
+    applied_at: str
+
+
+@dataclass(frozen=True)
+class SQLiteSchemaMigration:
+    version: int
+    name: str
+    apply: Callable[[sqlite3.Connection], None]
+
+
+class SchemaMigrationError(RuntimeError):
+    """Raised when SQLite migration history is incompatible or an upgrade fails."""
+
+
+class _ImmediateSQLiteTransaction:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def __enter__(self) -> None:
+        self.connection.execute("BEGIN IMMEDIATE")
+
+    def __exit__(self, exc_type: object, _exc: object, _traceback: object) -> None:
+        if exc_type is None:
+            self.connection.commit()
+        else:
+            self.connection.rollback()
 
 
 @dataclass(frozen=True)
@@ -600,63 +632,88 @@ class SQLiteIngestionStore:
 
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.database_path)
-        self.connection.execute("PRAGMA foreign_keys = ON")
-        self.connection.executescript(SCHEMA)
-        self._migrate_schema()
-        self.connection.commit()
+        if self.connection is None:
+            self.connection = sqlite3.connect(self.database_path, timeout=30.0)
+        try:
+            self.connection.execute("PRAGMA foreign_keys = ON")
+            _validate_migration_registry(SQLITE_SCHEMA_MIGRATIONS)
+            self._initialize_schema()
+        except BaseException:
+            if self.connection.in_transaction:
+                self.connection.rollback()
+            self.close()
+            raise
 
-    def _migrate_schema(self) -> None:
-        columns = {
-            row[1]
-            for row in self._connection.execute("PRAGMA table_info(books)").fetchall()
-        }
-        if "publisher" not in columns:
-            self._connection.execute("ALTER TABLE books ADD COLUMN publisher TEXT")
-        if "identity_key" not in columns:
-            self._connection.execute("ALTER TABLE books ADD COLUMN identity_key TEXT")
-        self._connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_books_identity_key ON books(identity_key)"
-        )
+    def _initialize_schema(self) -> None:
+        statements = _schema_statements(SCHEMA)
+        table_statements = [
+            statement
+            for statement in statements
+            if statement.lstrip().upper().startswith("CREATE TABLE")
+        ]
+        index_statements = [
+            statement
+            for statement in statements
+            if statement.lstrip().upper().startswith("CREATE INDEX")
+        ]
+        if len(table_statements) + len(index_statements) != len(statements):
+            raise SchemaMigrationError(
+                "canonical SQLite schema contains an unsupported statement type"
+            )
+
+        with self._immediate_transaction():
+            _validate_applied_migrations(
+                self._connection, SQLITE_SCHEMA_MIGRATIONS
+            )
+            for statement in table_statements:
+                self._connection.execute(statement)
+
+        for migration in SQLITE_SCHEMA_MIGRATIONS:
+            with self._immediate_transaction():
+                applied = _validate_applied_migrations(
+                    self._connection, SQLITE_SCHEMA_MIGRATIONS
+                )
+                if migration.version in applied:
+                    continue
+                try:
+                    migration.apply(self._connection)
+                    self._connection.execute(
+                        """
+                        INSERT INTO schema_migrations (version, name, applied_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (migration.version, migration.name, utc_now()),
+                    )
+                except BaseException as exc:
+                    raise SchemaMigrationError(
+                        f"SQLite schema migration {migration.version} "
+                        f"({migration.name}) failed"
+                    ) from exc
+
+        with self._immediate_transaction():
+            _validate_applied_migrations(
+                self._connection, SQLITE_SCHEMA_MIGRATIONS
+            )
+            for statement in index_statements:
+                self._connection.execute(statement)
+
+    def _immediate_transaction(self) -> _ImmediateSQLiteTransaction:
+        return _ImmediateSQLiteTransaction(self._connection)
+
+    def list_applied_schema_migrations(self) -> list[AppliedSchemaMigration]:
         rows = self._connection.execute(
             """
-            SELECT id, title, authors_json, publisher
-            FROM books
-            WHERE identity_key IS NULL
+            SELECT version, name, applied_at
+            FROM schema_migrations
+            ORDER BY version
             """
         ).fetchall()
-        for book_id, title, authors_json, publisher in rows:
-            try:
-                authors = json.loads(authors_json)
-            except json.JSONDecodeError:
-                authors = []
-            identity_key = build_book_identity_key(title, authors, publisher)
-            if identity_key:
-                self._connection.execute(
-                    "UPDATE books SET identity_key = ? WHERE id = ?",
-                    (identity_key, book_id),
-                )
-        self._migrate_summary_jobs_schema()
-
-    def _migrate_summary_jobs_schema(self) -> None:
-        columns = {
-            row[1]
-            for row in self._connection.execute(
-                "PRAGMA table_info(summary_jobs)"
-            ).fetchall()
-        }
-        progress_columns = {
-            "current_stage": "TEXT",
-            "current_step": "INTEGER",
-            "total_steps": "INTEGER",
-            "progress_message": "TEXT",
-            "progress_updated_at": "TEXT",
-        }
-        for column, column_type in progress_columns.items():
-            if column not in columns:
-                self._connection.execute(
-                    f"ALTER TABLE summary_jobs ADD COLUMN {column} {column_type}"
-                )
+        return [
+            AppliedSchemaMigration(
+                version=int(row[0]), name=str(row[1]), applied_at=str(row[2])
+            )
+            for row in rows
+        ]
 
     def get_book_by_relative_path(
         self, relative_path: str
@@ -2345,6 +2402,161 @@ def normalize_metadata_value(value: Optional[str]) -> str | None:
     return normalized or None
 
 
+def _migrate_book_identity_metadata(connection: sqlite3.Connection) -> None:
+    _add_column_if_missing(connection, "books", "publisher", "TEXT")
+    _add_column_if_missing(connection, "books", "identity_key", "TEXT")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_books_identity_key ON books(identity_key)"
+    )
+    rows = connection.execute(
+        """
+        SELECT id, title, authors_json, publisher
+        FROM books
+        WHERE identity_key IS NULL
+        """
+    ).fetchall()
+    for book_id, title, authors_json, publisher in rows:
+        try:
+            authors = json.loads(authors_json)
+        except json.JSONDecodeError:
+            authors = []
+        identity_key = build_book_identity_key(title, authors, publisher)
+        if identity_key:
+            connection.execute(
+                "UPDATE books SET identity_key = ? WHERE id = ?",
+                (identity_key, book_id),
+            )
+
+
+def _migrate_summary_job_progress(connection: sqlite3.Connection) -> None:
+    progress_columns = (
+        ("current_stage", "TEXT"),
+        ("current_step", "INTEGER"),
+        ("total_steps", "INTEGER"),
+        ("progress_message", "TEXT"),
+        ("progress_updated_at", "TEXT"),
+    )
+    for column, column_type in progress_columns:
+        _add_column_if_missing(
+            connection, "summary_jobs", column, column_type
+        )
+
+
+SQLITE_SCHEMA_MIGRATIONS: tuple[SQLiteSchemaMigration, ...] = (
+    SQLiteSchemaMigration(
+        version=1,
+        name="books_publisher_and_identity",
+        apply=_migrate_book_identity_metadata,
+    ),
+    SQLiteSchemaMigration(
+        version=2,
+        name="summary_jobs_progress",
+        apply=_migrate_summary_job_progress,
+    ),
+)
+
+
+def _add_column_if_missing(
+    connection: sqlite3.Connection,
+    table: str,
+    column: str,
+    column_type: str,
+) -> None:
+    columns = {
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        connection.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"
+        )
+
+
+def _validate_migration_registry(
+    migrations: tuple[SQLiteSchemaMigration, ...],
+) -> None:
+    versions = tuple(migration.version for migration in migrations)
+    expected_versions = tuple(range(1, len(migrations) + 1))
+    if (
+        any(type(version) is not int for version in versions)
+        or versions != expected_versions
+    ):
+        raise SchemaMigrationError(
+            "SQLite migration registry versions must be ordered, unique, and contiguous "
+            f"from 1; found {versions}"
+        )
+    names = tuple(migration.name for migration in migrations)
+    if any(not name.strip() for name in names) or len(set(names)) != len(names):
+        raise SchemaMigrationError(
+            "SQLite migration registry names must be non-empty and unique"
+        )
+
+
+def _validate_applied_migrations(
+    connection: sqlite3.Connection,
+    migrations: tuple[SQLiteSchemaMigration, ...],
+) -> dict[int, AppliedSchemaMigration]:
+    table_exists = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'schema_migrations'
+        """
+    ).fetchone()
+    if table_exists is None:
+        return {}
+
+    try:
+        rows = connection.execute(
+            """
+            SELECT version, name, applied_at
+            FROM schema_migrations
+            ORDER BY version
+            """
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise SchemaMigrationError(
+            "SQLite schema_migrations history cannot be read; refusing to modify the database"
+        ) from exc
+
+    known = {migration.version: migration for migration in migrations}
+    applied: dict[int, AppliedSchemaMigration] = {}
+    for raw_version, raw_name, raw_applied_at in rows:
+        version = int(raw_version)
+        name = str(raw_name)
+        expected = known.get(version)
+        if expected is None:
+            raise SchemaMigrationError(
+                f"SQLite schema migration version {version} is newer or unknown to "
+                "this application; use an application version that supports this database"
+            )
+        if name != expected.name:
+            raise SchemaMigrationError(
+                f"SQLite schema migration version {version} is recorded as {name!r}, "
+                f"but this application expects {expected.name!r}; refusing to rewrite history"
+            )
+        applied[version] = AppliedSchemaMigration(
+            version=version,
+            name=name,
+            applied_at=str(raw_applied_at),
+        )
+    return applied
+
+
+def _schema_statements(schema: str) -> list[str]:
+    statements: list[str] = []
+    pending: list[str] = []
+    for line in schema.splitlines():
+        pending.append(line)
+        candidate = "\n".join(pending).strip()
+        if candidate and sqlite3.complete_statement(candidate):
+            statements.append(candidate)
+            pending = []
+    if "\n".join(pending).strip():
+        raise SchemaMigrationError("canonical SQLite schema contains incomplete SQL")
+    return statements
+
+
 def _book_tag_key(tag: str) -> str:
     normalized = normalize_metadata_value(tag)
     if not normalized:
@@ -2469,6 +2681,12 @@ def create_ingestion_store(database_url: str) -> IngestionStore:
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS books (
     id TEXT PRIMARY KEY,
     source_path TEXT NOT NULL,
@@ -2491,6 +2709,7 @@ CREATE TABLE IF NOT EXISTS books (
 
 CREATE INDEX IF NOT EXISTS idx_books_file_hash ON books(file_hash);
 CREATE INDEX IF NOT EXISTS idx_books_status ON books(status);
+CREATE INDEX IF NOT EXISTS idx_books_identity_key ON books(identity_key);
 
 CREATE TABLE IF NOT EXISTS chunks (
     id TEXT PRIMARY KEY,
@@ -2568,6 +2787,11 @@ CREATE TABLE IF NOT EXISTS summary_jobs (
     status TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     error_message TEXT,
+    current_stage TEXT,
+    current_step INTEGER,
+    total_steps INTEGER,
+    progress_message TEXT,
+    progress_updated_at TEXT,
     started_at TEXT,
     completed_at TEXT,
     duration_seconds REAL,
