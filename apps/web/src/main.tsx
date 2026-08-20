@@ -4,13 +4,12 @@ import { askChat, getBooks, type ChatResponse, type LibraryBook } from "./api";
 import { ActivitySection } from "./activity";
 import {
   WHOLE_LIBRARY_SCOPE,
-  WHOLE_LIBRARY_SCOPE_VALUE,
   authorOptionsForBooks,
-  authorScopeValue,
-  bookScopeValue,
   sameScope,
   type SearchScope,
 } from "./scope";
+import { ScopePicker } from "./scope-picker";
+import { ScopeSidebar } from "./scope-sidebar";
 import "../styles.css";
 
 const starterPrompts = [
@@ -94,20 +93,6 @@ export function App() {
     document.getElementById("explore")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const selectScope = (value: string) => {
-    if (value === WHOLE_LIBRARY_SCOPE_VALUE) {
-      changeScope(WHOLE_LIBRARY_SCOPE);
-      return;
-    }
-    const author = authorOptions.find((option) => authorScopeValue(option) === value);
-    if (author) {
-      changeScope({ kind: "author", authorIdentity: author.identity });
-      return;
-    }
-    const book = books.find((option) => bookScopeValue(option) === value);
-    if (book) changeScope({ kind: "book", bookId: book.id });
-  };
-
   const choosePrompt = (prompt: string) => {
     setQuestion(prompt);
     document.getElementById("question")?.focus();
@@ -140,12 +125,6 @@ export function App() {
     }
   };
 
-  const selectedScopeValue = selectedBook
-    ? bookScopeValue(selectedBook)
-    : selectedAuthor
-      ? authorScopeValue(selectedAuthor)
-      : WHOLE_LIBRARY_SCOPE_VALUE;
-
   return <main className="app-shell">
     <nav className="topbar" aria-label="Primary navigation">
       <a className="brand" href="#explore" aria-label="Librarian home"><span className="brand-mark" aria-hidden="true">L</span><span>Librarian</span></a>
@@ -160,11 +139,7 @@ export function App() {
       <form className="question-form" onSubmit={submit} aria-busy={chatLoading}>
         <label className="sr-only" htmlFor="question">Ask a question about your library</label>
         <input id="question" autoComplete="off" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a question about your books" disabled={chatLoading} />
-        <label className="scope-control"><span>Scope</span><select aria-label="Search scope" value={selectedScopeValue} onChange={(event) => selectScope(event.target.value)} disabled={booksLoading}>
-          <option value={WHOLE_LIBRARY_SCOPE_VALUE}>Whole library</option>
-          {authorOptions.length > 0 && <optgroup label="Authors">{authorOptions.map((author) => <option key={author.identity} value={authorScopeValue(author)}>{author.name} ({author.bookCount} {author.bookCount === 1 ? "book" : "books"})</option>)}</optgroup>}
-          {books.length > 0 && <optgroup label="Books">{books.map((book) => <option key={book.id} value={bookScopeValue(book)}>{bookTitle(book)}</option>)}</optgroup>}
-        </select></label>
+        <ScopePicker books={books} authors={authorOptions} scope={scope} disabled={booksLoading} onSelect={changeScope} />
         <button type="submit" disabled={chatLoading || !question.trim()}>{chatLoading ? "Asking…" : <>Ask <span aria-hidden="true">→</span></>}</button>
       </form>
       {chatLoading && <p className="request-status" role="status">Searching your local library and preparing an evidence-backed answer…</p>}
@@ -173,15 +148,7 @@ export function App() {
     </section>
 
     <section id="workspace" className="workspace" aria-labelledby="answer-heading">
-      <aside className="filters">
-        <div className="filter-heading"><span>Search scope</span>{scope.kind !== "library" && <button type="button" onClick={() => changeScope(WHOLE_LIBRARY_SCOPE)}>Whole library</button>}</div>
-        <fieldset><legend>Current scope</legend>
-          <label><input type="radio" name="scope" checked={scope.kind === "library"} onChange={() => changeScope(WHOLE_LIBRARY_SCOPE)} /> Whole library <span>{books.length}</span></label>
-          {selectedAuthor && <label><input type="radio" name="scope" checked readOnly /> {selectedAuthor.name} <span>{selectedAuthor.bookCount} {selectedAuthor.bookCount === 1 ? "book" : "books"}</span></label>}
-          {selectedBook && <label><input type="radio" name="scope" checked readOnly /> {bookTitle(selectedBook)} <span>{selectedBook.chunk_count} chunks</span></label>}
-        </fieldset>
-        <div className="demo-note"><span className="note-icon">i</span><p>{selectedBook ? `Answers will use passages from ${bookTitle(selectedBook)} only.` : selectedAuthor ? `Answers will use books credited to ${selectedAuthor.name}.` : "Answers search your entire local library."}</p></div>
-      </aside>
+      <ScopeSidebar books={books} authors={authorOptions} scope={scope} onSelect={changeScope} />
       <div className="answer-area">
         <div className="answer-meta"><p id="answer-heading" className="eyebrow">Grounded answer</p><span>{chat ? `${chat.sources.length} supporting passages` : "Ask a question to begin"}</span></div>
         {chat ? <>
