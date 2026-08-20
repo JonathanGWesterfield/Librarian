@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI_CHAT_RETRIEVAL_LIMIT } from "./api";
 import { App } from "./main";
 
+vi.mock("./activity", () => ({ ActivitySection: () => null }));
+
 const books = [
   {
     id: "book-1",
