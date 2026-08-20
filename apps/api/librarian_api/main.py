@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import Optional
 
@@ -38,7 +40,18 @@ from librarian_summarization.summarize import SummarizeBookOptions, summarize_bo
 
 configure_logging()
 
-app = FastAPI(title="Librarian API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    store = create_ingestion_store(settings.database_url)
+    try:
+        store.initialize()
+    finally:
+        store.close()
+    yield
+
+
+app = FastAPI(title="Librarian API", version="0.1.0", lifespan=lifespan)
 
 
 class IngestionRunRequest(BaseModel):

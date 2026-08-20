@@ -10,6 +10,22 @@ ingestion, metadata modeling, chunking, embeddings, retrieval, reranking,
 prompt assembly, source attribution, evaluation, and containerized local
 infrastructure.
 
+## Product tour
+
+![Searchable author and book scope picker in Librarian](docs/images/librarian-search-scope.png)
+
+*Search across the whole library or narrow retrieval to a searchable author or
+book scope.*
+
+![Librarian browsing grid containing 59 books](docs/images/librarian-library.png)
+
+*Browse the local 59-book collection with title, author, and ingestion details.*
+
+![Librarian processing and activity status view](docs/images/librarian-activity.png)
+
+*Track ingestion and chunking, summarization, and metadata tagging from the
+activity view.*
+
 ## Goals
 
 - Ingest EPUB files from a configurable local folder.
@@ -257,12 +273,28 @@ See the evaluation north star:
 
 ### Phase 8: Operational Polish
 
-- Add one-command startup.
-- Add database migrations.
-- Add backup/export guidance.
-- Add observability for ingestion and query latency.
-- Add error handling for malformed EPUB files.
-- Add configuration profiles for small-machine and heavier-machine setups.
+- [x] Add one-command startup.
+- [x] Add database migrations.
+- [ ] Add backup/export guidance.
+- [ ] Add observability for ingestion and query latency.
+- [ ] Add error handling for malformed EPUB files.
+- [ ] Add configuration profiles for small-machine and heavier-machine setups.
+
+### Immediate Next: Search Performance and Correctness Hardening
+
+Before continuing the remaining Phase 8 operational polish, prioritize
+[search performance (#73)](https://github.com/JonathanGWesterfield/Librarian/issues/73)
+and [answer correctness (#74)](https://github.com/JonathanGWesterfield/Librarian/issues/74):
+
+- [ ] Route chat retrieval through OpenSearch hybrid search instead of SQLite
+  full-vector cosine scanning.
+- [ ] Measure and separate retrieval latency from generation latency, then
+  evaluate response streaming.
+- [ ] Suppress publisher and front-matter noise in retrieved context.
+- [ ] Improve result/source diversity and source attribution.
+- [ ] Enforce corpus and claim boundaries, including refusal when the library
+  cannot support an answer.
+- [ ] Rerun live retrieval and correctness baselines after these changes.
 
 ## Design Principles
 
@@ -344,6 +376,14 @@ LIBRARIAN_GENERATION_MODEL=qwen2.5:1.5b
 The Compose database default is `sqlite:////data/librarian.db`, which is the
 absolute path of its bind-mounted `data/` directory. Commands run from the host
 repository continue to use `sqlite:///data/librarian.db`.
+
+SQLite migrations run automatically during normal application startup; no
+manual migration command is required. Successful migrations are recorded in
+the database's `schema_migrations` table with their version, stable name, and
+UTC application time. Existing library rows are upgraded in place and
+preserved. **If startup reports a newer or unknown schema version, do not edit
+the migration history or retry with older code: run an application version that
+supports that database before making any further changes.**
 
 OpenSearch defaults to a `-Xms192m -Xmx192m` JVM heap so the full local stack
 fits in Docker Desktop's common 2 GB VM allocation. If Docker has more memory
