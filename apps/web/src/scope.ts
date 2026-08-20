@@ -40,7 +40,11 @@ export function authorOptionsForBooks(books: LibraryBook[]): AuthorOption[] {
 }
 
 export function normalizeAuthorIdentity(name: string): string {
-  return name.trim().normalize("NFKC").toLocaleLowerCase("en-US");
+  return normalizeScopeText(name);
+}
+
+export function normalizeScopeText(value: string): string {
+  return value.trim().normalize("NFKC").toLocaleLowerCase("en-US");
 }
 
 export function sameScope(left: SearchScope, right: SearchScope): boolean {
