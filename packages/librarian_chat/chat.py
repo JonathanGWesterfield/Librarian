@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import re
 
 from librarian_chat.generation import (
     ChatMessage,
@@ -8,6 +9,42 @@ from librarian_chat.generation import (
 )
 from librarian_config.config import resolve_generation_answer_capability
 from librarian_search.search import SearchOptions, SearchResult, search_chunks
+
+
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+_WORD = re.compile(r"[a-z0-9]+")
+_LOOKUP_QUESTION_PREFIXES = ("what", "who", "when", "where", "which")
+_QUESTION_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "at",
+        "by",
+        "did",
+        "do",
+        "does",
+        "for",
+        "from",
+        "how",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "the",
+        "to",
+        "was",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "with",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -104,7 +141,13 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,
     )
-    answer = generator.generate(_build_messages(question, sources))
+    answer = (
+        _lightweight_lookup_answer(question, sources)
+        if answer_capability == "lightweight"
+        else None
+    )
+    if answer is None:
+        answer = generator.generate(_build_messages(question, sources))
 
     return ChatResponse(
         question=question,
@@ -182,3 +225,62 @@ def _format_sources(sources: list[ChatSource]) -> str:
             )
         )
     return "\n\n".join(formatted)
+
+
+def _lightweight_lookup_answer(question: str, sources: list[ChatSource]) -> str | None:
+    """Return an exact local sentence for a well-supported lookup question.
+
+    The default Compose model is intentionally small. For a short factual
+    lookup, preserving the source's subject/action relationship is more useful
+    than asking that model to paraphrase adjacent sentences. This path is
+    deliberately narrow: it only applies when a question-led source sentence
+    covers the request's meaningful terms. Broader questions still use the
+    configured generator.
+    """
+    question_terms = _meaningful_terms(question)
+    if not _is_lookup_question(question) or not question_terms:
+        return None
+
+    best: tuple[float, int, ChatSource, str] | None = None
+    for source in sources:
+        for sentence in _sentences(source.text):
+            sentence_terms = _meaningful_terms(sentence)
+            overlap = len(question_terms & sentence_terms)
+            coverage = overlap / len(question_terms)
+            candidate = (coverage, overlap, source, sentence)
+            if best is None or candidate[:2] > best[:2]:
+                best = candidate
+
+    if best is None:
+        return None
+    coverage, overlap, source, sentence = best
+    required_overlap = 1 if len(question_terms) == 1 else 2
+    if overlap < required_overlap or coverage < 0.5:
+        return None
+    return f"{sentence} [{source.source_id}]"
+
+
+def _is_lookup_question(question: str) -> bool:
+    first_word = ""
+    if question.strip():
+        first_word = question.lstrip().split(maxsplit=1)[0].casefold().rstrip("?:")
+    return first_word in _LOOKUP_QUESTION_PREFIXES or question.casefold().startswith(
+        ("how many", "how much")
+    )
+
+
+def _meaningful_terms(value: str) -> set[str]:
+    return {
+        term
+        for term in _WORD.findall(value.casefold())
+        if term not in _QUESTION_STOP_WORDS and len(term) > 1
+    }
+
+
+def _sentences(text: str) -> list[str]:
+    return [
+        sentence.strip()
+        for line in text.splitlines()
+        for sentence in _SENTENCE_BOUNDARY.split(line.strip())
+        if sentence.strip()
+    ]
