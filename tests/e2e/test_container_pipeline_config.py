@@ -70,6 +70,34 @@ class ContainerPipelineConfigTests(unittest.TestCase):
             self.assertIn("Timed out", launcher)
             self.assertNotIn("wait ollama-init", launcher)
 
+    def test_powershell_initializer_failure_prints_diagnostics_before_throwing(self) -> None:
+        """Stop-on-error must not suppress the service state and logs on Windows."""
+        powershell = (REPO_ROOT / "scripts" / "start_local.ps1").read_text(
+            encoding="utf-8"
+        )
+        diagnostic_body = powershell.split("function Show-OllamaInitDiagnostics", 1)[1].split(
+            "function Wait-OllamaInit", 1
+        )[0]
+        self.assertIn("Write-Host", diagnostic_body)
+        self.assertNotIn("Write-Error", diagnostic_body)
+        self.assertIn("ps --all ollama-init", diagnostic_body)
+        self.assertIn("logs --tail 100 ollama-init", diagnostic_body)
+
+        wait_body = powershell.split("function Wait-OllamaInit", 1)[1].split(
+            "function Confirm-DockerOllamaModels", 1
+        )[0]
+        for marker in (
+            "ollama-init exited with code",
+            "Timed out after",
+        ):
+            diagnostic_index = wait_body.index(marker)
+            throw_index = wait_body.index("throw", diagnostic_index)
+            self.assertLess(diagnostic_index, throw_index)
+            self.assertIn(
+                "Show-OllamaInitDiagnostics",
+                wait_body[diagnostic_index:throw_index],
+            )
+
     def test_verification_runner_waits_for_dependencies_then_runs_verifier(self) -> None:
         """Verify a successful ollama-init exit cannot abort the evaluator."""
         runner = (REPO_ROOT / "scripts/run_compose_verification.sh").read_text(
