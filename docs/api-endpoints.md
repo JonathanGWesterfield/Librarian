@@ -42,7 +42,7 @@ progress, running, complete, or failed.
 Query fields:
 
 - `database_url`: optional SQLite database URL. Defaults to
-  `LIBRARIAN_DATABASE_URL`.
+  `paths.database_url` in `config/librarian.json`.
 
 Example request:
 
@@ -191,8 +191,8 @@ returns without calling the summarizer LLM. A worker such as
 
 Request fields:
 
-- `books_dir`: EPUB source directory. Defaults to `LIBRARIAN_BOOKS_DIR`.
-- `database_url`: local storage URL. Defaults to `LIBRARIAN_DATABASE_URL`.
+- `books_dir`: EPUB source directory. Defaults to `paths.books_dir` in JSON.
+- `database_url`: local storage URL. Defaults to `paths.database_url` in JSON.
 - `force`: re-parse unchanged EPUB files.
 - `list_epubs`: include discovered EPUB metadata in the response.
 - `embed_chunks`: generate embeddings for chunks created during the run.
@@ -282,10 +282,10 @@ regenerating tags/genres so existing documents are replaced.
 Request fields:
 
 - `database_url`: optional SQLite source-of-truth URL. Defaults to
-  `LIBRARIAN_DATABASE_URL`.
+  `paths.database_url` in `config/librarian.json`.
 - `opensearch_url`: optional OpenSearch URL. Defaults to
-  `LIBRARIAN_OPENSEARCH_URL`.
-- `index_name`: optional index name. Defaults to `LIBRARIAN_OPENSEARCH_INDEX`.
+  `search.opensearch_url` in `config/librarian.json`.
+- `index_name`: optional index name. Defaults to `search.opensearch_index` in JSON.
 - `embedding_provider`, `embedding_model`: optional embedding identity to
   index. Defaults to the configured Librarian values.
 - `batch_size`: documents per OpenSearch bulk request; default `250`.
@@ -328,9 +328,9 @@ Request fields:
 
 - `query`: user search text. Must not be empty.
 - `opensearch_url`: optional OpenSearch URL. Defaults to
-  `LIBRARIAN_OPENSEARCH_URL`.
+  `search.opensearch_url` in `config/librarian.json`.
 - `index_name`: optional OpenSearch index name. Defaults to
-  `LIBRARIAN_OPENSEARCH_INDEX`.
+  `search.opensearch_index` in `config/librarian.json`.
 - `embedding_provider`: embedding provider used for the query vector.
 - `embedding_model`: embedding model used for the query vector.
 - `ollama_base_url`: optional Ollama URL override.
@@ -381,7 +381,7 @@ Request fields:
 
 - `query`: reader recommendation request. Must not be empty.
 - `database_url`: optional SQLite database URL. Defaults to
-  `LIBRARIAN_DATABASE_URL`.
+  `paths.database_url` in `config/librarian.json`.
 - `embedding_provider`: embedding provider for retrieval, such as `ollama` or
   `noop`.
 - `embedding_model`: embedding model name.
@@ -451,7 +451,7 @@ reset cached summaries when benchmarking providers or prompt changes.
 Request fields:
 
 - `database_url`: optional SQLite database URL. Defaults to
-  `LIBRARIAN_DATABASE_URL`.
+  `paths.database_url` in `config/librarian.json`.
 - `book_title`: optional title check/filter for the target book.
 - `author`: optional author check/filter for the target book.
 - `generation_provider`: optional summary provider. One of `codex`, `ollama`, or
@@ -520,7 +520,7 @@ target book must already have a stored book summary for the selected
 Request fields:
 
 - `database_url`: optional SQLite database URL. Defaults to
-  `LIBRARIAN_DATABASE_URL`.
+  `paths.database_url` in `config/librarian.json`.
 - `source_summary_provider`: optional summary provider to read from, such as
   `codex` or `ollama`.
 - `source_summary_model`: optional summary model to read from.

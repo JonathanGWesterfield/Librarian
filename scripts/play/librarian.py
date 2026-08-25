@@ -76,16 +76,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import (
-    BOOKS_DIR_ENV,
-    DATABASE_URL_ENV,
-    EMBEDDING_MODEL_ENV,
-    EMBEDDING_PROVIDER_ENV,
-    GENERATION_MODEL_ENV,
-    GENERATION_PROVIDER_ENV,
-    OLLAMA_BASE_URL_ENV,
-    resolve_database_url,
-)
+from librarian_config.config import resolve_database_url
 from librarian_ingestion.embedding_ops import (
     RebuildEmbeddingsOptions,
     rebuild_embeddings,
@@ -110,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help=f"Override the ingestion database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -123,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ingest_parser.add_argument(
         "--books-dir",
-        help=f"Override the EPUB source directory instead of {BOOKS_DIR_ENV}.",
+        help="Override the books_dir configured in config/librarian.json.",
     )
     ingest_parser.add_argument(
         "--force",
@@ -142,12 +133,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ingest_parser.add_argument(
         "--summary-generation-provider",
-        choices=["noop", "ollama", "codex"],
-        help=f"Summary provider override instead of {GENERATION_PROVIDER_ENV}.",
+        choices=["noop", "ollama", "codex", "openai_compatible"],
+        help="Override the generation provider in config/librarian.json.",
     )
     ingest_parser.add_argument(
         "--summary-generation-model",
-        help=f"Summary model override instead of {GENERATION_MODEL_ENV}.",
+        help="Override the generation model in config/librarian.json.",
     )
     ingest_parser.add_argument(
         "--summary-detail",
@@ -164,15 +155,15 @@ def main(argv: list[str] | None = None) -> int:
     embed_parser.add_argument(
         "--embedding-provider",
         choices=["noop", "ollama"],
-        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     embed_parser.add_argument(
         "--embedding-model",
-        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     embed_parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
     embed_parser.add_argument(
         "--batch-size",
@@ -224,15 +215,15 @@ def main(argv: list[str] | None = None) -> int:
     search_parser.add_argument(
         "--embedding-provider",
         choices=["noop", "ollama"],
-        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     search_parser.add_argument(
         "--embedding-model",
-        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     search_parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
     search_parser.add_argument(
         "--limit",
@@ -258,15 +249,15 @@ def main(argv: list[str] | None = None) -> int:
     hybrid_parser.add_argument(
         "--embedding-provider",
         choices=["noop", "ollama"],
-        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     hybrid_parser.add_argument(
         "--embedding-model",
-        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     hybrid_parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
     hybrid_parser.add_argument(
         "--limit",
@@ -292,24 +283,24 @@ def main(argv: list[str] | None = None) -> int:
     recommend_parser.add_argument(
         "--embedding-provider",
         choices=["noop", "ollama"],
-        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     recommend_parser.add_argument(
         "--embedding-model",
-        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     recommend_parser.add_argument(
         "--generation-provider",
         choices=["noop", "ollama", "codex"],
-        help=f"Generation provider override instead of {GENERATION_PROVIDER_ENV}.",
+        help="Override the generation provider in config/librarian.json.",
     )
     recommend_parser.add_argument(
         "--generation-model",
-        help=f"Generation model override instead of {GENERATION_MODEL_ENV}.",
+        help="Override the generation model in config/librarian.json.",
     )
     recommend_parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
     recommend_parser.add_argument(
         "--limit",

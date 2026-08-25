@@ -58,15 +58,6 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import (
-    BOOKS_DIR_ENV,
-    DATABASE_URL_ENV,
-    EMBEDDING_MODEL_ENV,
-    EMBEDDING_PROVIDER_ENV,
-    GENERATION_MODEL_ENV,
-    GENERATION_PROVIDER_ENV,
-    OLLAMA_BASE_URL_ENV,
-)
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_ingestion.scan import EpubSourceError
 from librarian_logging import configure_cli_logging, emit_json
@@ -80,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--books-dir",
-        help=f"Override the EPUB source directory instead of {BOOKS_DIR_ENV}.",
+        help="Override the books_dir configured in config/librarian.json.",
     )
     parser.add_argument(
         "--list",
@@ -89,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help=f"Override the ingestion database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     parser.add_argument(
         "--force",
@@ -109,15 +100,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--embedding-provider",
         choices=["noop", "ollama"],
-        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     parser.add_argument(
         "--embedding-model",
-        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
     parser.add_argument(
         "--embedding-batch-size",
@@ -132,12 +123,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--summary-generation-provider",
-        choices=["noop", "ollama", "codex"],
-        help=f"Summary provider override instead of {GENERATION_PROVIDER_ENV}.",
+        choices=["noop", "ollama", "codex", "openai_compatible"],
+        help="Override the generation provider in config/librarian.json.",
     )
     parser.add_argument(
         "--summary-generation-model",
-        help=f"Summary model override instead of {GENERATION_MODEL_ENV}.",
+        help="Override the generation model in config/librarian.json.",
     )
     parser.add_argument(
         "--summary-detail",

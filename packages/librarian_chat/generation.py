@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 from urllib import error, request
@@ -14,9 +14,11 @@ from urllib import error, request
 from librarian_config.config import (
     resolve_codex_executable,
     resolve_generation_model,
+    resolve_generation_ollama_base_url,
+    resolve_generation_openai_compatible,
     resolve_generation_provider,
-    resolve_ollama_base_url,
 )
+from librarian_config.openai_compatible import build_openai_compatible_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,59 @@ class OllamaGenerator:
 
 
 @dataclass(frozen=True)
+class OpenAICompatibleGenerator:
+    """Generation client for a configured OpenAI-compatible gateway."""
+
+    model: str
+    base_url: str
+    api_key: str
+    extra_headers: dict[str, str] = field(default_factory=dict)
+    timeout_seconds: float = 240.0
+    provider: str = "openai_compatible"
+
+    def generate(
+        self, messages: list[ChatMessage], *, response_format: str | None = None
+    ) -> str:
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        headers.update(self.extra_headers)
+        payload: dict[str, object] = {
+            "model": self.model,
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in messages
+            ],
+            "stream": False,
+            "temperature": 0.1,
+        }
+        if response_format == "json":
+            payload["response_format"] = {"type": "json_object"}
+        endpoint = build_openai_compatible_endpoint(self.base_url, "chat/completions")
+        http_request = request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            raise GenerationError(f"OpenAI-compatible generation gateway returned HTTP {exc.code}") from exc
+        except error.URLError as exc:
+            raise GenerationError("could not reach OpenAI-compatible generation gateway") from exc
+        except json.JSONDecodeError as exc:
+            raise GenerationError("OpenAI-compatible gateway returned invalid JSON") from exc
+        choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise GenerationError("OpenAI-compatible gateway did not include choices")
+        message = choices[0].get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
+            raise GenerationError("OpenAI-compatible gateway did not include message content")
+        return content.strip()
+
+
+@dataclass(frozen=True)
 class CodexGenerator:
     model: str = "codex"
     executable: str = "codex"
@@ -141,7 +196,7 @@ class CodexGenerator:
         except FileNotFoundError as exc:
             raise GenerationError(
                 "Codex executable was not found. Install the Codex CLI or set "
-                "LIBRARIAN_CODEX_EXECUTABLE to the full path returned by "
+                "codex_executable in config/librarian.json to the full path returned by "
                 "`which codex`."
             ) from exc
         except OSError as exc:
@@ -164,6 +219,9 @@ def create_generator(
     *,
     model: str,
     ollama_base_url: str | None = None,
+    openai_base_url: str | None = None,
+    openai_api_key: str | None = None,
+    openai_headers: dict[str, str] | None = None,
 ) -> Generator:
     normalized = provider.strip().casefold()
     if normalized == "noop":
@@ -171,7 +229,18 @@ def create_generator(
     if normalized == "ollama":
         return OllamaGenerator(
             model=model,
-            base_url=resolve_ollama_base_url(ollama_base_url),
+            base_url=resolve_generation_ollama_base_url(ollama_base_url),
+        )
+    if normalized == "openai_compatible":
+        if not openai_base_url or not openai_api_key:
+            raise ValueError(
+                "OpenAI-compatible generation provider requires base_url and api_key_file in librarian.json"
+            )
+        return OpenAICompatibleGenerator(
+            model=model,
+            base_url=openai_base_url,
+            api_key=openai_api_key,
+            extra_headers=openai_headers or {},
         )
     if normalized == "codex":
         return CodexGenerator(
@@ -192,11 +261,23 @@ def create_configured_generator(
         resolved_model = "codex"
     else:
         resolved_model = resolve_generation_model(model)
-    return create_generator(
-        resolved_provider,
-        model=resolved_model,
-        ollama_base_url=ollama_base_url,
-    )
+    normalized = resolved_provider.strip().casefold()
+    if normalized == "ollama":
+        return create_generator(
+            resolved_provider,
+            model=resolved_model,
+            ollama_base_url=resolve_generation_ollama_base_url(ollama_base_url),
+        )
+    if normalized == "openai_compatible":
+        base_url, api_key, headers = resolve_generation_openai_compatible()
+        return create_generator(
+            resolved_provider,
+            model=resolved_model,
+            openai_base_url=base_url,
+            openai_api_key=api_key,
+            openai_headers=headers,
+        )
+    return create_generator(resolved_provider, model=resolved_model)
 
 
 def _resolve_codex_command(configured: str) -> str:

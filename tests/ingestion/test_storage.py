@@ -37,32 +37,15 @@ from librarian_storage.storage import (
 
 
 class DatabaseConfigTests(unittest.TestCase):
-    def test_resolve_database_url_uses_env_then_default(self) -> None:
-        """Verify database configuration follows the same env-first pattern.
-        This lets local development use the default SQLite file while tests and
-        future deployments can point storage somewhere else.
-        """
-        self.assertEqual(
-            resolve_database_url(env={"LIBRARIAN_DATABASE_URL": "sqlite:///tmp.db"}),
-            "sqlite:///tmp.db",
-        )
-        self.assertEqual(resolve_database_url(env={}), "sqlite:///data/librarian.db")
+    def test_resolve_database_url_uses_json_default(self) -> None:
+        """Verify storage reads its default from the active JSON configuration."""
+        self.assertEqual(resolve_database_url(), "sqlite:////data/librarian.db")
 
     def test_resolve_embedding_config_tracks_local_provider_settings(self) -> None:
-        """Verify embedding settings are configurable but harmless by default.
-        The repo can remember that Ollama is the likely provider while default
-        ingestion still avoids any model download or network call.
-        """
-        env = {
-            "LIBRARIAN_EMBEDDING_PROVIDER": "ollama",
-            "LIBRARIAN_EMBEDDING_MODEL": "all-minilm",
-            "LIBRARIAN_OLLAMA_BASE_URL": "http://localhost:11434/",
-        }
-
-        self.assertEqual(resolve_embedding_provider(env=env), "ollama")
-        self.assertEqual(resolve_embedding_model(env=env), "all-minilm")
-        self.assertEqual(resolve_ollama_base_url(env=env), "http://localhost:11434")
-        self.assertEqual(resolve_embedding_provider(env={}), "noop")
+        """Verify embedding settings resolve from the active JSON configuration."""
+        self.assertEqual(resolve_embedding_provider(), "ollama")
+        self.assertEqual(resolve_embedding_model(), "all-minilm")
+        self.assertEqual(resolve_ollama_base_url(), "http://ollama:11434")
 
     def test_sqlite_path_from_url_accepts_relative_and_absolute_paths(self) -> None:
         """Verify SQLite URL parsing supports common local paths.

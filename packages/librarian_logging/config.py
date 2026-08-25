@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, TextIO
 
 DEFAULT_LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
-LOG_FILE_ENV = "LIBRARIAN_LOG_FILE"
-DEFAULT_LOG_FILE = Path(__file__).resolve().parents[2] / "logs/librarian.log"
 DEFAULT_MAX_LOG_BYTES = 5_000_000
 DEFAULT_BACKUP_COUNT = 3
 
@@ -37,7 +34,7 @@ def configure_logging(
         root_logger,
         formatter,
         enabled=file_enabled,
-        log_file=_resolve_log_file(log_file),
+        log_file=_resolve_log_file(log_file) if file_enabled else Path(".") / "unused.log",
     )
 
     root_logger.setLevel(level)
@@ -78,19 +75,28 @@ def _configure_file_handler(
         _remove_handler(root_logger, handler)
         return
 
-    log_file.parent.mkdir(parents=True, exist_ok=True)
     current_path = Path(getattr(handler, "_librarian_log_file", "")) if handler else None
-    if handler is None or current_path != log_file:
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        if handler is None or current_path != log_file:
+            _remove_handler(root_logger, handler)
+            handler = RotatingFileHandler(
+                log_file,
+                maxBytes=DEFAULT_MAX_LOG_BYTES,
+                backupCount=DEFAULT_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+            setattr(handler, "_librarian_file_handler", True)
+            setattr(handler, "_librarian_log_file", log_file)
+            root_logger.addHandler(handler)
+    except OSError as exc:
         _remove_handler(root_logger, handler)
-        handler = RotatingFileHandler(
+        root_logger.warning(
+            "Persistent log file %s is unavailable; continuing without file logging: %s",
             log_file,
-            maxBytes=DEFAULT_MAX_LOG_BYTES,
-            backupCount=DEFAULT_BACKUP_COUNT,
-            encoding="utf-8",
+            exc,
         )
-        setattr(handler, "_librarian_file_handler", True)
-        setattr(handler, "_librarian_log_file", log_file)
-        root_logger.addHandler(handler)
+        return
 
     handler.setFormatter(formatter)
 
@@ -98,10 +104,9 @@ def _configure_file_handler(
 def _resolve_log_file(log_file: str | Path | None) -> Path:
     if log_file is not None:
         return Path(log_file).expanduser()
-    configured = os.environ.get(LOG_FILE_ENV)
-    if configured:
-        return Path(configured).expanduser()
-    return DEFAULT_LOG_FILE
+    from librarian_config.config import get_librarian_config
+
+    return Path(get_librarian_config().paths.log_file).expanduser()
 
 
 def _find_librarian_handler(

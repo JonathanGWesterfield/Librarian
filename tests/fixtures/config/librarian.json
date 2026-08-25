@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "paths": {
+    "books_dir": "/books",
+    "host_books_dir": "./tests/fixtures/epubs",
+    "database_url": "sqlite:////data/librarian.db",
+    "log_file": "/data/librarian.log"
+  },
+  "embedding": {
+    "mode": "docker_ollama",
+    "model": "all-minilm"
+  },
+  "generation": {
+    "mode": "docker_ollama",
+    "model": "qwen2.5:1.5b",
+    "answer_capability": "lightweight"
+  },
+  "search": {
+    "opensearch_url": "http://opensearch:9200",
+    "opensearch_index": "librarian-chunks",
+    "retrieval_backend": "auto"
+  },
+  "summaries": {
+    "chunk_timeout_seconds": 240,
+    "max_parallel_chunks": 1
+  },
+  "services": {
+    "api_port": 8000,
+    "web_port": 3000,
+    "opensearch_port": 9200,
+    "opensearch_java_opts": "-Xms192m -Xmx192m",
+    "ollama_host": "0.0.0.0:11434",
+    "summary_worker_limit": 1,
+    "summary_worker_poll_interval_seconds": 10
+  },
+  "codex_executable": "codex"
+}

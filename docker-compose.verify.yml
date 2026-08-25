@@ -4,13 +4,28 @@ services:
     volumes:
       - verify-opensearch-data:/usr/share/opensearch/data
 
+  config-resolver:
+    volumes:
+      - ./tests/fixtures/config:/config:ro
+      - ./.runtime/verification:/output
+    command:
+      - --config
+      - /config/librarian.json
+      - --no-host-ports
+      - --compose-output
+      - /output/librarian.compose.json
+      - --state-output
+      - /output/librarian.state.json
+
   api:
     ports: !reset []
-    environment:
-      LIBRARIAN_DATABASE_URL: sqlite:////data/librarian.db
     volumes:
       - verify-data:/data
       - ./tests/fixtures/epubs:/books:ro
+      - ./tests/fixtures/config:/config:ro
+
+  web:
+    ports: !reset []
 
   verifier:
     profiles:
@@ -34,6 +49,7 @@ services:
       - http://ollama:11434
     volumes:
       - verify-data:/verify-data
+      - ./tests/fixtures/config:/config:ro
     depends_on:
       api:
         condition: service_healthy

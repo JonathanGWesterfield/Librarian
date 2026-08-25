@@ -9,10 +9,10 @@
 # Examples:
 #   scripts/verify_preflight.sh
 #   scripts/verify_preflight.sh --minimum-gb 6
-#   LIBRARIAN_VERIFY_MIN_MEMORY_GB=8 scripts/verify_preflight.sh
+#   VERIFY_MIN_MEMORY_GB=8 scripts/verify_preflight.sh
 set -euo pipefail
 
-minimum_gb="${LIBRARIAN_VERIFY_MIN_MEMORY_GB:-4}"
+minimum_gb="${VERIFY_MIN_MEMORY_GB:-4}"
 
 usage() {
   cat <<'EOF'
@@ -23,7 +23,7 @@ Checks the memory assigned to Docker before Compose verification.
 Examples:
   scripts/verify_preflight.sh
   scripts/verify_preflight.sh --minimum-gb 6
-  LIBRARIAN_VERIFY_MIN_MEMORY_GB=8 scripts/verify_preflight.sh
+  VERIFY_MIN_MEMORY_GB=8 scripts/verify_preflight.sh
 EOF
 }
 

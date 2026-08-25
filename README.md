@@ -310,20 +310,20 @@ and [answer correctness (#74)](https://github.com/JonathanGWesterfield/Librarian
 
 ### Standard Docker Compose path
 
-Install and start a Docker runtime with Docker Compose v2, then run this command
-from the repository root:
+Install and start a Docker runtime with Docker Compose v2, then run the
+launcher from the repository root:
 
 ```bash
-docker compose up --build
+scripts/start_local.sh
 ```
 
-This is the supported onboarding command on Windows, Linux, and macOS wherever
-Docker Compose runs. It builds the API image for the host architecture (the
-image pins Python 3.12), starts OpenSearch and Ollama, and pulls the configured
-embedding and generation models before starting the API. Model files live in
-the named `ollama-models` Docker volume, so they survive container restarts.
-The first run needs network access for container images and model downloads and
-can take several minutes.
+On Windows, run `./scripts/start_local.ps1`. The launcher creates the ignored
+`config/librarian.json` file from the tracked example, resolves its non-secret
+Compose values, and starts only the model services the configuration requires.
+It builds the API image for the host architecture, starts OpenSearch, and, when
+configured for Docker Ollama, pulls the configured embedding and generation
+models before starting the API and production web UI. Model files live in the
+named `ollama-models` Docker volume, so they survive container restarts.
 
 The normal command builds and runs only the lean `runtime` image. It never
 starts evaluation automatically; the test/evaluation harness is a separate
@@ -333,18 +333,19 @@ No host Python, virtual environment, Homebrew, or native Ollama installation is
 required for this normal app path. A virtual environment cannot change a host
 Python version; the container image owns that runtime instead.
 
-The command runs in the foreground. To start it in the background, use:
+The command starts the stack in the background. To follow logs, use:
 
 ```bash
-docker compose up --build -d
 docker compose ps
+docker compose logs --follow api web
 ```
 
-Open <http://localhost:8000/docs> after `api` is healthy. The optional summary
-worker is intentionally separate because it can consume generation resources:
+Open the Web UI URL printed by the launcher (normally <http://localhost:3000>).
+The API documentation is normally <http://localhost:8000/docs>. The optional
+summary worker is intentionally separate because it can consume generation resources:
 
 ```bash
-docker compose --profile workers up --build
+scripts/start_local.sh --with-workers
 ```
 
 The Bash convenience helpers are available for macOS/Linux, or Windows through
@@ -361,17 +362,19 @@ scripts/stop_local.sh
 without starting containers, run `scripts/setup_local.sh` (or directly run
 `docker compose config`).
 
-### Configuration and optional native Ollama override
+### JSON configuration and provider selection
 
-The defaults are in [`.env.example`](.env.example). Compose works without a
-`.env` file. To change model names or the EPUB source directory, create a local
-`.env` file with only the values to override, for example:
+All operational settings live in the ignored `config/librarian.json` file. The
+launcher creates it from [`config/librarian.example.json`](config/librarian.example.json)
+on first run. JSON is authoritative; `LIBRARIAN_*` shell variables are not read.
 
-```dotenv
-LIBRARIAN_HOST_BOOKS_DIR=/absolute/path/to/epubs
-LIBRARIAN_EMBEDDING_MODEL=all-minilm
-LIBRARIAN_GENERATION_MODEL=qwen2.5:1.5b
-```
+The `embedding` and `generation` sections are independent. Each accepts
+`docker_ollama`, `native_ollama`, or `openai_compatible`; generation also accepts
+`codex`. `generation.answer_capability` is an explicit product default:
+`lightweight` for the Compose model and `quality` for a capable configured
+provider. Gateway credentials belong in ignored files below `config/secrets/`,
+referenced by `api_key_file` or `header_files`; they are never rendered into the
+generated Compose override.
 
 The Compose database default is `sqlite:////data/librarian.db`, which is the
 absolute path of its bind-mounted `data/` directory. Commands run from the host
@@ -386,28 +389,15 @@ the migration history or retry with older code: run an application version that
 supports that database before making any further changes.**
 
 OpenSearch defaults to a `-Xms192m -Xmx192m` JVM heap so the full local stack
-fits in Docker Desktop's common 2 GB VM allocation. If Docker has more memory
-available, set `LIBRARIAN_OPENSEARCH_JAVA_OPTS` in `.env` to raise both values,
-for example `-Xms512m -Xmx512m`.
+fits in Docker Desktop's common 2 GB VM allocation. Change
+`services.opensearch_java_opts` in JSON when Docker has more memory available.
 
-The normal container setting is
-`LIBRARIAN_OLLAMA_BASE_URL=http://ollama:11434`; API and worker containers use
-the Compose service hostname rather than a host-specific address.
-
-Native Ollama is an optional performance/developer override, not a prerequisite.
-Start native Ollama and pull the required models yourself, set
-`LIBRARIAN_OLLAMA_BASE_URL=http://host.docker.internal:11434`, then start
-OpenSearch and the API without its Compose dependencies:
-
-```bash
-docker compose up -d opensearch
-LIBRARIAN_OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-  docker compose up --build --no-deps api
-```
-
-`host.docker.internal` works with Docker Desktop; this Compose file also maps it
-on Linux. This override skips the container model-initialization guard, so model
-availability is the developer's responsibility.
+`docker_ollama` uses the Compose hostname automatically. For native Ollama,
+choose `native_ollama` and set `base_url` to
+`http://host.docker.internal:11434` in the relevant provider section. For an
+OpenAI-compatible gateway, choose `openai_compatible`, set its `base_url`, and
+store its credentials beneath `config/secrets/`. The Compose file maps
+`host.docker.internal` on Linux as well as Docker Desktop.
 
 ### Full Compose verification
 
@@ -426,7 +416,7 @@ then run the isolated verifier:
 scripts/run_compose_verification.sh
 ```
 
-Use `LIBRARIAN_VERIFY_MIN_MEMORY_GB=6 scripts/verify_preflight.sh` (or
+Use `VERIFY_MIN_MEMORY_GB=6 scripts/verify_preflight.sh` (or
 `--minimum-gb 6`) for a higher threshold. If the check fails, increase Docker
 Desktop memory in **Resources**, or restart Colima with a larger allocation
 such as `colima start --memory 4`. This is Docker VM runtime memory, not the
@@ -434,7 +424,7 @@ on-disk image size. The runner creates an isolated `librarian-verify` Compose
 project, starts the runtime dependencies with `--wait`, then explicitly runs
 the profile-gated verifier; `ollama-init` cannot abort it. Its EXIT trap removes
 only that project's fixture SQLite, OpenSearch, and Ollama model volumes. Set
-`LIBRARIAN_VERIFY_PROJECT` to choose a different isolated project name.
+`VERIFY_PROJECT` to choose a different isolated project name.
 
 Stop the normal stack without deleting models or search data:
 
@@ -445,8 +435,8 @@ docker compose down
 Deliberately deleting named volumes with `docker compose down --volumes` also
 deletes downloaded Ollama models and OpenSearch data.
 
-Runtime logs are written to stdout and to the file configured by
-`LIBRARIAN_LOG_FILE`. With the default Docker environment, inspect live output
+Runtime logs are written to stdout and to `paths.log_file` in JSON. With the
+default Docker configuration, inspect live output
 with `docker compose logs api` and the persisted file at `data/librarian.log`.
 
 Run the test suite:
@@ -522,19 +512,21 @@ small local machines because embedding models are usually tiny, while summary
 generation models can easily exceed available RAM and make the worker look
 stalled.
 
-Use embedding settings for chunk/query vectors:
+Use the `embedding` section of `config/librarian.json` for chunk/query vectors:
 
-```bash
-LIBRARIAN_EMBEDDING_PROVIDER=ollama
-LIBRARIAN_EMBEDDING_MODEL=all-minilm
+```json
+"embedding": {"mode": "docker_ollama", "model": "all-minilm"}
 ```
 
-Use generation settings for chat, summarization, tags, genres, and
+Use the `generation` section for chat, summarization, tags, genres, and
 recommendation text:
 
-```bash
-LIBRARIAN_GENERATION_PROVIDER=ollama
-LIBRARIAN_GENERATION_MODEL=qwen2.5:1.5b
+```json
+"generation": {
+  "mode": "docker_ollama",
+  "model": "qwen2.5:1.5b",
+  "answer_capability": "lightweight"
+}
 ```
 
 When ingesting books, summary jobs can be queued with a model that is different
@@ -553,7 +545,7 @@ python3 scripts/play/ingest_epubs.py \
 ```
 
 The selected summary provider/model/detail are stored on each queued summary
-job, so changing `LIBRARIAN_GENERATION_MODEL` later only affects newly queued
+job, so changing the configured generation model later only affects newly queued
 jobs or explicit rebuild/reset operations.
 
 For grounded answer synthesis, use the standalone chat CLI:
@@ -585,8 +577,8 @@ python3 scripts/summarize.py \
 ```
 
 If your terminal cannot find the bundled Codex executable, set
-`LIBRARIAN_CODEX_EXECUTABLE` to the full path returned by `which codex` in an
-environment where Codex is available.
+`codex_executable` in `config/librarian.json` to the full path returned by
+`which codex` in an environment where Codex is available.
 
 To rebuild summaries for a different provider/model, either reset during the
 summary run:
@@ -677,15 +669,16 @@ GET  /books                query: database_url, status, limit, offset
 ```
 
 By default, Docker Compose mounts `./Epub-Books` into the API container at
-`/books`. To use a different local folder, create a `.env` file and set:
+`/books`. To use a different local folder, update `paths.host_books_dir` in
+`config/librarian.json`:
 
-```bash
-LIBRARIAN_HOST_BOOKS_DIR=/absolute/path/to/epubs
+```json
+"paths": {"host_books_dir": "/absolute/path/to/epubs"}
 ```
 
-Inside the container, the application reads from `LIBRARIAN_BOOKS_DIR`, which
-defaults to `/books`. When running outside Docker, set `LIBRARIAN_BOOKS_DIR`
-directly to the local folder you want to ingest from.
+Inside the container, the application reads `paths.books_dir`, which defaults
+to `/books`. When running outside Docker, set that JSON field directly to the
+local folder you want to ingest from.
 
 ## Codex Usage Boundary
 
@@ -707,12 +700,10 @@ Embedding models are runtime dependencies, not repository assets. The repo
 tracks the provider, model name, and storage schema, but model weights should
 live in Ollama's local model cache or another local model runtime.
 
-Current embedding configuration:
+Current default embedding configuration:
 
-```bash
-LIBRARIAN_EMBEDDING_PROVIDER=ollama
-LIBRARIAN_EMBEDDING_MODEL=all-minilm
-LIBRARIAN_OLLAMA_BASE_URL=http://ollama:11434
+```json
+"embedding": {"mode": "docker_ollama", "model": "all-minilm"}
 ```
 
 For the default Compose path, model availability is handled by the `ollama-init`

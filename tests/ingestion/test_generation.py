@@ -198,7 +198,7 @@ class GenerationProviderTests(unittest.TestCase):
                 with patch("subprocess.Popen", side_effect=FileNotFoundError):
                     with self.assertRaisesRegex(
                         RuntimeError,
-                        "LIBRARIAN_CODEX_EXECUTABLE",
+                        "codex_executable in config/librarian.json",
                     ):
                         CodexGenerator(executable="missing-codex").generate(
                             [ChatMessage(role="user", content="Hello")]

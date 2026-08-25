@@ -53,12 +53,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import (
-    CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV,
-    DATABASE_URL_ENV,
-    MAX_PARALLEL_CHUNK_SUMMARIES_ENV,
-    resolve_database_url,
-)
+from librarian_config.config import resolve_database_url
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.jobs import (
@@ -77,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help=f"Override the local database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     parser.add_argument(
         "--limit",
@@ -124,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         help=(
             "Timeout for each Codex chunk/chapter summary call instead of "
-            f"{CHUNK_SUMMARY_TIMEOUT_SECONDS_ENV}."
+            "config/librarian.json."
         ),
     )
     parser.add_argument(
@@ -132,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         help=(
             "Maximum chunk/chapter summaries to generate concurrently instead "
-            f"of {MAX_PARALLEL_CHUNK_SUMMARIES_ENV}."
+            "of config/librarian.json."
         ),
     )
     parser.add_argument(

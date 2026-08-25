@@ -13,28 +13,33 @@ npm run dev
 npm test
 ```
 
-Then visit the Vite URL shown in the terminal. Run `npm run build` before
-deploying; its static output is written to `dist/`.
+Start the Docker stack with `scripts/start_local.sh` (or
+`./scripts/start_local.ps1`) before `npm run dev`; it creates the ignored local
+JSON configuration on first use. Then visit the Vite URL shown in the terminal.
+Run `npm run build` before deploying; its static output is written to `dist/`.
+
+## Production Compose UI
+
+The standard launcher also builds `apps/web/Dockerfile` and starts a small Nginx
+web service. It serves the production Vite build on `services.web_port`
+(default `http://localhost:3000`) and proxies `/api/*` to the healthy FastAPI
+service. This keeps the browser same-origin and does not put provider settings,
+credentials, or an API URL in the compiled frontend.
 
 ## API connection
 
-By default the app calls same-origin `/api`. Vite proxies that path to
-`http://localhost:8000` during development, so no permissive API CORS setting
-is required. Start the Librarian API with Docker Compose (or on port 8000) and
-then run the Vite dev server.
+The app calls the same-origin public `/api` contract. At development-server
+startup, Vite reads `../../config/librarian.json` and proxies `/api` to the
+configured `services.api_port`. No frontend environment variable or build-time
+API URL is used. After changing `services.api_port`, restart `npm run dev`.
 
-For a separately hosted API, set `VITE_API_BASE_URL` to its base path or URL at
-build time. For example:
-
-```bash
-VITE_API_BASE_URL=https://librarian.example.com/api npm run build
-```
-
-Static hosting should route `/api` to the Librarian API, or use the build-time
-override above.
+For static hosting, route the public site's `/api` path to the Librarian API.
+The built browser app still makes only same-origin `/api` requests, so it
+contains no local host or provider configuration. Compose implements that
+route with the bundled Nginx proxy; another host must provide an equivalent
+reverse-proxy rule.
 
 ## Deploy
 
 Deploy `apps/web` to Cloudflare Pages with `npm run build` and `dist/` as the
-output directory. Configure `/api` as a reverse proxy to the Librarian API, or
-set `VITE_API_BASE_URL` during the build.
+output directory. Configure `/api` as a reverse proxy to the Librarian API.

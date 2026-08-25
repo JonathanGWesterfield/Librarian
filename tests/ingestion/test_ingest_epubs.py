@@ -87,7 +87,7 @@ class IngestEpubsScriptTests(unittest.TestCase):
         self.assertEqual(payload["found"], 1)
         self.assertEqual(payload["parsed"], 1)
         self.assertEqual(payload["total_books"], 1)
-        self.assertEqual(payload["embedding_provider"], "noop")
+        self.assertEqual(payload["embedding_provider"], "ollama")
         self.assertEqual(payload["total_embeddings"], 0)
 
     def test_script_can_run_embedding_path_with_noop_provider(self) -> None:

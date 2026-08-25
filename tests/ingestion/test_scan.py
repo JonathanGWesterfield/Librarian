@@ -87,44 +87,9 @@ class ScanEpubFilesTests(unittest.TestCase):
 
 
 class ResolveBooksDirTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temp_dir = TemporaryDirectory()
-        self.root = Path(self.temp_dir.name)
-
-    def tearDown(self) -> None:
-        self.temp_dir.cleanup()
-
-    def test_env_value_wins(self) -> None:
-        """Verify explicit configuration takes precedence.
-        This lets local runs, Docker, and future automation point ingestion at
-        different source folders without changing code.
-        """
-        self.assertEqual(
-            resolve_books_dir(env={"LIBRARIAN_BOOKS_DIR": "/tmp/books"}),
-            Path("/tmp/books"),
-        )
-
-    def test_local_default_wins_when_present(self) -> None:
-        """Verify the local `Epub-Books` convention works without env setup.
-        This keeps development ergonomic on this machine while still allowing
-        environment-based configuration for other contexts.
-        """
-        (self.root / "Epub-Books").mkdir()
-
-        self.assertEqual(
-            resolve_books_dir(env={}, cwd=self.root),
-            self.root / "Epub-Books",
-        )
-
-    def test_container_default_is_last_resort(self) -> None:
-        """Verify the Docker default is used only as a fallback.
-        If no env var or local folder is present, containerized ingestion should
-        look at `/books`, which matches the Compose volume mount.
-        """
-        self.assertEqual(
-            resolve_books_dir(env={}, cwd=self.root),
-            Path("/books"),
-        )
+    def test_json_config_is_the_default_books_source(self) -> None:
+        """Verify runtime discovery uses the test JSON configuration."""
+        self.assertEqual(resolve_books_dir(), Path("/books"))
 
 
 if __name__ == "__main__":

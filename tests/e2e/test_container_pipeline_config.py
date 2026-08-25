@@ -72,4 +72,4 @@ class ContainerPipelineConfigTests(unittest.TestCase):
         )
 
         self.assertIn("--minimum-gb", completed.stdout)
-        self.assertIn("LIBRARIAN_VERIFY_MIN_MEMORY_GB", completed.stdout)
+        self.assertIn("VERIFY_MIN_MEMORY_GB", completed.stdout)

@@ -10,7 +10,7 @@
     "strict": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["vite/client"],
+    "types": ["node", "vite/client"],
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,

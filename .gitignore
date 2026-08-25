@@ -10,10 +10,10 @@ build/
 *.egg-info/
 node_modules/
 
-# Environment
-.env
-.env.*
-!.env.example
+# Local configuration and credentials
+config/librarian.json
+config/secrets/
+.runtime/
 
 # Local library/runtime state
 Epub-Books/

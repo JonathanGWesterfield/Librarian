@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from librarian_api.config import settings
+from librarian_api.config import get_settings
 from librarian_chat.chat import ChatOptions, answer_question
 from librarian_config.config import resolve_embedding_model, resolve_embedding_provider
 from librarian_ingestion.embedding_ops import (
@@ -38,11 +38,13 @@ from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
 
-configure_logging()
+configure_logging(file_enabled=False)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    configure_logging(log_file=settings.log_file)
     store = create_ingestion_store(settings.database_url)
     try:
         store.initialize()
@@ -188,11 +190,11 @@ class BookGenresRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, object]:
+    settings = get_settings()
     return {
         "status": "ok",
         "books_dir": settings.books_dir,
         "host_books_dir": settings.host_books_dir,
-        "codex_broker_enabled": settings.enable_codex_broker,
     }
 
 
@@ -209,8 +211,8 @@ def run_ingestion_endpoint(request: IngestionRunRequest) -> dict[str, object]:
     try:
         result = run_ingestion(
             IngestionOptions(
-                books_dir=request.books_dir or settings.books_dir,
-                database_url=request.database_url or settings.database_url,
+                books_dir=request.books_dir or get_settings().books_dir,
+                database_url=request.database_url or get_settings().database_url,
                 force=request.force,
                 list_epubs=request.list_epubs,
                 embed_chunks=request.embed_chunks,
@@ -232,7 +234,7 @@ def run_ingestion_endpoint(request: IngestionRunRequest) -> dict[str, object]:
 @app.get("/ingestion/summary")
 def ingestion_summary(database_url: Optional[str] = None) -> dict[str, object]:
     try:
-        store = create_ingestion_store(database_url or settings.database_url)
+        store = create_ingestion_store(database_url or get_settings().database_url)
     except (ValueError, NotImplementedError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     store.initialize()
@@ -244,7 +246,7 @@ def ingestion_summary(database_url: Optional[str] = None) -> dict[str, object]:
 
 @app.get("/ingestion/status")
 def ingestion_status(database_url: Optional[str] = None) -> dict[str, object]:
-    resolved_database_url = database_url or settings.database_url
+    resolved_database_url = database_url or get_settings().database_url
     try:
         store = create_ingestion_store(resolved_database_url)
     except (ValueError, NotImplementedError) as error:
@@ -263,7 +265,7 @@ def rebuild_embeddings_endpoint(request: RebuildEmbeddingsRequest) -> dict[str, 
     try:
         result = rebuild_embeddings(
             RebuildEmbeddingsOptions(
-                database_url=request.database_url or settings.database_url,
+                database_url=request.database_url or get_settings().database_url,
                 embedding_provider=request.embedding_provider,
                 embedding_model=request.embedding_model,
                 ollama_base_url=request.ollama_base_url,
@@ -300,7 +302,7 @@ def search_endpoint(request: SearchRequest) -> dict[str, object]:
         result = search_chunks(
             SearchOptions(
                 query=request.query,
-                database_url=request.database_url or settings.database_url,
+                database_url=request.database_url or get_settings().database_url,
                 embedding_provider=request.embedding_provider,
                 embedding_model=request.embedding_model,
                 ollama_base_url=request.ollama_base_url,
@@ -345,7 +347,7 @@ def index_search_endpoint(request: SearchIndexRequest) -> dict[str, object]:
     try:
         result = index_chunks(
             OpenSearchIndexOptions(
-                database_url=request.database_url or settings.database_url,
+                database_url=request.database_url or get_settings().database_url,
                 opensearch_url=request.opensearch_url,
                 index_name=request.index_name,
                 embedding_provider=resolve_embedding_provider(
@@ -367,7 +369,7 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
         result = answer_question(
             ChatOptions(
                 question=request.question,
-                database_url=request.database_url or settings.database_url,
+                database_url=request.database_url or get_settings().database_url,
                 embedding_provider=request.embedding_provider,
                 embedding_model=request.embedding_model,
                 generation_provider=request.generation_provider,
@@ -390,7 +392,7 @@ def recommendations_endpoint(request: RecommendationRequest) -> dict[str, object
         result = recommend_books(
             RecommendationOptions(
                 query=request.query,
-                database_url=request.database_url or settings.database_url,
+                database_url=request.database_url or get_settings().database_url,
                 embedding_provider=request.embedding_provider,
                 embedding_model=request.embedding_model,
                 generation_provider=request.generation_provider,
@@ -417,7 +419,7 @@ def summarize_book_endpoint(
     try:
         result = summarize_book(
             SummarizeBookOptions(
-                database_url=request.database_url or settings.database_url,
+                database_url=request.database_url or get_settings().database_url,
                 book_id=book_id,
                 book_title=request.book_title,
                 author=request.author,
@@ -446,7 +448,7 @@ def generate_book_genres_endpoint(
     try:
         result = generate_book_genres(
             GenerateBookGenresOptions(
-                database_url=request.database_url or settings.database_url,
+                database_url=request.database_url or get_settings().database_url,
                 book_id=book_id,
                 source_summary_provider=request.source_summary_provider,
                 source_summary_model=request.source_summary_model,
@@ -476,7 +478,7 @@ def list_book_genres_endpoint(
     try:
         genres = list_book_genres(
             ListBookGenresOptions(
-                database_url=database_url or settings.database_url,
+                database_url=database_url or get_settings().database_url,
                 book_id=book_id,
                 genre_role=genre_role,
                 source=source,
@@ -499,7 +501,7 @@ def delete_book_genres_endpoint(
     try:
         deleted = delete_book_genres(
             DeleteBookGenresOptions(
-                database_url=database_url or settings.database_url,
+                database_url=database_url or get_settings().database_url,
                 book_id=book_id,
                 genre_role=genre_role,
                 source=source,
@@ -518,7 +520,7 @@ def list_books(
     database_url: Optional[str] = None,
 ) -> list[dict[str, object]]:
     try:
-        store = create_ingestion_store(database_url or settings.database_url)
+        store = create_ingestion_store(database_url or get_settings().database_url)
     except (ValueError, NotImplementedError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     store.initialize()
