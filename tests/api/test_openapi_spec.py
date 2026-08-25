@@ -62,6 +62,19 @@ class StaticOpenApiSpecTests(unittest.TestCase):
         self.assertIn("answer_capability", request_schema["properties"])
         self.assertIn("answer_capability", response_schema["required"])
 
+    def test_chat_documents_its_intentional_bad_request_response(self) -> None:
+        """Provider/configuration failures are documented as HTTP 400 at runtime."""
+        static = json.loads((REPO_ROOT / "docs" / "openapi.json").read_text())
+        static_response = static["paths"]["/chat"]["post"]["responses"]["400"]
+        self.assertEqual(static_response, {"$ref": "#/components/responses/BadRequest"})
+
+        live_response = app.openapi()["paths"]["/chat"]["post"]["responses"]["400"]
+        self.assertIn("Invalid or unsupported chat provider/model", live_response["description"])
+        self.assertEqual(
+            live_response["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/ErrorResponse",
+        )
+
     def test_openapi_does_not_advertise_unimplemented_chat_streaming(self) -> None:
         """Keep the client contract aligned with the synchronous chat route.
 

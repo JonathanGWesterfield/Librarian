@@ -162,6 +162,60 @@ class LibrarianConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(LibrarianConfigError, "under config/secrets"):
                 get_librarian_config(path)
 
+    def test_literal_credential_headers_must_be_file_backed(self) -> None:
+        """Gateway credentials never appear in the tracked JSON configuration."""
+        credential_headers = (
+            "Authorization",
+            "Proxy-Authorization",
+            "X-API-Key",
+            "Api-Key",
+            "X_Goog_Api_Key",
+            "Ocp-Apim-Subscription-Key",
+            "X-Access-Token",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            _write_config(path, generation=_selection("openai_compatible", "generation"))
+            _write_secret_files(root, "docker_ollama", "openai_compatible")
+            for header_name in credential_headers:
+                with self.subTest(header=header_name):
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                    payload["generation"]["headers"] = {header_name: "literal-secret"}
+                    path.write_text(json.dumps(payload), encoding="utf-8")
+                    clear_librarian_config_cache()
+                    with self.assertRaisesRegex(LibrarianConfigError, "must use header_files"):
+                        get_librarian_config(path)
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["generation"]["headers"] = {
+                "OpenAI-Organization": "reader-club",
+                "User-Agent": "Librarian/1.0",
+            }
+            payload["generation"]["header_files"] = {
+                "Authorization": "secrets/gateway-authorization.token",
+                "X-API-Key": "secrets/gateway-api-key.token",
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            (root / "secrets" / "gateway-authorization.token").write_text(
+                "Bearer local-secret\n", encoding="utf-8"
+            )
+            (root / "secrets" / "gateway-api-key.token").write_text(
+                "gateway-key\n", encoding="utf-8"
+            )
+            clear_librarian_config_cache()
+            headers = get_librarian_config(path).generation.headers
+
+        self.assertEqual(
+            headers,
+            {
+                "OpenAI-Organization": "reader-club",
+                "User-Agent": "Librarian/1.0",
+                "Authorization": "Bearer local-secret",
+                "X-API-Key": "gateway-key",
+            },
+        )
+
     def test_compose_state_and_override_are_json_derived(self) -> None:
         """Resolved ports and Docker-Ollama profile follow JSON, not shell state."""
         with tempfile.TemporaryDirectory() as directory:

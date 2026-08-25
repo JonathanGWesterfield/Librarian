@@ -34,6 +34,16 @@ _ALLOWED_ANSWER_CAPABILITIES = {"quality", "lightweight"}
 _HTTP_HEADER_NAME = frozenset(
     "!#$%&'*+.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-"
 )
+_CREDENTIAL_HEADER_COMBINATIONS = frozenset(
+    {
+        frozenset({"access", "token"}),
+        frozenset({"api", "key"}),
+        frozenset({"api", "token"}),
+        frozenset({"auth", "token"}),
+        frozenset({"client", "secret"}),
+        frozenset({"subscription", "key"}),
+    }
+)
 
 
 class LibrarianConfigError(ValueError):
@@ -491,12 +501,13 @@ def _parse_services(value: object) -> ServiceSettings:
 
 
 def _parse_headers(value: object, *, role: str) -> dict[str, str]:
+    """Parse documented, non-secret request metadata for a gateway provider."""
     if value is None:
         return {}
     headers = _require_mapping(value, f"{role}.headers")
     normalized: dict[str, str] = {}
     for name, header_value in headers.items():
-        _validate_header_name(name, f"{role}.headers")
+        _validate_header_name(name, f"{role}.headers", allow_credential=False)
         normalized[name] = _require_string(header_value, f"{role}.headers.{name}")
     return normalized
 
@@ -507,7 +518,7 @@ def _parse_header_files(value: object, *, role: str) -> dict[str, str]:
     headers = _require_mapping(value, f"{role}.header_files")
     normalized: dict[str, str] = {}
     for name, reference in headers.items():
-        _validate_header_name(name, f"{role}.header_files")
+        _validate_header_name(name, f"{role}.header_files", allow_credential=True)
         normalized[name] = _require_string(reference, f"{role}.header_files.{name}")
     return normalized
 
@@ -566,11 +577,31 @@ def _require_port(value: object, label: str) -> int:
     return value
 
 
-def _validate_header_name(name: object, label: str) -> None:
+def _validate_header_name(name: object, label: str, *, allow_credential: bool) -> None:
     if not isinstance(name, str) or not name or any(char not in _HTTP_HEADER_NAME for char in name):
         raise LibrarianConfigError(f"{label} keys must be valid HTTP header names")
-    if name.casefold() in {"authorization", "content-type", "host"}:
+    if name.casefold() in {"content-type", "host"}:
         raise LibrarianConfigError(f"{label} cannot override {name}")
+    if not allow_credential and _is_credential_header_name(name):
+        raise LibrarianConfigError(
+            f"{label}.{name} must use header_files with a file under config/secrets"
+        )
+
+
+def _is_credential_header_name(name: str) -> bool:
+    """Return whether a request header name conventionally carries a secret.
+
+    This intentionally errs on the side of protecting a credential-looking
+    header. ``headers`` exists only for non-secret metadata; custom gateway
+    credentials must be provided through ``header_files`` instead.
+    """
+    normalized = name.casefold().replace("_", "-")
+    if normalized in {"authorization", "proxy-authorization", "token"}:
+        return True
+    tokens = frozenset(token for token in normalized.split("-") if token)
+    if tokens & {"authorization", "credential", "secret", "token"}:
+        return True
+    return any(combination <= tokens for combination in _CREDENTIAL_HEADER_COMBINATIONS)
 
 
 def _validate_http_url(value: str, label: str) -> str:

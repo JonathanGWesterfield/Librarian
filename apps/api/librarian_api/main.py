@@ -169,6 +169,12 @@ class ChatSourceResponse(BaseModel):
     text: str
 
 
+class ErrorResponse(BaseModel):
+    """Intentional error payload returned for a rejected API operation."""
+
+    detail: str
+
+
 class ChatResponse(BaseModel):
     """The documented response contract for one ``POST /chat`` request."""
 
@@ -188,6 +194,15 @@ class ChatResponse(BaseModel):
     candidate_count: int = Field(ge=0)
     filters: dict[str, str]
     sources: list[ChatSourceResponse]
+
+
+_CHAT_BAD_REQUEST_RESPONSE = {
+    "model": ErrorResponse,
+    "description": (
+        "Invalid or unsupported chat provider/model configuration, missing "
+        "answer capability for an override, or a local generation failure."
+    ),
+}
 
 
 class RecommendationRequest(BaseModel):
@@ -416,6 +431,7 @@ def index_search_endpoint(request: SearchIndexRequest) -> dict[str, object]:
     "/chat",
     response_model=ChatResponse,
     response_description="Grounded answer and the local source chunks used as context.",
+    responses={400: _CHAT_BAD_REQUEST_RESPONSE},
 )
 def chat_endpoint(request: ChatRequest) -> dict[str, object]:
     try:

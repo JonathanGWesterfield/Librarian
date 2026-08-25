@@ -376,6 +376,12 @@ provider. Gateway credentials belong in ignored files below `config/secrets/`,
 referenced by `api_key_file` or `header_files`; they are never rendered into the
 generated Compose override.
 
+`headers` is only for non-secret request metadata, such as `User-Agent`,
+`OpenAI-Organization`, or `OpenAI-Project`. Literal credential-bearing headers
+(`Authorization`, API-key variants, tokens, and subscription keys) are rejected
+there and must instead be referenced through `header_files` below
+`config/secrets/`. This keeps every credential out of `librarian.json`.
+
 The Compose database default is `sqlite:////data/librarian.db`, which is the
 absolute path of its bind-mounted `data/` directory. Commands run from the host
 repository continue to use `sqlite:///data/librarian.db`.
@@ -708,9 +714,11 @@ Current default embedding configuration:
 "embedding": {"mode": "docker_ollama", "model": "all-minilm"}
 ```
 
-For the default Compose path, model availability is handled by the `ollama-init`
-service before the API or optional worker starts. See the local-development
-section above for the intentionally manual native-Ollama override.
+For the default Compose path, the launcher waits for `ollama-init` to exit with
+code zero, prints its diagnostics on failure or timeout, and verifies every
+configured Docker Ollama model with `ollama list` before starting the API or
+optional worker. See the local-development section above for the intentionally
+manual native-Ollama override.
 
 To rebuild embeddings without deleting raw book text or chunks:
 
