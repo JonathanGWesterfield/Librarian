@@ -645,7 +645,7 @@
         "tags": ["chat"],
         "operationId": "answerQuestion",
         "summary": "Answer a question from local books",
-        "description": "Retrieves relevant chunks, sends them to the configured local generator, and returns a grounded answer with source chunks.",
+        "description": "Retrieves relevant chunks, sends them to the configured generator, and returns a grounded answer with source chunks. A provider or model override must explicitly state its answer capability.",
         "requestBody": {
           "required": true,
           "content": {
@@ -663,6 +663,7 @@
                     "embedding_model": "all-minilm",
                     "generation_provider": "ollama",
                     "generation_model": "qwen2.5:1.5b",
+                    "answer_capability": "lightweight",
                     "ollama_base_url": "http://host.docker.internal:11434",
                     "book_title": "All Quiet on the Western Front",
                     "retrieval_limit": 30
@@ -673,7 +674,8 @@
                   "value": {
                     "question": "What books discuss memory?",
                     "embedding_provider": "noop",
-                    "generation_provider": "noop"
+                    "generation_provider": "noop",
+                    "answer_capability": "lightweight"
                   }
                 }
               }
@@ -2372,6 +2374,11 @@
             "type": ["string", "null"],
             "example": "qwen2.5:1.5b"
           },
+          "answer_capability": {
+            "type": ["string", "null"],
+            "enum": ["quality", "lightweight", null],
+            "description": "Required when generation_provider or generation_model changes the JSON-configured generator; otherwise the JSON generation capability applies."
+          },
           "ollama_base_url": {
             "type": ["string", "null"]
           },
@@ -2403,6 +2410,7 @@
           "embedding_model",
           "generation_provider",
           "generation_model",
+          "answer_capability",
           "retrieval_limit",
           "candidate_count",
           "filters",
@@ -2426,6 +2434,11 @@
           },
           "generation_model": {
             "type": "string"
+          },
+          "answer_capability": {
+            "type": "string",
+            "enum": ["quality", "lightweight"],
+            "description": "The capability resolved for this request from an explicit override or the JSON-configured default."
           },
           "retrieval_limit": {
             "type": "integer",

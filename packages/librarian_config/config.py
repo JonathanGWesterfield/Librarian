@@ -216,9 +216,41 @@ def resolve_generation_model(generation_model: str | None = None) -> str:
     return generation_model or get_librarian_config().generation.model
 
 
-def resolve_generation_answer_capability() -> str:
-    """Return the configured generation capability without model-name guessing."""
-    return get_librarian_config().generation.answer_capability or "quality"
+def resolve_generation_answer_capability(
+    *,
+    answer_capability: str | None = None,
+    generation_provider: str | None = None,
+    generation_model: str | None = None,
+) -> str:
+    """Resolve a chat capability without inferring one from a model name.
+
+    The JSON generation setting is the default only while a request keeps that
+    provider and model.  A request that selects a different generator must
+    declare its capability explicitly; otherwise a quality model could silently
+    inherit the configured lightweight behavior (or vice versa).
+    """
+    if answer_capability is not None:
+        return _parse_answer_capability_value(
+            answer_capability, field_name="answer_capability"
+        )
+
+    configured = get_librarian_config().generation
+    provider_changed = (
+        generation_provider is not None
+        and generation_provider.strip().casefold()
+        != configured.provider.strip().casefold()
+    )
+    model_changed = (
+        generation_model is not None
+        and generation_model.strip() != configured.model.strip()
+    )
+    if provider_changed or model_changed:
+        raise LibrarianConfigError(
+            "generation_provider or generation_model overrides require "
+            "answer_capability (quality or lightweight)"
+        )
+
+    return configured.answer_capability or "quality"
 
 
 def resolve_embedding_ollama_base_url(ollama_base_url: str | None = None) -> str:

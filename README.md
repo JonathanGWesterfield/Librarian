@@ -557,6 +557,7 @@ python3 scripts/chat.py \
   --embedding-model all-minilm \
   --generation-provider ollama \
   --generation-model qwen2.5:1.5b \
+  --answer-capability lightweight \
   --retrieval-limit 30 \
   "How brutal and terrible is war?"
 ```
@@ -658,7 +659,8 @@ POST /search/hybrid        body: query, opensearch_url, index_name,
                             ollama_base_url, limit, genre, tag
 POST /chat                 body: question, database_url, embedding_provider,
                             embedding_model, generation_provider,
-                            generation_model, ollama_base_url, retrieval_limit
+                            generation_model, answer_capability, ollama_base_url,
+                            retrieval_limit
 POST /books/{book_id}/summary
                            body: database_url, generation_provider,
                             generation_model, ollama_base_url, detail,

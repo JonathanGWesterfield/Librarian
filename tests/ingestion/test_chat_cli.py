@@ -55,6 +55,38 @@ class ChatCliTests(unittest.TestCase):
         self.assertIn("[S1]", rendered)
         self.assertIn("All Quiet on the Western Front", rendered)
 
+    def test_chat_cli_forwards_an_explicit_generation_capability(self) -> None:
+        """Verify the CLI can select a one-off model without model-name guessing."""
+        fake_response = ChatResponse(
+            question="What does the author say?",
+            answer="A grounded answer.",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="ollama",
+            generation_model="qwen2.5:7b",
+            retrieval_limit=30,
+            candidate_count=1,
+            filters={},
+            sources=[],
+            answer_capability="quality",
+        )
+
+        with patch("chat.answer_question", return_value=fake_response) as answer:
+            exit_code = main(
+                [
+                    "--generation-provider",
+                    "ollama",
+                    "--generation-model",
+                    "qwen2.5:7b",
+                    "--answer-capability",
+                    "quality",
+                    "What does the author say?",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(answer.call_args.args[0].answer_capability, "quality")
+
 
 if __name__ == "__main__":
     unittest.main()

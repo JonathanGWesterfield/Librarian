@@ -386,6 +386,7 @@ class IngestionApiTests(unittest.TestCase):
                     "embedding_model": "all-minilm",
                     "generation_provider": "ollama",
                     "generation_model": "llama3.2:3b",
+                    "answer_capability": "quality",
                     "retrieval_limit": 20,
                     "book_title": "All Quiet",
                 },
@@ -396,8 +397,79 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["answer"], fake_response.answer)
         self.assertEqual(payload["generation_model"], "llama3.2:3b")
+        self.assertEqual(payload["answer_capability"], "quality")
         self.assertEqual(payload["filters"], {"book_title": "All Quiet"})
         self.assertEqual(payload["sources"][0]["source_id"], "S1")
+
+    def test_chat_generator_override_requires_capability_and_keeps_json_default(self) -> None:
+        """Provider/model overrides must state their product capability explicitly."""
+        override_response = ChatResponse(
+            question="What does the author say?",
+            answer="A grounded answer.",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="ollama",
+            generation_model="qwen2.5:7b",
+            retrieval_limit=3,
+            candidate_count=1,
+            filters={},
+            sources=[],
+            answer_capability="quality",
+        )
+        with patch(
+            "librarian_api.main.answer_question", return_value=override_response
+        ) as answer_question:
+            overridden = self.client.post(
+                "/chat",
+                json={
+                    "question": override_response.question,
+                    "generation_provider": "ollama",
+                    "generation_model": "qwen2.5:7b",
+                    "answer_capability": "quality",
+                },
+            )
+            missing_capability = self.client.post(
+                "/chat",
+                json={
+                    "question": override_response.question,
+                    "generation_provider": "ollama",
+                    "generation_model": "qwen2.5:7b",
+                },
+            )
+
+        self.assertEqual(overridden.status_code, 200)
+        self.assertEqual(overridden.json()["answer_capability"], "quality")
+        options = answer_question.call_args.args[0]
+        self.assertEqual(options.generation_provider, "ollama")
+        self.assertEqual(options.generation_model, "qwen2.5:7b")
+        self.assertEqual(options.answer_capability, "quality")
+        self.assertEqual(missing_capability.status_code, 400)
+        self.assertIn("overrides require answer_capability", missing_capability.text)
+        self.assertEqual(answer_question.call_count, 1)
+
+        default_response = ChatResponse(
+            question="What does the author say?",
+            answer="A configured answer.",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="ollama",
+            generation_model="qwen2.5:1.5b",
+            retrieval_limit=3,
+            candidate_count=1,
+            filters={},
+            sources=[],
+            answer_capability="lightweight",
+        )
+        with patch(
+            "librarian_api.main.answer_question", return_value=default_response
+        ) as answer_question:
+            defaulted = self.client.post(
+                "/chat", json={"question": default_response.question}
+            )
+
+        self.assertEqual(defaulted.status_code, 200)
+        self.assertEqual(defaulted.json()["answer_capability"], "lightweight")
+        self.assertEqual(answer_question.call_args.args[0].answer_capability, "lightweight")
 
     def test_recommendations_endpoint_returns_book_level_recommendations(self) -> None:
         """Verify desktop clients can ask for book-level recommendations.

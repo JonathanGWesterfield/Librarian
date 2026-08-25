@@ -56,6 +56,7 @@ class ChatTests(unittest.TestCase):
                         embedding_model="all-minilm",
                         generation_provider="ollama",
                         generation_model="llama3.2:3b",
+                        answer_capability="quality",
                         retrieval_limit=20,
                         author="Erich Maria Remarque",
                     )
@@ -63,6 +64,7 @@ class ChatTests(unittest.TestCase):
 
         self.assertEqual(response.question, "How brutal is war?")
         self.assertEqual(response.answer, "War is described as terrifying. [S1]")
+        self.assertEqual(response.answer_capability, "quality")
         self.assertEqual(response.filters, {"author": "Erich Maria Remarque"})
         self.assertEqual(response.candidate_count, 2)
         self.assertEqual(response.sources[0].source_id, "S1")

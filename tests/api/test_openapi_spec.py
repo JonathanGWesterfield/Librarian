@@ -40,6 +40,42 @@ class StaticOpenApiSpecTests(unittest.TestCase):
 
         self.assertEqual(runtime_routes, documented_routes)
 
+    def test_chat_capability_is_documented_in_static_and_live_openapi(self) -> None:
+        """Clients can discover the explicit override rule without source access."""
+        spec = json.loads((REPO_ROOT / "docs" / "openapi.json").read_text())
+        static_request = spec["components"]["schemas"]["ChatRequest"]
+        static_response = spec["components"]["schemas"]["ChatResponse"]
+
+        self.assertEqual(
+            static_request["properties"]["answer_capability"]["enum"],
+            ["quality", "lightweight", None],
+        )
+        self.assertIn("answer_capability", static_response["required"])
+        self.assertEqual(
+            static_response["properties"]["answer_capability"]["enum"],
+            ["quality", "lightweight"],
+        )
+
+        live = app.openapi()
+        request_schema = live["components"]["schemas"]["ChatRequest"]
+        response_schema = live["components"]["schemas"]["ChatResponse"]
+        self.assertIn("answer_capability", request_schema["properties"])
+        self.assertIn("answer_capability", response_schema["required"])
+
+    def test_openapi_does_not_advertise_unimplemented_chat_streaming(self) -> None:
+        """Keep the client contract aligned with the synchronous chat route.
+
+        The web UI receives one complete JSON response from ``POST /chat``.
+        Do not expose an SSE route in documentation before that route exists.
+        """
+        static_spec = json.loads((REPO_ROOT / "docs" / "openapi.json").read_text())
+        live_spec = app.openapi()
+
+        for spec in (static_spec, live_spec):
+            self.assertIn("/chat", spec["paths"])
+            self.assertNotIn("/chat/stream", spec["paths"])
+            self.assertNotIn("text/event-stream", json.dumps(spec))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,7 @@ from librarian_chat.generation import (
     ChatMessage,
     create_configured_generator,
 )
+from librarian_config.config import resolve_generation_answer_capability
 from librarian_search.search import SearchOptions, SearchResult, search_chunks
 
 
@@ -17,6 +18,7 @@ class ChatOptions:
     embedding_model: str | None = None
     generation_provider: str | None = None
     generation_model: str | None = None
+    answer_capability: str | None = None
     ollama_base_url: str | None = None
     retrieval_limit: int = 30
     book_id: str | None = None
@@ -52,6 +54,7 @@ class ChatResponse:
     candidate_count: int
     filters: dict[str, str]
     sources: list[ChatSource]
+    answer_capability: str = "quality"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -64,6 +67,7 @@ class ChatResponse:
             "retrieval_limit": self.retrieval_limit,
             "candidate_count": self.candidate_count,
             "filters": self.filters,
+            "answer_capability": self.answer_capability,
             "sources": [source.to_dict() for source in self.sources],
         }
 
@@ -72,6 +76,12 @@ def answer_question(options: ChatOptions) -> ChatResponse:
     question = options.question.strip()
     if not question:
         raise ValueError("question must not be empty")
+
+    answer_capability = resolve_generation_answer_capability(
+        answer_capability=options.answer_capability,
+        generation_provider=options.generation_provider,
+        generation_model=options.generation_model,
+    )
 
     retrieval_limit = max(1, options.retrieval_limit)
     search_response = search_chunks(
@@ -107,6 +117,7 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         candidate_count=search_response.candidate_count,
         filters=search_response.filters,
         sources=sources,
+        answer_capability=answer_capability,
     )
 
 

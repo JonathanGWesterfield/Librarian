@@ -82,6 +82,35 @@ class LibrarianConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(LibrarianConfigError, "quality or lightweight"):
                 get_librarian_config(path)
 
+    def test_request_generator_override_requires_an_explicit_capability(self) -> None:
+        """A request-selected model cannot silently inherit the JSON default."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "librarian.json"
+            _write_config(path)
+            with patch("librarian_config.config.default_config_path", return_value=path):
+                self.assertEqual(resolve_generation_answer_capability(), "lightweight")
+                with self.assertRaisesRegex(
+                    LibrarianConfigError,
+                    "overrides require answer_capability",
+                ):
+                    resolve_generation_answer_capability(
+                        generation_provider="ollama",
+                        generation_model="qwen2.5:7b",
+                    )
+                self.assertEqual(
+                    resolve_generation_answer_capability(
+                        answer_capability="quality",
+                        generation_provider="ollama",
+                        generation_model="qwen2.5:7b",
+                    ),
+                    "quality",
+                )
+
+            self.assertEqual(
+                get_librarian_config(path).generation.answer_capability,
+                "lightweight",
+            )
+
     def test_supported_provider_modes_are_independent(self) -> None:
         """Embedding and generation transports are independently selected."""
         modes = ("docker_ollama", "native_ollama", "openai_compatible")

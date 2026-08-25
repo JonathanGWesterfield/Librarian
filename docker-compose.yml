@@ -103,10 +103,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      # Kept as localhost for compatibility with the currently shipped web
-      # image. The IPv4-only readiness correction is intentionally a focused
-      # follow-up to this foundation commit.
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 30
