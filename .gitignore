@@ -14,6 +14,9 @@ node_modules/
 config/librarian.json
 config/secrets/
 .runtime/
+.env
+.env.*
+!.env.example
 
 # Local library/runtime state
 Epub-Books/

@@ -58,9 +58,9 @@ if ($WithWorkers) { $composePrefix += @("--profile", "workers") }
 function Show-OllamaInitDiagnostics {
     param([string[]]$ComposePrefix)
 
-    Write-Error "[librarian] ollama-init did not complete successfully. Current service state:"
+    Write-Host "[librarian] ollama-init did not complete successfully. Current service state:"
     & docker @ComposePrefix ps --all ollama-init
-    Write-Error "[librarian] ollama-init logs (last 100 lines):"
+    Write-Host "[librarian] ollama-init logs (last 100 lines):"
     & docker @ComposePrefix logs --tail 100 ollama-init
 }
 
@@ -84,7 +84,7 @@ function Wait-OllamaInit {
                 $exitCode = if ($parts.Count -gt 1) { $parts[1] } else { "unknown" }
                 if ($state -in @("exited", "dead")) {
                     if ($exitCode -eq "0") { return }
-                    Write-Error "[librarian] ollama-init exited with code $exitCode."
+                    Write-Host "[librarian] ollama-init exited with code $exitCode."
                     Show-OllamaInitDiagnostics -ComposePrefix $ComposePrefix
                     throw "[librarian] Docker Ollama initialization failed."
                 }
@@ -93,7 +93,7 @@ function Wait-OllamaInit {
         Start-Sleep -Seconds 2
     }
 
-    Write-Error "[librarian] Timed out after $timeoutSeconds seconds waiting for ollama-init to exit successfully."
+    Write-Host "[librarian] Timed out after $timeoutSeconds seconds waiting for ollama-init to exit successfully."
     Show-OllamaInitDiagnostics -ComposePrefix $ComposePrefix
     throw "[librarian] Docker Ollama initialization timed out."
 }
@@ -119,9 +119,9 @@ function Confirm-DockerOllamaModels {
         })
     })
     if ($missing.Count -gt 0) {
-        Write-Error "[librarian] Configured Docker Ollama models are unavailable after initialization: $($missing -join ', ')"
-        Write-Error "[librarian] Docker Ollama models currently available:"
-        $modelList | Write-Error
+        Write-Host "[librarian] Configured Docker Ollama models are unavailable after initialization: $($missing -join ', ')"
+        Write-Host "[librarian] Docker Ollama models currently available:"
+        $modelList | ForEach-Object { Write-Host $_ }
         throw "[librarian] Docker Ollama model verification failed."
     }
 }
