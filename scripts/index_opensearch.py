@@ -40,13 +40,6 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import (  # noqa: E402
-    DATABASE_URL_ENV,
-    EMBEDDING_MODEL_ENV,
-    EMBEDDING_PROVIDER_ENV,
-    OPENSEARCH_INDEX_ENV,
-    OPENSEARCH_URL_ENV,
-)
 from librarian_logging import configure_cli_logging, emit_json  # noqa: E402
 from librarian_search.opensearch import (  # noqa: E402
     OpenSearchError,
@@ -63,25 +56,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help=f"Override the local database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     parser.add_argument(
         "--opensearch-url",
-        help=f"Override the OpenSearch URL instead of {OPENSEARCH_URL_ENV}.",
+        help="Override the OpenSearch URL in config/librarian.json.",
     )
     parser.add_argument(
         "--index-name",
-        help=f"Override the OpenSearch index instead of {OPENSEARCH_INDEX_ENV}.",
+        help="Override the OpenSearch index in config/librarian.json.",
     )
     parser.add_argument(
         "--embedding-provider",
-        default="ollama",
-        help=f"Embedding provider to index instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     parser.add_argument(
         "--embedding-model",
-        default="all-minilm",
-        help=f"Embedding model to index instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     parser.add_argument(
         "--batch-size",

@@ -47,12 +47,6 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import (
-    DATABASE_URL_ENV,
-    EMBEDDING_MODEL_ENV,
-    EMBEDDING_PROVIDER_ENV,
-    OLLAMA_BASE_URL_ENV,
-)
 from librarian_ingestion.embedding_ops import (
     RebuildEmbeddingsOptions,
     rebuild_embeddings,
@@ -68,20 +62,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help=f"Override the ingestion database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     parser.add_argument(
         "--embedding-provider",
         choices=["noop", "ollama"],
-        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     parser.add_argument(
         "--embedding-model",
-        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
     parser.add_argument(
         "--batch-size",

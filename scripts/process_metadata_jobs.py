@@ -54,7 +54,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import DATABASE_URL_ENV, resolve_database_url
+from librarian_config.config import resolve_database_url
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_metadata.jobs import (
     METADATA_JOB_TYPE_GENRES,
@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help=f"Override the local database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     parser.add_argument(
         "--limit",

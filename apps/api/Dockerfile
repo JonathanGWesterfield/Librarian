@@ -1,3 +1,15 @@
+FROM python:3.12-slim AS config-resolver
+
+WORKDIR /app
+
+COPY scripts/resolve_provider_config.py scripts/
+COPY packages/librarian_config packages/librarian_config
+
+ENV PYTHONPATH=/app/packages
+
+ENTRYPOINT ["python", "scripts/resolve_provider_config.py"]
+
+
 FROM python:3.12-slim AS runtime
 
 WORKDIR /app

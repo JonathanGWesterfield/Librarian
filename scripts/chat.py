@@ -50,14 +50,6 @@ if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatOptions, answer_question
-from librarian_config.config import (
-    DATABASE_URL_ENV,
-    EMBEDDING_MODEL_ENV,
-    EMBEDDING_PROVIDER_ENV,
-    GENERATION_MODEL_ENV,
-    GENERATION_PROVIDER_ENV,
-    OLLAMA_BASE_URL_ENV,
-)
 from librarian_logging import configure_cli_logging, emit_json
 
 logger = logging.getLogger(__name__)
@@ -68,29 +60,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("question", nargs="*", help="Question to ask.")
     parser.add_argument(
         "--database-url",
-        help=f"Override the local database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     parser.add_argument(
         "--embedding-provider",
         choices=["noop", "ollama"],
-        help=f"Embedding provider override instead of {EMBEDDING_PROVIDER_ENV}.",
+        help="Override the embedding provider in config/librarian.json.",
     )
     parser.add_argument(
         "--embedding-model",
-        help=f"Embedding model override instead of {EMBEDDING_MODEL_ENV}.",
+        help="Override the embedding model in config/librarian.json.",
     )
     parser.add_argument(
         "--generation-provider",
-        choices=["noop", "ollama", "codex"],
-        help=f"Generation provider override instead of {GENERATION_PROVIDER_ENV}.",
+        choices=["noop", "ollama", "codex", "openai_compatible"],
+        help="Override the generation provider in config/librarian.json.",
     )
     parser.add_argument(
         "--generation-model",
-        help=f"Generation model override instead of {GENERATION_MODEL_ENV}.",
+        help="Override the generation model in config/librarian.json.",
     )
     parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
     parser.add_argument(
         "--retrieval-limit",

@@ -61,12 +61,6 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import (
-    DATABASE_URL_ENV,
-    GENERATION_MODEL_ENV,
-    GENERATION_PROVIDER_ENV,
-    OLLAMA_BASE_URL_ENV,
-)
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_metadata.genres import (
     DeleteBookGenresOptions,
@@ -86,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help=f"Override the local database instead of {DATABASE_URL_ENV}.",
+        help="Override the database configured in config/librarian.json.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -226,16 +220,16 @@ def _add_book_filters(parser: argparse.ArgumentParser) -> None:
 def _add_generation_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--generation-provider",
-        choices=["noop", "ollama", "codex"],
-        help=f"Generation provider override instead of {GENERATION_PROVIDER_ENV}.",
+        choices=["noop", "ollama", "codex", "openai_compatible"],
+        help="Override the generation provider in config/librarian.json.",
     )
     parser.add_argument(
         "--generation-model",
-        help=f"Generation model override instead of {GENERATION_MODEL_ENV}.",
+        help="Override the generation model in config/librarian.json.",
     )
     parser.add_argument(
         "--ollama-base-url",
-        help=f"Ollama base URL override instead of {OLLAMA_BASE_URL_ENV}.",
+        help="Override the configured Ollama endpoint for this run.",
     )
 
 

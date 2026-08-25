@@ -45,13 +45,13 @@ Development/operator scripts:
 Example local usage:
 
 ```bash
-LIBRARIAN_BOOKS_DIR=./Epub-Books python scripts/play/ingest_epubs.py
+python scripts/play/ingest_epubs.py --books-dir ./Epub-Books
 ```
 
 Example Docker-oriented usage:
 
 ```bash
-LIBRARIAN_BOOKS_DIR=/books python scripts/play/ingest_epubs.py
+python scripts/play/ingest_epubs.py --books-dir /books
 ```
 
 The FastAPI endpoints and CLI wrappers delegate to the same package services,
@@ -75,7 +75,7 @@ load settings
 
 ## Step 1: File Scanning
 
-The scanner should read `LIBRARIAN_BOOKS_DIR`, verify that the directory exists,
+The scanner should read `paths.books_dir` from JSON, verify that the directory exists,
 and find EPUB files recursively or directly within the configured folder.
 
 Initial behavior:
@@ -247,9 +247,11 @@ local model cache by the user or by a future setup helper.
 Current provider settings:
 
 ```bash
-LIBRARIAN_EMBEDDING_PROVIDER=ollama
-LIBRARIAN_EMBEDDING_MODEL=all-minilm
-LIBRARIAN_OLLAMA_BASE_URL=http://localhost:11434
+"embedding": {
+  "mode": "native_ollama",
+  "model": "all-minilm",
+  "base_url": "http://localhost:11434"
+}
 ```
 
 Ollama embedding generation should call `POST /api/embed` with `model` and
@@ -306,7 +308,7 @@ Database totals: 54 books, 4120 chunks, 4120 embeddings
 - `scripts/rebuild_embeddings.py`
 - Chunking utilities in `packages`
 - SQLite persistence under `data/librarian.db`
-- Config-based `LIBRARIAN_BOOKS_DIR` support
+- JSON-configured `paths.books_dir` support
 - File hashing and unchanged-file skipping
 - Summary output
 - Local Ollama embedding provider scaffolding

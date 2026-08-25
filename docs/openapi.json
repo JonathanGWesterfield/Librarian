@@ -1115,7 +1115,7 @@
           "type": "string",
           "example": "sqlite:///data/librarian.db"
         },
-        "description": "Storage URL to inspect or operate on. Defaults to LIBRARIAN_DATABASE_URL."
+        "description": "Storage URL to inspect or operate on. Defaults to paths.database_url in config/librarian.json."
       }
     },
     "responses": {
@@ -1181,11 +1181,11 @@
         "properties": {
           "books_dir": {
             "type": ["string", "null"],
-            "description": "EPUB source directory. Defaults to LIBRARIAN_BOOKS_DIR."
+            "description": "EPUB source directory. Defaults to paths.books_dir in config/librarian.json."
           },
           "database_url": {
             "type": ["string", "null"],
-            "description": "Storage URL. Defaults to LIBRARIAN_DATABASE_URL.",
+            "description": "Storage URL. Defaults to paths.database_url in config/librarian.json.",
             "example": "sqlite:///data/librarian.db"
           },
           "force": {

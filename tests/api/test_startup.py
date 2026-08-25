@@ -19,6 +19,7 @@ from librarian_storage.storage import (
 try:
     from fastapi.testclient import TestClient
     import librarian_api.main as main_module
+    from librarian_api.config import Settings
 except (ModuleNotFoundError, RuntimeError) as error:
     TestClient = None
     main_module = None
@@ -40,12 +41,20 @@ class ApiStartupMigrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def _settings(self) -> Settings:
+        return Settings(
+            database_url=self.database_url,
+            books_dir="/books",
+            host_books_dir="./tests/fixtures/epubs",
+            log_file=str(Path(self.temp_dir.name) / "librarian.log"),
+        )
+
     def test_lifespan_migrates_compatible_database_and_closes_startup_store(
         self,
     ) -> None:
         startup_store = SQLiteIngestionStore(self.database_path)
         with (
-            patch.object(main_module.settings, "database_url", self.database_url),
+            patch.object(main_module, "get_settings", return_value=self._settings()),
             patch.object(
                 main_module,
                 "create_ingestion_store",
@@ -97,9 +106,7 @@ class ApiStartupMigrationTests(unittest.TestCase):
             )
         before = self._snapshot()
 
-        with patch.object(
-            main_module.settings, "database_url", self.database_url
-        ):
+        with patch.object(main_module, "get_settings", return_value=self._settings()):
             with self.assertRaisesRegex(SchemaMigrationError, "newer or unknown"):
                 with TestClient(main_module.app):
                     pass
@@ -111,7 +118,7 @@ class ApiStartupMigrationTests(unittest.TestCase):
         failing_store.initialize.side_effect = RuntimeError("startup failed")
 
         with (
-            patch.object(main_module.settings, "database_url", self.database_url),
+            patch.object(main_module, "get_settings", return_value=self._settings()),
             patch.object(
                 main_module,
                 "create_ingestion_store",

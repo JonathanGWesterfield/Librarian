@@ -5,7 +5,6 @@ description = "API surface for the local-first Librarian app."
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",
-  "pydantic-settings>=2.6.0",
   "uvicorn[standard]>=0.32.0",
   "librarian-packages",
 ]

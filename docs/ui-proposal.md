@@ -78,7 +78,7 @@ The UI should call only a small public contract:
 - `GET /books/{book_id}/genres` and the existing summary endpoint data for book
   detail.
 
-Add an environment variable such as `VITE_API_BASE_URL`; the production build
+Use a same-origin `/api` route; the production build
 must never contain a local URL. Add CORS in FastAPI for the Pages production
 domain and local Vite development origin.
 

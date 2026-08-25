@@ -1,36 +1,36 @@
-x-librarian-environment: &librarian_environment
-  LIBRARIAN_DATABASE_URL: ${LIBRARIAN_DATABASE_URL:-sqlite:////data/librarian.db}
-  LIBRARIAN_LOG_FILE: ${LIBRARIAN_LOG_FILE:-/data/librarian.log}
-  LIBRARIAN_BOOKS_DIR: ${LIBRARIAN_BOOKS_DIR:-/books}
-  LIBRARIAN_HOST_BOOKS_DIR: ${LIBRARIAN_HOST_BOOKS_DIR:-./Epub-Books}
-  LIBRARIAN_CODEX_BROKER_URL: ${LIBRARIAN_CODEX_BROKER_URL:-http://host.docker.internal:8787}
-  LIBRARIAN_ENABLE_CODEX_BROKER: ${LIBRARIAN_ENABLE_CODEX_BROKER:-false}
-  LIBRARIAN_EMBEDDING_PROVIDER: ${LIBRARIAN_EMBEDDING_PROVIDER:-ollama}
-  LIBRARIAN_EMBEDDING_MODEL: ${LIBRARIAN_EMBEDDING_MODEL:-all-minilm}
-  LIBRARIAN_GENERATION_PROVIDER: ${LIBRARIAN_GENERATION_PROVIDER:-ollama}
-  LIBRARIAN_GENERATION_MODEL: ${LIBRARIAN_GENERATION_MODEL:-qwen2.5:1.5b}
-  LIBRARIAN_OLLAMA_BASE_URL: ${LIBRARIAN_OLLAMA_BASE_URL:-http://ollama:11434}
-  LIBRARIAN_OPENSEARCH_URL: ${LIBRARIAN_OPENSEARCH_URL:-http://opensearch:9200}
-  LIBRARIAN_OPENSEARCH_INDEX: ${LIBRARIAN_OPENSEARCH_INDEX:-librarian-chunks}
-
 services:
+  # This one-shot service is the required bridge from the user-owned JSON file
+  # to non-secret Docker service wiring. Run scripts/start_local.sh or
+  # scripts/start_local.ps1; direct `docker compose up` intentionally fails at
+  # API startup when config/librarian.json has not been created.
+  config-resolver:
+    profiles:
+      - config-resolver
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: config-resolver
+    volumes:
+      - ./config:/config:ro
+      - ./.runtime:/output
+    command:
+      - --config
+      - /config/librarian.json
+      - --compose-output
+      - /output/librarian.compose.json
+      - --state-output
+      - /output/librarian.state.json
+
   opensearch:
     image: opensearchproject/opensearch:2.15.0
     environment:
       discovery.type: single-node
       DISABLE_SECURITY_PLUGIN: "true"
-      # Allow the Docker VM to reclaim inactive pages on the constrained default
-      # local stack instead of pinning OpenSearch's entire native footprint.
       bootstrap.memory_lock: "false"
-      # Keep the default stack within Docker Desktop's common 2 GB VM budget;
-      # override this when the local Docker VM has more memory available.
-      OPENSEARCH_JAVA_OPTS: ${LIBRARIAN_OPENSEARCH_JAVA_OPTS:--Xms192m -Xmx192m}
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
-    ports:
-      - "9200:9200"
     volumes:
       - opensearch-data:/usr/share/opensearch/data
     healthcheck:
@@ -40,9 +40,9 @@ services:
       retries: 30
 
   ollama:
+    profiles:
+      - docker-ollama
     image: ollama/ollama:latest
-    environment:
-      OLLAMA_HOST: 0.0.0.0:11434
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:
@@ -52,27 +52,27 @@ services:
       retries: 60
 
   ollama-init:
+    profiles:
+      - docker-ollama
     image: ollama/ollama:latest
     depends_on:
       ollama:
         condition: service_healthy
     environment:
       OLLAMA_HOST: ollama:11434
-      LIBRARIAN_EMBEDDING_MODEL: ${LIBRARIAN_EMBEDDING_MODEL:-all-minilm}
-      LIBRARIAN_GENERATION_MODEL: ${LIBRARIAN_GENERATION_MODEL:-qwen2.5:1.5b}
+      OLLAMA_INIT_MODELS: ""
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -eu
-        pull_model() {
-          if [ "$$1" != "noop" ]; then
-            ollama pull "$$1"
+        old_ifs="$$IFS"
+        IFS=,
+        for model in $$OLLAMA_INIT_MODELS; do
+          if [ -n "$$model" ]; then
+            ollama pull "$$model"
           fi
-        }
-        pull_model "$$LIBRARIAN_EMBEDDING_MODEL"
-        if [ "$$LIBRARIAN_GENERATION_MODEL" != "$$LIBRARIAN_EMBEDDING_MODEL" ]; then
-          pull_model "$$LIBRARIAN_GENERATION_MODEL"
-        fi
+        done
+        IFS="$$old_ifs"
     restart: "no"
 
   api:
@@ -80,22 +80,33 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
       target: runtime
-    environment: *librarian_environment
-    ports:
-      - "8000:8000"
     volumes:
-      - ${LIBRARIAN_HOST_BOOKS_DIR:-./Epub-Books}:/books:ro
+      - ./config:/config:ro
       - ./data:/data
-    # Enables the explicitly documented native-Ollama developer override on Linux.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       opensearch:
         condition: service_healthy
-      ollama-init:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://localhost:8000/health', timeout=2).read()\""]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runtime
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # Kept as localhost for compatibility with the currently shipped web
+      # image. The IPv4-only readiness correction is intentionally a focused
+      # follow-up to this foundation commit.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -107,7 +118,6 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
       target: runtime
-    environment: *librarian_environment
     command:
       - python
       - scripts/process_summary_jobs.py
@@ -117,15 +127,13 @@ services:
       - --poll-interval-seconds
       - "10"
     volumes:
+      - ./config:/config:ro
       - ./data:/data
-    # Enables the explicitly documented native-Ollama developer override on Linux.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       opensearch:
         condition: service_healthy
-      ollama-init:
-        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

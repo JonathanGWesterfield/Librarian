@@ -133,7 +133,9 @@ export type SearchIndexResponse = {
 // within its context window while still providing multiple source passages.
 export const UI_CHAT_RETRIEVAL_LIMIT = 5;
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+// The browser always uses the public same-origin API contract. During local
+// development Vite routes this path to services.api_port from librarian.json.
+const apiBaseUrl = "/api";
 
 export async function getBooks(): Promise<LibraryBook[]> {
   return request<LibraryBook[]>("/books");
