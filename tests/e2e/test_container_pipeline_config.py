@@ -55,6 +55,21 @@ class ContainerPipelineConfigTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8080/", web_service)
         self.assertNotIn("http://localhost:8080/", web_service)
 
+    def test_local_launchers_wait_for_one_shot_ollama_and_verify_models(self) -> None:
+        """Launchers must not mistake creation of ollama-init for successful pulls."""
+        bash = (REPO_ROOT / "scripts" / "start_local.sh").read_text(encoding="utf-8")
+        powershell = (REPO_ROOT / "scripts" / "start_local.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        for launcher in (bash, powershell):
+            self.assertIn("ps --all --quiet ollama-init", launcher)
+            self.assertIn("docker inspect", launcher)
+            self.assertIn("OLLAMA_INIT_MODELS", launcher)
+            self.assertIn("ollama list", launcher)
+            self.assertIn("Timed out", launcher)
+            self.assertNotIn("wait ollama-init", launcher)
+
     def test_verification_runner_waits_for_dependencies_then_runs_verifier(self) -> None:
         """Verify a successful ollama-init exit cannot abort the evaluator."""
         runner = (REPO_ROOT / "scripts/run_compose_verification.sh").read_text(

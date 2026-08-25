@@ -80,6 +80,86 @@ read_state_value() {
   ' .runtime/librarian.state.json
 }
 
+read_docker_ollama_models() {
+  awk -F '"' '
+    /"OLLAMA_INIT_MODELS"[[:space:]]*:/ {
+      print $4
+      exit
+    }
+  ' .runtime/librarian.compose.json
+}
+
+show_ollama_init_diagnostics() {
+  printf '%s\n' '[librarian] ollama-init did not complete successfully. Current service state:' >&2
+  docker "${compose_args[@]}" ps --all ollama-init >&2 || true
+  printf '%s\n' '[librarian] ollama-init logs (last 100 lines):' >&2
+  docker "${compose_args[@]}" logs --tail 100 ollama-init >&2 || true
+}
+
+wait_for_ollama_init() {
+  local timeout_seconds=900
+  local poll_seconds=2
+  local deadline=$((SECONDS + timeout_seconds))
+  local container_id
+  local state
+  local exit_code
+  local inspection
+
+  while (( SECONDS < deadline )); do
+    container_id="$(docker "${compose_args[@]}" ps --all --quiet ollama-init | head -n 1)"
+    if [[ -n "$container_id" ]]; then
+      inspection="$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$container_id" 2>/dev/null || true)"
+      read -r state exit_code <<<"$inspection"
+      if [[ "$state" == "exited" || "$state" == "dead" ]]; then
+        if [[ "$exit_code" == "0" ]]; then
+          return 0
+        fi
+        printf '[librarian] ollama-init exited with code %s.\n' "${exit_code:-unknown}" >&2
+        show_ollama_init_diagnostics
+        return 1
+      fi
+    fi
+    sleep "$poll_seconds"
+  done
+
+  printf '[librarian] Timed out after %ss waiting for ollama-init to exit successfully.\n' "$timeout_seconds" >&2
+  show_ollama_init_diagnostics
+  return 1
+}
+
+verify_docker_ollama_models() {
+  local configured_models
+  local model
+  local model_list
+  local missing=0
+
+  configured_models="$(read_docker_ollama_models)"
+  [[ -z "$configured_models" ]] && return 0
+  if ! model_list="$(docker "${compose_args[@]}" exec -T ollama ollama list 2>&1)"; then
+    printf '%s\n' '[librarian] Could not list models from the configured Docker Ollama service.' >&2
+    printf '%s\n' "$model_list" >&2
+    return 1
+  fi
+  IFS=',' read -r -a models <<<"$configured_models"
+  for model in "${models[@]}"; do
+    [[ -z "$model" ]] && continue
+    if ! awk -v expected="$model" '
+      NR > 1 && ($1 == expected || (expected !~ /:/ && $1 == expected ":latest")) {
+        found = 1
+      }
+      END { exit !found }
+    ' <<<"$model_list"; then
+      printf '[librarian] Configured Docker Ollama model is unavailable after initialization: %s\n' "$model" >&2
+      missing=1
+    fi
+  done
+  if (( missing )); then
+    printf '%s\n' '[librarian] Docker Ollama models currently available:' >&2
+    printf '%s\n' "$model_list" >&2
+    return 1
+  fi
+}
+
 docker_ollama_enabled="$(read_state_value docker_ollama_enabled)"
 api_port="$(read_state_value api_port)"
 web_port="$(read_state_value web_port)"
@@ -109,7 +189,8 @@ if [[ "$docker_ollama_enabled" == "true" ]]; then
   [[ "$BUILD" == "true" ]] && initializer_start+=(--build)
   initializer_start+=(-d ollama-init)
   docker "${compose_args[@]}" "${initializer_start[@]}"
-  docker "${compose_args[@]}" wait ollama-init
+  wait_for_ollama_init
+  verify_docker_ollama_models
 fi
 
 start_args=(up)

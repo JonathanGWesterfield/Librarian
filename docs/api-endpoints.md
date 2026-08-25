@@ -405,6 +405,10 @@ JSON default in `answer_capability`. An override without `answer_capability`
 returns `400`. The response also includes the resolved provider/model, answer,
 and the source chunks used as local evidence.
 
+`400` is also the intentional response for an unsupported provider/model
+selection, invalid configured generation input, or a local generation failure.
+Malformed request fields remain FastAPI validation errors (`422`).
+
 ## Recommendations
 
 ### `POST /recommendations`
