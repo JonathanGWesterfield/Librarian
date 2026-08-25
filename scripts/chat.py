@@ -17,6 +17,7 @@ Ask one question and print a human-readable answer with sources:
       --embedding-provider ollama \\
       --embedding-model all-minilm \\
       --generation-provider codex \\
+      --answer-capability quality \\
       "How brutal and terrible is war?"
 
 Restrict retrieval to one book title:
@@ -29,7 +30,8 @@ Start an interactive prompt:
     python3 scripts/chat.py \\
       --database-url sqlite:///data/librarian.db \\
       --generation-provider ollama \\
-      --generation-model qwen2.5:1.5b
+      --generation-model qwen2.5:1.5b \\
+      --answer-capability lightweight
 
 Return machine-readable JSON for automation:
     python3 scripts/chat.py \\
@@ -79,6 +81,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--generation-model",
         help="Override the generation model in config/librarian.json.",
+    )
+    parser.add_argument(
+        "--answer-capability",
+        choices=["quality", "lightweight"],
+        help=(
+            "Required with a generation provider/model override. Selects the "
+            "declared capability instead of inferring it from the model name."
+        ),
     )
     parser.add_argument(
         "--ollama-base-url",
@@ -135,6 +145,7 @@ def _ask_once(args: argparse.Namespace, question: str) -> int:
                 embedding_model=args.embedding_model,
                 generation_provider=args.generation_provider,
                 generation_model=args.generation_model,
+                answer_capability=args.answer_capability,
                 ollama_base_url=args.ollama_base_url,
                 retrieval_limit=args.retrieval_limit,
                 book_id=args.book_id,

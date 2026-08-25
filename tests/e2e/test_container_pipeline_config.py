@@ -45,6 +45,16 @@ class ContainerPipelineConfigTests(unittest.TestCase):
         self.assertNotIn("\n      - opensearch-data:", overlay)
         self.assertNotIn("Epub-Books", overlay)
 
+    def test_web_healthcheck_uses_the_container_ipv4_loopback(self) -> None:
+        """Verify ``docker compose up --wait`` does not depend on localhost DNS."""
+        compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+        web_service = compose.split("  web:\n", maxsplit=1)[1].split(
+            "  summary-worker:\n", maxsplit=1
+        )[0]
+        self.assertIn("http://127.0.0.1:8080/", web_service)
+        self.assertNotIn("http://localhost:8080/", web_service)
+
     def test_verification_runner_waits_for_dependencies_then_runs_verifier(self) -> None:
         """Verify a successful ollama-init exit cannot abort the evaluator."""
         runner = (REPO_ROOT / "scripts/run_compose_verification.sh").read_text(

@@ -24,7 +24,7 @@ cover or spine accents, restrained motion, and generous reading space.
 1. **Explore / Ask**
    - A prominent question box with clickable starter prompts.
    - Filters for author, book, genre, and topic tag.
-   - An answer panel that streams or reveals a concise grounded response.
+   - An answer panel that reveals a concise grounded response.
    - Citation cards underneath: book, author, chapter, source excerpt, and a
      relevance indicator. A citation is the main product proof, not a footnote.
 

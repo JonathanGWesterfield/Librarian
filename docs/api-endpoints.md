@@ -365,6 +365,46 @@ Response:
 - `filters`: book, author, tag, or genre filters applied.
 - `results`: ranked chunks with score, book metadata, chunk id, and text.
 
+## Chat
+
+### `POST /chat`
+
+Retrieves local source chunks and asks the selected generation provider for a
+grounded answer. The normal provider, model, and answer capability come from
+the ignored, user-owned `config/librarian.json` file.
+
+`POST /chat` is a request-response endpoint. This release does not expose an
+SSE or `/chat/stream` endpoint; clients should wait for the complete JSON
+response before rendering the answer and its citations.
+
+Request fields:
+
+- `question`: required reader question.
+- `generation_provider`, `generation_model`: optional generation override.
+- `answer_capability`: `quality` or `lightweight`. It is required whenever a
+  request changes the configured generation provider or model. Librarian does
+  not infer capability from a model name, so a larger native Ollama model cannot
+  silently inherit the configured lightweight behavior.
+- `book_id`, `book_title`, `author`: optional library scope filters.
+- `retrieval_limit`: number of source chunks to retrieve; defaults to `30`.
+
+For example, a one-off native Ollama model must state its capability:
+
+```json
+{
+  "question": "What does the author say about modern Christianity?",
+  "generation_provider": "ollama",
+  "generation_model": "qwen2.5:7b",
+  "answer_capability": "quality",
+  "book_title": "The Screwtape Letters"
+}
+```
+
+If the request omits generation overrides, the response reports the configured
+JSON default in `answer_capability`. An override without `answer_capability`
+returns `400`. The response also includes the resolved provider/model, answer,
+and the source chunks used as local evidence.
+
 ## Recommendations
 
 ### `POST /recommendations`

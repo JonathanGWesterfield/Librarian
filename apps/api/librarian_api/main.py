@@ -3,14 +3,18 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from librarian_api.config import get_settings
 from librarian_chat.chat import ChatOptions, answer_question
-from librarian_config.config import resolve_embedding_model, resolve_embedding_provider
+from librarian_config.config import (
+    resolve_embedding_model,
+    resolve_embedding_provider,
+    resolve_generation_answer_capability,
+)
 from librarian_ingestion.embedding_ops import (
     EmbedQueryOptions,
     RebuildEmbeddingsOptions,
@@ -128,17 +132,62 @@ class SearchIndexRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    """Request one grounded chat answer from the configured local library."""
+
     question: str
     database_url: Optional[str] = None
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
     generation_provider: Optional[str] = None
     generation_model: Optional[str] = None
+    answer_capability: Optional[Literal["quality", "lightweight"]] = Field(
+        default=None,
+        description=(
+            "Required when generation_provider or generation_model changes the "
+            "JSON-configured generator. Otherwise the JSON generation capability "
+            "is used."
+        ),
+    )
     ollama_base_url: Optional[str] = None
     retrieval_limit: int = 30
     book_id: Optional[str] = None
     book_title: Optional[str] = None
     author: Optional[str] = None
+
+
+class ChatSourceResponse(BaseModel):
+    """A local chunk supplied as evidence for a chat answer."""
+
+    source_id: str
+    score: float
+    chunk_id: str
+    book_id: str
+    relative_path: str
+    title: Optional[str] = None
+    authors: list[str]
+    chunk_index: int = Field(ge=0)
+    text: str
+
+
+class ChatResponse(BaseModel):
+    """The documented response contract for one ``POST /chat`` request."""
+
+    question: str
+    answer: str
+    embedding_provider: str
+    embedding_model: str
+    generation_provider: str
+    generation_model: str
+    answer_capability: Literal["quality", "lightweight"] = Field(
+        description=(
+            "Capability resolved for this request: the explicit request value "
+            "for an overridden generator, or the configured JSON default."
+        )
+    )
+    retrieval_limit: int = Field(ge=1)
+    candidate_count: int = Field(ge=0)
+    filters: dict[str, str]
+    sources: list[ChatSourceResponse]
 
 
 class RecommendationRequest(BaseModel):
@@ -363,7 +412,11 @@ def index_search_endpoint(request: SearchIndexRequest) -> dict[str, object]:
     return result.to_dict()
 
 
-@app.post("/chat")
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    response_description="Grounded answer and the local source chunks used as context.",
+)
 def chat_endpoint(request: ChatRequest) -> dict[str, object]:
     try:
         result = answer_question(
@@ -374,6 +427,11 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
                 embedding_model=request.embedding_model,
                 generation_provider=request.generation_provider,
                 generation_model=request.generation_model,
+                answer_capability=resolve_generation_answer_capability(
+                    answer_capability=request.answer_capability,
+                    generation_provider=request.generation_provider,
+                    generation_model=request.generation_model,
+                ),
                 ollama_base_url=request.ollama_base_url,
                 retrieval_limit=request.retrieval_limit,
                 book_id=request.book_id,
