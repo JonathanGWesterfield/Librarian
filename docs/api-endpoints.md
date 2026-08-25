@@ -409,6 +409,12 @@ and the source chunks used as local evidence.
 selection, invalid configured generation input, or a local generation failure.
 Malformed request fields remain FastAPI validation errors (`422`).
 
+For the configured `lightweight` Compose model, a direct factual lookup that
+matches a local source sentence is returned as that sentence with its source
+ID. This deliberately preserves subject/action relationships in small-model
+answers; broader or weakly matched questions still use the configured
+generator.
+
 ## Recommendations
 
 ### `POST /recommendations`

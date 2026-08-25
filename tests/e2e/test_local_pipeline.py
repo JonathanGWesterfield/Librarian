@@ -299,6 +299,62 @@ class LocalPipelineApiE2ETests(unittest.TestCase):
         self.assertIn("[S1]", chat_response.json()["answer"])
         self.assertEqual(chat_response.json()["sources"][0]["source_id"], "S1")
 
+    def test_default_lightweight_lookup_is_repeatably_source_faithful(self) -> None:
+        """Default Docker Ollama lookups keep adjacent source facts separate.
+
+        This exercises ingestion, embeddings, retrieval, and the public chat
+        endpoint with the configured ``qwen2.5:1.5b`` lightweight default.
+        The fake transport deliberately gives a wrong combined-subject answer
+        if chat generation is reached; a direct lookup must instead return the
+        matching local sentence on every request.
+        """
+        with fake_ollama_transport() as ollama:
+            ingest_response = self.client.post(
+                "/ingestion/run",
+                json={
+                    "books_dir": str(self.books_dir),
+                    "database_url": self.database_url,
+                },
+            )
+            embed_response = self.client.post(
+                "/embeddings/rebuild",
+                json={
+                    "database_url": self.database_url,
+                    "embedding_provider": "ollama",
+                    "embedding_model": "all-minilm",
+                    "ollama_base_url": ollama.base_url,
+                    "reset": True,
+                },
+            )
+            responses = [
+                self.client.post(
+                    "/chat",
+                    json={
+                        "question": "What woke at dawn in The Clockwork Garden?",
+                        "database_url": self.database_url,
+                        "embedding_provider": "ollama",
+                        "embedding_model": "all-minilm",
+                        "ollama_base_url": ollama.base_url,
+                        "book_title": "The Clockwork Garden",
+                    },
+                )
+                for _ in range(3)
+            ]
+
+        self.assertEqual(ingest_response.status_code, 200)
+        self.assertEqual(embed_response.status_code, 200)
+        self.assertEqual([response.status_code for response in responses], [200, 200, 200])
+        self.assertEqual(
+            [response.json()["answer"] for response in responses],
+            ["The clockwork garden woke at dawn. [S1]"] * 3,
+        )
+        self.assertTrue(
+            all(response.json()["answer_capability"] == "lightweight" for response in responses)
+        )
+        self.assertFalse(
+            any(request["url"].endswith("/api/chat") for request in ollama.requests)
+        )
+
     def test_api_status_reports_background_summary_and_metadata_progress(self) -> None:
         """Verify the status endpoint reflects worker-completed background stages.
         This protects the future desktop progress view by checking the HTTP
@@ -415,6 +471,8 @@ class _FakeOllamaTransport:
         raise AssertionError(f"unexpected Ollama URL: {http_request.full_url}")
 
     def _chat_content(self, prompt: str) -> str:
+        if "What woke at dawn in The Clockwork Garden?" in prompt:
+            return "A brass robin woke at dawn and counted three silver seeds. [S1]"
         if '"tags"' in prompt:
             return json.dumps(
                 {
