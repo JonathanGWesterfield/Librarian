@@ -31,6 +31,29 @@ class ContainerPipelineConfigTests(unittest.TestCase):
             "docker build -f apps/api/Dockerfile --target test", workflow
         )
 
+    def test_ci_evaluation_uses_the_committed_test_json_configuration(self) -> None:
+        """Verify the post-check evaluator does not need ignored local config.
+
+        ``scripts/check.sh`` deliberately removes the temporary runtime
+        configuration it uses for tests. GitHub Actions therefore installs the
+        checked-in fixture just for its subsequent deterministic evaluation
+        step, and removes it whether that evaluator succeeds or fails.
+        """
+        workflow = (REPO_ROOT / ".github/workflows/tests.yml").read_text(
+            encoding="utf-8"
+        )
+        evaluation_step = workflow.split("- name: Publish evaluation summary", 1)[1].split(
+            "- name: Upload evaluation reports", 1
+        )[0]
+
+        self.assertIn(
+            "cp tests/fixtures/config/librarian.test.json config/librarian.json",
+            evaluation_step,
+        )
+        self.assertIn("trap 'rm -f config/librarian.json' EXIT", evaluation_step)
+        self.assertIn("python scripts/evaluate_retrieval.py --check", evaluation_step)
+        self.assertNotIn("LIBRARIAN_", evaluation_step)
+
     def test_verify_overlay_is_profile_gated_and_uses_runtime_api(self) -> None:
         """Verify standard Compose startup cannot launch the one-shot verifier."""
         compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")

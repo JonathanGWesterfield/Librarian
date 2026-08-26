@@ -41,7 +41,14 @@ jobs:
           git show "origin/${{ github.base_ref }}:docs/evaluation-retrieval-report.json" > /tmp/librarian-base-evaluation-report.json || true
 
       - name: Publish evaluation summary
-        run: python scripts/evaluate_retrieval.py --check --github-summary "$GITHUB_STEP_SUMMARY" --compare-to /tmp/librarian-base-evaluation-report.json
+        run: |
+          # scripts/check.sh removes its temporary ignored runtime config. The
+          # deterministic evaluator still initializes configured logging, so
+          # give this post-check step the committed test configuration without
+          # relying on legacy environment settings or local user configuration.
+          cp tests/fixtures/config/librarian.test.json config/librarian.json
+          trap 'rm -f config/librarian.json' EXIT
+          python scripts/evaluate_retrieval.py --check --github-summary "$GITHUB_STEP_SUMMARY" --compare-to /tmp/librarian-base-evaluation-report.json
 
       - name: Upload evaluation reports
         uses: actions/upload-artifact@v4
