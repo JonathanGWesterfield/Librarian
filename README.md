@@ -368,6 +368,12 @@ All operational settings live in the ignored `config/librarian.json` file. The
 launcher creates it from [`config/librarian.example.json`](config/librarian.example.json)
 on first run. JSON is authoritative; `LIBRARIAN_*` shell variables are not read.
 
+For the populated, non-secret Codex-compatible gateway baseline, copy
+[`config/librarian.base.json`](config/librarian.base.json) and add its referenced
+token file under ignored `config/secrets/`. See
+[`docs/configuration.md`](docs/configuration.md) for the full configuration
+reference, provider matrix, secret rules, and validation steps.
+
 The `embedding` and `generation` sections are independent. Each accepts
 `docker_ollama`, `native_ollama`, or `openai_compatible`; generation also accepts
 `codex`. `generation.answer_capability` is an explicit product default:

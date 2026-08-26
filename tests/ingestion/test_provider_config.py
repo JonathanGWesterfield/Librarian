@@ -59,6 +59,31 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.generation.answer_capability, "lightweight")
         self.assertEqual(config.search.opensearch_url, "http://opensearch:9200")
 
+    def test_base_profile_is_complete_without_tracking_its_gateway_token(self) -> None:
+        """The tracked Codex-gateway baseline needs only a local ignored secret file."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            path.write_text(
+                (REPO_ROOT / "config" / "librarian.base.json").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            secrets = root / "secrets"
+            secrets.mkdir()
+            (secrets / "codex-bridge-token.txt").write_text(
+                "test-bridge-token\n", encoding="utf-8"
+            )
+            config = get_librarian_config(path)
+
+        self.assertEqual(config.embedding.provider, "ollama")
+        self.assertEqual(config.embedding.model, "all-minilm")
+        self.assertEqual(config.generation.provider, "openai_compatible")
+        self.assertEqual(config.generation.model, "codex")
+        self.assertEqual(config.generation.answer_capability, "quality")
+        self.assertEqual(config.generation.api_key, "test-bridge-token")
+
     def test_generation_capability_is_a_configured_product_default(self) -> None:
         """Capability is not inferred from a generation model name."""
         with tempfile.TemporaryDirectory() as directory:
