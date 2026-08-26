@@ -7,6 +7,8 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatOptions, answer_question
+from librarian_ingestion.embedding_ops import EmbedQueryResult
+from librarian_search.opensearch import OpenSearchError
 from librarian_search.search import SearchResponse, SearchResult
 
 
@@ -43,35 +45,180 @@ class ChatTests(unittest.TestCase):
         )
         generator = _FakeGenerator()
 
-        with patch("librarian_chat.chat.search_chunks", return_value=fake_search):
-            with patch(
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=fake_search),
+            patch(
                 "librarian_chat.chat.create_configured_generator",
                 return_value=generator,
-            ):
-                response = answer_question(
-                    ChatOptions(
-                        question=" How brutal is war? ",
-                        database_url="sqlite:///tmp/librarian.db",
-                        embedding_provider="ollama",
-                        embedding_model="all-minilm",
-                        generation_provider="ollama",
-                        generation_model="llama3.2:3b",
-                        answer_capability="quality",
-                        retrieval_limit=20,
-                        author="Erich Maria Remarque",
-                    )
+            ),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=" How brutal is war? ",
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="llama3.2:3b",
+                    answer_capability="quality",
+                    retrieval_limit=20,
+                    author="Erich Maria Remarque",
                 )
+            )
 
         self.assertEqual(response.question, "How brutal is war?")
         self.assertEqual(response.answer, "War is described as terrifying. [S1]")
         self.assertEqual(response.answer_capability, "quality")
         self.assertEqual(response.filters, {"author": "Erich Maria Remarque"})
         self.assertEqual(response.candidate_count, 2)
+        self.assertEqual(response.retrieval_backend, "sqlite")
         self.assertEqual(response.sources[0].source_id, "S1")
         self.assertEqual(response.sources[0].title, "All Quiet on the Western Front")
+        self.assertGreaterEqual(response.timings.query_embedding_seconds, 0.0)
+        self.assertGreaterEqual(response.timings.retrieval_seconds, 0.0)
+        self.assertGreaterEqual(response.timings.prompt_construction_seconds, 0.0)
+        self.assertGreaterEqual(response.timings.generation_seconds, 0.0)
+        self.assertGreaterEqual(response.timings.total_seconds, 0.0)
         prompt = generator.messages[-1].content
         self.assertIn("[S1]", prompt)
         self.assertIn("The front is a cage", prompt)
+
+    def test_answer_question_uses_opensearch_hybrid_when_auto_backend_is_healthy(self) -> None:
+        """Auto chat retrieval should use the indexed hybrid path and keep scope."""
+        generator = _FakeGenerator()
+        fake_search = _search_response()
+
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="auto"),
+            patch(
+                "librarian_chat.chat.hybrid_search_chunks", return_value=fake_search
+            ) as hybrid_search,
+            patch("librarian_chat.chat.search_chunks") as sqlite_search,
+            patch(
+                "librarian_chat.chat.create_configured_generator",
+                return_value=generator,
+            ),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question="How brutal is war?",
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="llama3.2:3b",
+                    answer_capability="quality",
+                    retrieval_limit=20,
+                    book_title="All Quiet",
+                    author="Erich Maria Remarque",
+                )
+            )
+
+        self.assertEqual(response.retrieval_backend, "opensearch")
+        sqlite_search.assert_not_called()
+        hybrid_options = hybrid_search.call_args.args[0]
+        self.assertEqual(hybrid_options.query_embedding, _query_embedding())
+        self.assertEqual(hybrid_options.book_title, "All Quiet")
+        self.assertEqual(hybrid_options.author, "Erich Maria Remarque")
+        self.assertEqual(hybrid_options.limit, 20)
+        self.assertEqual(response.sources[0].to_dict(), {
+            "source_id": "S1",
+            "score": 0.9,
+            "chunk_id": "book:0",
+            "book_id": "book",
+            "relative_path": "All Quiet.epub",
+            "title": "All Quiet on the Western Front",
+            "authors": ["Erich Maria Remarque"],
+            "chunk_index": 0,
+            "text": "The front is a cage in which we must await fearfully.",
+        })
+        self.assertEqual(set(response.timings.to_dict()), {
+            "query_embedding_seconds",
+            "retrieval_seconds",
+            "prompt_construction_seconds",
+            "generation_seconds",
+            "total_seconds",
+        })
+
+    def test_answer_question_falls_back_to_sqlite_when_auto_opensearch_is_unavailable(self) -> None:
+        """An unavailable projection must not stop source-of-truth chat retrieval."""
+        generator = _FakeGenerator()
+        fake_search = _search_response()
+
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="auto"),
+            patch(
+                "librarian_chat.chat.hybrid_search_chunks",
+                side_effect=OpenSearchError("index is unavailable"),
+            ),
+            patch(
+                "librarian_chat.chat.search_chunks", return_value=fake_search
+            ) as sqlite_search,
+            patch(
+                "librarian_chat.chat.create_configured_generator",
+                return_value=generator,
+            ),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question="How brutal is war?",
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="llama3.2:3b",
+                    answer_capability="quality",
+                    retrieval_limit=20,
+                    book_id="book",
+                )
+            )
+
+        self.assertEqual(response.retrieval_backend, "sqlite")
+        sqlite_options = sqlite_search.call_args.args[0]
+        self.assertEqual(sqlite_options.query_embedding, _query_embedding())
+        self.assertEqual(sqlite_options.book_id, "book")
+        self.assertEqual(response.sources[0].source_id, "S1")
+
+
+def _query_embedding() -> EmbedQueryResult:
+    return EmbedQueryResult(
+        query="How brutal is war?",
+        embedding_provider="ollama",
+        embedding_model="all-minilm",
+        dimensions=2,
+        vector=[1.0, 0.0],
+    )
+
+
+def _search_response() -> SearchResponse:
+    return SearchResponse(
+        query="How brutal is war?",
+        embedding_provider="ollama",
+        embedding_model="all-minilm",
+        dimensions=2,
+        candidate_count=2,
+        filters={"author": "Erich Maria Remarque"},
+        results=[
+            SearchResult(
+                score=0.9,
+                chunk_id="book:0",
+                book_id="book",
+                relative_path="All Quiet.epub",
+                title="All Quiet on the Western Front",
+                authors=["Erich Maria Remarque"],
+                publisher=None,
+                chunk_index=0,
+                text="The front is a cage in which we must await fearfully.",
+                embedding_provider="ollama",
+                embedding_model="all-minilm",
+                dimensions=2,
+            )
+        ],
+    )
 
 
 class _FakeGenerator:

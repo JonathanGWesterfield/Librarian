@@ -2414,6 +2414,8 @@
           "retrieval_limit",
           "candidate_count",
           "filters",
+          "retrieval_backend",
+          "timings",
           "sources"
         ],
         "properties": {
@@ -2451,11 +2453,52 @@
           "filters": {
             "$ref": "#/components/schemas/SearchFilters"
           },
+          "retrieval_backend": {
+            "type": "string",
+            "enum": ["opensearch", "sqlite"],
+            "description": "Backend that supplied sources for this response. Auto retrieval uses OpenSearch when its configured index is available and falls back to SQLite otherwise."
+          },
+          "timings": {
+            "$ref": "#/components/schemas/ChatTimingsResponse",
+            "description": "Wall-clock seconds spent in each synchronous chat stage."
+          },
           "sources": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ChatSource"
             }
+          }
+        }
+      },
+      "ChatTimingsResponse": {
+        "type": "object",
+        "required": [
+          "query_embedding_seconds",
+          "retrieval_seconds",
+          "prompt_construction_seconds",
+          "generation_seconds",
+          "total_seconds"
+        ],
+        "properties": {
+          "query_embedding_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "retrieval_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "prompt_construction_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "generation_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "total_seconds": {
+            "type": "number",
+            "minimum": 0
           }
         }
       },

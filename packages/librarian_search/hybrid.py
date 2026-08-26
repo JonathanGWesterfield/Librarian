@@ -4,7 +4,11 @@ import re
 from dataclasses import dataclass
 
 from librarian_config.config import resolve_opensearch_index, resolve_opensearch_url
-from librarian_ingestion.embedding_ops import EmbedQueryOptions, embed_query
+from librarian_ingestion.embedding_ops import (
+    EmbedQueryOptions,
+    EmbedQueryResult,
+    embed_query,
+)
 from librarian_search.opensearch import OpenSearchClient, OpenSearchHit
 from librarian_search.search import SearchResponse, SearchResult
 
@@ -26,17 +30,11 @@ class HybridSearchOptions:
     genre: str | None = None
     tag: str | None = None
     rerank_candidate_multiplier: int = DEFAULT_RERANK_CANDIDATE_MULTIPLIER
+    query_embedding: EmbedQueryResult | None = None
 
 
 def hybrid_search_chunks(options: HybridSearchOptions) -> SearchResponse:
-    query_embedding = embed_query(
-        EmbedQueryOptions(
-            query=options.query,
-            embedding_provider=options.embedding_provider,
-            embedding_model=options.embedding_model,
-            ollama_base_url=options.ollama_base_url,
-        )
-    )
+    query_embedding = _query_embedding(options)
     if not query_embedding.vector:
         return SearchResponse(
             query=query_embedding.query,
@@ -74,6 +72,22 @@ def hybrid_search_chunks(options: HybridSearchOptions) -> SearchResponse:
         candidate_count=len(hits),
         filters=_hybrid_filters(options),
         results=[_result_from_hit(hit) for hit in reranked_hits],
+    )
+
+
+def _query_embedding(options: HybridSearchOptions) -> EmbedQueryResult:
+    """Use an already-created query vector when a caller shares retrieval work."""
+    if options.query_embedding is not None:
+        if options.query.strip() != options.query_embedding.query:
+            raise ValueError("query_embedding query must match the hybrid search query")
+        return options.query_embedding
+    return embed_query(
+        EmbedQueryOptions(
+            query=options.query,
+            embedding_provider=options.embedding_provider,
+            embedding_model=options.embedding_model,
+            ollama_base_url=options.ollama_base_url,
+        )
     )
 
 

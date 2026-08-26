@@ -373,6 +373,23 @@ Retrieves local source chunks and asks the selected generation provider for a
 grounded answer. The normal provider, model, and answer capability come from
 the ignored, user-owned `config/librarian.json` file.
 
+Chat retrieval follows `search.retrieval_backend` in that JSON configuration:
+
+- `auto` (the default) uses the configured OpenSearch hybrid index when it can
+  serve the request, then deliberately falls back to SQLite cosine retrieval
+  when the projection is unavailable or unhealthy.
+- `opensearch` requires the configured OpenSearch index and returns its error
+  rather than silently changing the selected backend.
+- `sqlite` deliberately uses the SQLite cosine fallback without contacting
+  OpenSearch.
+
+The response reports the backend that actually supplied the source chunks in
+`retrieval_backend`. It also includes `timings` with wall-clock seconds for
+`query_embedding`, `retrieval`, `prompt_construction`, `generation`, and the
+overall request. These fields let a UI or local diagnostic tool distinguish
+generation latency from retrieval latency without changing the synchronous
+`POST /chat` flow.
+
 `POST /chat` is a request-response endpoint. This release does not expose an
 SSE or `/chat/stream` endpoint; clients should wait for the complete JSON
 response before rendering the answer and its citations.
@@ -403,7 +420,8 @@ For example, a one-off native Ollama model must state its capability:
 If the request omits generation overrides, the response reports the configured
 JSON default in `answer_capability`. An override without `answer_capability`
 returns `400`. The response also includes the resolved provider/model, answer,
-and the source chunks used as local evidence.
+the source chunks used as local evidence, the actual `retrieval_backend`, and
+the stage `timings`.
 
 `400` is also the intentional response for an unsupported provider/model
 selection, invalid configured generation input, or a local generation failure.

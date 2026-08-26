@@ -4,7 +4,11 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from librarian_ingestion.embedding_ops import EmbedQueryOptions, embed_query
+from librarian_ingestion.embedding_ops import (
+    EmbedQueryOptions,
+    EmbedQueryResult,
+    embed_query,
+)
 from librarian_config.config import resolve_database_url
 from librarian_storage.storage import SearchEmbeddingRecord, create_ingestion_store
 
@@ -20,6 +24,7 @@ class SearchOptions:
     book_id: str | None = None
     book_title: str | None = None
     author: str | None = None
+    query_embedding: EmbedQueryResult | None = None
 
 
 @dataclass(frozen=True)
@@ -64,14 +69,7 @@ class SearchResponse:
 
 
 def search_chunks(options: SearchOptions) -> SearchResponse:
-    query_embedding = embed_query(
-        EmbedQueryOptions(
-            query=options.query,
-            embedding_provider=options.embedding_provider,
-            embedding_model=options.embedding_model,
-            ollama_base_url=options.ollama_base_url,
-        )
-    )
+    query_embedding = _query_embedding(options)
     if not query_embedding.vector:
         return SearchResponse(
             query=query_embedding.query,
@@ -109,6 +107,26 @@ def search_chunks(options: SearchOptions) -> SearchResponse:
         candidate_count=len(scored),
         filters=_search_filters(options),
         results=scored[:limit],
+    )
+
+
+def _query_embedding(options: SearchOptions) -> EmbedQueryResult:
+    """Use a caller-supplied embedding or create one for standalone search.
+
+    Chat retrieval can share a single query embedding across OpenSearch and its
+    SQLite fallback. Direct ``/search`` callers retain the existing behavior.
+    """
+    if options.query_embedding is not None:
+        if options.query.strip() != options.query_embedding.query:
+            raise ValueError("query_embedding query must match the search query")
+        return options.query_embedding
+    return embed_query(
+        EmbedQueryOptions(
+            query=options.query,
+            embedding_provider=options.embedding_provider,
+            embedding_model=options.embedding_model,
+            ollama_base_url=options.ollama_base_url,
+        )
     )
 
 
