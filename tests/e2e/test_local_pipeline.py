@@ -5,6 +5,7 @@ from contextlib import contextmanager, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib import error
 from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -115,6 +116,7 @@ class LocalPipelineCliE2ETests(unittest.TestCase):
         self.assertEqual(search["candidate_count"], 1)
         self.assertIn("The clockwork garden woke at dawn.", search["results"][0]["text"])
         self.assertIn("[S1]", chat["answer"])
+        self.assertEqual(chat["retrieval_backend"], "sqlite")
         self.assertEqual(chat["sources"][0]["source_id"], "S1")
         self.assertIn("The Clockwork Garden", chat["sources"][0]["title"])
 
@@ -297,6 +299,7 @@ class LocalPipelineApiE2ETests(unittest.TestCase):
         self.assertEqual(embed_response.json()["embeddings_stored"], 1)
         self.assertEqual(search_response.json()["candidate_count"], 1)
         self.assertIn("[S1]", chat_response.json()["answer"])
+        self.assertEqual(chat_response.json()["retrieval_backend"], "sqlite")
         self.assertEqual(chat_response.json()["sources"][0]["source_id"], "S1")
 
     def test_default_lightweight_lookup_is_repeatably_source_faithful(self) -> None:
@@ -438,6 +441,11 @@ class _FakeOllamaTransport:
         self.requests: list[dict[str, object]] = []
 
     def urlopen(self, http_request, timeout=None):
+        if http_request.full_url.startswith("http://opensearch:9200/"):
+            # This SQLite-only pipeline deliberately has no OpenSearch service.
+            # The regular transport failure mirrors an unavailable projection so
+            # chat can exercise its configured ``auto`` fallback.
+            raise error.URLError("OpenSearch is unavailable in this fixture")
         payload = json.loads(http_request.data.decode("utf-8"))
         self.requests.append(
             {

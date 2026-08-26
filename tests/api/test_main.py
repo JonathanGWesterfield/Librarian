@@ -399,6 +399,17 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(payload["generation_model"], "llama3.2:3b")
         self.assertEqual(payload["answer_capability"], "quality")
         self.assertEqual(payload["filters"], {"book_title": "All Quiet"})
+        self.assertEqual(payload["retrieval_backend"], "sqlite")
+        self.assertEqual(
+            set(payload["timings"]),
+            {
+                "query_embedding_seconds",
+                "retrieval_seconds",
+                "prompt_construction_seconds",
+                "generation_seconds",
+                "total_seconds",
+            },
+        )
         self.assertEqual(payload["sources"][0]["source_id"], "S1")
 
     def test_chat_generator_override_requires_capability_and_keeps_json_default(self) -> None:

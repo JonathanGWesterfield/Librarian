@@ -169,6 +169,16 @@ class ChatSourceResponse(BaseModel):
     text: str
 
 
+class ChatTimingsResponse(BaseModel):
+    """Stage timings reported for a completed synchronous chat request."""
+
+    query_embedding_seconds: float = Field(ge=0)
+    retrieval_seconds: float = Field(ge=0)
+    prompt_construction_seconds: float = Field(ge=0)
+    generation_seconds: float = Field(ge=0)
+    total_seconds: float = Field(ge=0)
+
+
 class ErrorResponse(BaseModel):
     """Intentional error payload returned for a rejected API operation."""
 
@@ -193,6 +203,16 @@ class ChatResponse(BaseModel):
     retrieval_limit: int = Field(ge=1)
     candidate_count: int = Field(ge=0)
     filters: dict[str, str]
+    retrieval_backend: Literal["opensearch", "sqlite"] = Field(
+        description=(
+            "Backend that supplied sources for this response. Auto retrieval "
+            "uses OpenSearch when its configured index is available and falls "
+            "back to SQLite otherwise."
+        )
+    )
+    timings: ChatTimingsResponse = Field(
+        description="Wall-clock seconds spent in each synchronous chat stage."
+    )
     sources: list[ChatSourceResponse]
 
 

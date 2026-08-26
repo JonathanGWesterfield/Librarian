@@ -1,14 +1,34 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+import logging
 import re
+from time import perf_counter
 
 from librarian_chat.generation import (
     ChatMessage,
     create_configured_generator,
 )
-from librarian_config.config import resolve_generation_answer_capability
-from librarian_search.search import SearchOptions, SearchResult, search_chunks
+from librarian_config.config import (
+    resolve_chat_retrieval_backend,
+    resolve_generation_answer_capability,
+)
+from librarian_ingestion.embedding_ops import (
+    EmbedQueryOptions,
+    EmbedQueryResult,
+    embed_query,
+)
+from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
+from librarian_search.opensearch import OpenSearchError
+from librarian_search.search import (
+    SearchOptions,
+    SearchResponse,
+    SearchResult,
+    search_chunks,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
@@ -80,6 +100,20 @@ class ChatSource:
 
 
 @dataclass(frozen=True)
+class ChatTimings:
+    """Wall-clock timings for the visible stages of one chat request."""
+
+    query_embedding_seconds: float = 0.0
+    retrieval_seconds: float = 0.0
+    prompt_construction_seconds: float = 0.0
+    generation_seconds: float = 0.0
+    total_seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, float]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class ChatResponse:
     question: str
     answer: str
@@ -92,6 +126,8 @@ class ChatResponse:
     filters: dict[str, str]
     sources: list[ChatSource]
     answer_capability: str = "quality"
+    retrieval_backend: str = "sqlite"
+    timings: ChatTimings = field(default_factory=ChatTimings)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -105,11 +141,14 @@ class ChatResponse:
             "candidate_count": self.candidate_count,
             "filters": self.filters,
             "answer_capability": self.answer_capability,
+            "retrieval_backend": self.retrieval_backend,
+            "timings": self.timings.to_dict(),
             "sources": [source.to_dict() for source in self.sources],
         }
 
 
 def answer_question(options: ChatOptions) -> ChatResponse:
+    total_started = perf_counter()
     question = options.question.strip()
     if not question:
         raise ValueError("question must not be empty")
@@ -121,21 +160,31 @@ def answer_question(options: ChatOptions) -> ChatResponse:
     )
 
     retrieval_limit = max(1, options.retrieval_limit)
-    search_response = search_chunks(
-        SearchOptions(
+    embedding_started = perf_counter()
+    query_embedding = embed_query(
+        EmbedQueryOptions(
             query=question,
-            database_url=options.database_url,
             embedding_provider=options.embedding_provider,
             embedding_model=options.embedding_model,
             ollama_base_url=options.ollama_base_url,
-            limit=retrieval_limit,
-            book_id=options.book_id,
-            book_title=options.book_title,
-            author=options.author,
         )
     )
+    query_embedding_seconds = perf_counter() - embedding_started
+
+    retrieval_started = perf_counter()
+    search_response, retrieval_backend = _retrieve_sources(
+        options,
+        query_embedding=query_embedding,
+        retrieval_limit=retrieval_limit,
+    )
+    retrieval_seconds = perf_counter() - retrieval_started
     sources = _to_sources(search_response.results)
 
+    prompt_started = perf_counter()
+    messages = _build_messages(question, sources)
+    prompt_construction_seconds = perf_counter() - prompt_started
+
+    generation_started = perf_counter()
     generator = create_configured_generator(
         provider=options.generation_provider,
         model=options.generation_model,
@@ -147,7 +196,8 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         else None
     )
     if answer is None:
-        answer = generator.generate(_build_messages(question, sources))
+        answer = generator.generate(messages)
+    generation_seconds = perf_counter() - generation_started
 
     return ChatResponse(
         question=question,
@@ -161,6 +211,75 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         filters=search_response.filters,
         sources=sources,
         answer_capability=answer_capability,
+        retrieval_backend=retrieval_backend,
+        timings=ChatTimings(
+            query_embedding_seconds=query_embedding_seconds,
+            retrieval_seconds=retrieval_seconds,
+            prompt_construction_seconds=prompt_construction_seconds,
+            generation_seconds=generation_seconds,
+            total_seconds=perf_counter() - total_started,
+        ),
+    )
+
+
+def _retrieve_sources(
+    options: ChatOptions,
+    *,
+    query_embedding: EmbedQueryResult,
+    retrieval_limit: int,
+) -> tuple[SearchResponse, str]:
+    """Prefer OpenSearch hybrid retrieval and keep SQLite as a safe fallback.
+
+    ``auto`` uses the rebuildable OpenSearch projection whenever it can serve
+    the configured index. A missing, unavailable, or otherwise unhealthy
+    projection falls back to SQLite's source-of-truth embeddings. Explicit
+    ``opensearch`` configuration intentionally surfaces its error instead of
+    silently changing the selected backend; explicit ``sqlite`` skips the
+    projection entirely.
+    """
+    backend = resolve_chat_retrieval_backend()
+    if backend in {"auto", "opensearch"}:
+        try:
+            return (
+                hybrid_search_chunks(
+                    HybridSearchOptions(
+                        query=query_embedding.query,
+                        embedding_provider=options.embedding_provider,
+                        embedding_model=options.embedding_model,
+                        ollama_base_url=options.ollama_base_url,
+                        limit=retrieval_limit,
+                        book_id=options.book_id,
+                        book_title=options.book_title,
+                        author=options.author,
+                        query_embedding=query_embedding,
+                    )
+                ),
+                "opensearch",
+            )
+        except OpenSearchError as error:
+            if backend == "opensearch":
+                raise
+            logger.info(
+                "OpenSearch chat retrieval unavailable; using SQLite fallback: %s",
+                error,
+            )
+
+    return (
+        search_chunks(
+            SearchOptions(
+                query=query_embedding.query,
+                database_url=options.database_url,
+                embedding_provider=options.embedding_provider,
+                embedding_model=options.embedding_model,
+                ollama_base_url=options.ollama_base_url,
+                limit=retrieval_limit,
+                book_id=options.book_id,
+                book_title=options.book_title,
+                author=options.author,
+                query_embedding=query_embedding,
+            )
+        ),
+        "sqlite",
     )
 
 

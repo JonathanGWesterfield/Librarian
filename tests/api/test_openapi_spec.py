@@ -55,12 +55,19 @@ class StaticOpenApiSpecTests(unittest.TestCase):
             static_response["properties"]["answer_capability"]["enum"],
             ["quality", "lightweight"],
         )
+        self.assertEqual(
+            static_response["properties"]["retrieval_backend"]["enum"],
+            ["opensearch", "sqlite"],
+        )
+        self.assertIn("timings", static_response["required"])
 
         live = app.openapi()
         request_schema = live["components"]["schemas"]["ChatRequest"]
         response_schema = live["components"]["schemas"]["ChatResponse"]
         self.assertIn("answer_capability", request_schema["properties"])
         self.assertIn("answer_capability", response_schema["required"])
+        self.assertIn("retrieval_backend", response_schema["required"])
+        self.assertIn("timings", response_schema["properties"])
 
     def test_chat_documents_its_intentional_bad_request_response(self) -> None:
         """Provider/configuration failures are documented as HTTP 400 at runtime."""
