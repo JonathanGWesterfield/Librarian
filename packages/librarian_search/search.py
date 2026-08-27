@@ -24,6 +24,7 @@ class SearchOptions:
     book_id: str | None = None
     book_title: str | None = None
     author: str | None = None
+    include_non_content: bool = False
     query_embedding: EmbedQueryResult | None = None
 
 
@@ -41,6 +42,7 @@ class SearchResult:
     embedding_provider: str
     embedding_model: str
     dimensions: int
+    content_type: str = "body"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -93,6 +95,7 @@ def search_chunks(options: SearchOptions) -> SearchResponse:
             book_id=_clean_filter(options.book_id),
             book_title=_clean_filter(options.book_title),
             author=_clean_filter(options.author),
+            include_non_content=options.include_non_content,
         )
     finally:
         store.close()
@@ -135,6 +138,7 @@ def _search_filters(options: SearchOptions) -> dict[str, str]:
         "book_id": _clean_filter(options.book_id),
         "book_title": _clean_filter(options.book_title),
         "author": _clean_filter(options.author),
+        "include_non_content": "true" if options.include_non_content else None,
     }
     return {key: value for key, value in filters.items() if value}
 
@@ -191,6 +195,7 @@ def _score_candidates(
                 authors=candidate.authors,
                 publisher=candidate.publisher,
                 chunk_index=candidate.chunk_index,
+                content_type=candidate.content_type,
                 text=candidate.text,
                 embedding_provider=candidate.provider,
                 embedding_model=candidate.model,

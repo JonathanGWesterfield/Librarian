@@ -104,6 +104,10 @@ class SearchRequest(BaseModel):
     book_id: Optional[str] = None
     book_title: Optional[str] = None
     author: Optional[str] = None
+    include_non_content: bool = Field(
+        default=False,
+        description="Include publisher, catalog, and other non-body EPUB content.",
+    )
 
 
 class HybridSearchRequest(BaseModel):
@@ -117,6 +121,10 @@ class HybridSearchRequest(BaseModel):
     book_id: Optional[str] = None
     book_title: Optional[str] = None
     author: Optional[str] = None
+    include_non_content: bool = Field(
+        default=False,
+        description="Include publisher, catalog, and other non-body EPUB content.",
+    )
     genre: Optional[str] = None
     tag: Optional[str] = None
 
@@ -153,6 +161,13 @@ class ChatRequest(BaseModel):
     book_id: Optional[str] = None
     book_title: Optional[str] = None
     author: Optional[str] = None
+    include_non_content: bool = Field(
+        default=False,
+        description=(
+            "Include publisher, catalog, and other non-body EPUB content. "
+            "Publication and edition questions enable this automatically."
+        ),
+    )
 
 
 class ChatSourceResponse(BaseModel):
@@ -166,6 +181,7 @@ class ChatSourceResponse(BaseModel):
     title: Optional[str] = None
     authors: list[str]
     chunk_index: int = Field(ge=0)
+    content_type: Literal["body", "front_matter", "back_matter"] = "body"
     text: str
 
 
@@ -394,6 +410,7 @@ def search_endpoint(request: SearchRequest) -> dict[str, object]:
                 book_id=request.book_id,
                 book_title=request.book_title,
                 author=request.author,
+                include_non_content=request.include_non_content,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:
@@ -416,6 +433,7 @@ def hybrid_search_endpoint(request: HybridSearchRequest) -> dict[str, object]:
                 book_id=request.book_id,
                 book_title=request.book_title,
                 author=request.author,
+                include_non_content=request.include_non_content,
                 genre=request.genre,
                 tag=request.tag,
             )
@@ -473,6 +491,7 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
                 book_id=request.book_id,
                 book_title=request.book_title,
                 author=request.author,
+                include_non_content=request.include_non_content,
             )
         )
     except (ValueError, NotImplementedError, RuntimeError) as error:

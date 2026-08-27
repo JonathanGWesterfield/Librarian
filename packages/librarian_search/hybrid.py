@@ -27,6 +27,7 @@ class HybridSearchOptions:
     book_id: str | None = None
     book_title: str | None = None
     author: str | None = None
+    include_non_content: bool = False
     genre: str | None = None
     tag: str | None = None
     rerank_candidate_multiplier: int = DEFAULT_RERANK_CANDIDATE_MULTIPLIER
@@ -59,6 +60,7 @@ def hybrid_search_chunks(options: HybridSearchOptions) -> SearchResponse:
         book_id=_clean_filter(options.book_id),
         book_title=_clean_filter(options.book_title),
         author=_clean_filter(options.author),
+        include_non_content=options.include_non_content,
         genre=_clean_filter(options.genre),
         tag=_clean_filter(options.tag),
     )
@@ -102,6 +104,7 @@ def _result_from_hit(hit) -> SearchResult:
         authors=document.authors,
         publisher=document.publisher,
         chunk_index=document.chunk_index,
+        content_type=document.content_type,
         text=document.text,
         embedding_provider=document.embedding_provider,
         embedding_model=document.embedding_model,
@@ -114,6 +117,7 @@ def _hybrid_filters(options: HybridSearchOptions) -> dict[str, str]:
         "book_id": _clean_filter(options.book_id),
         "book_title": _clean_filter(options.book_title),
         "author": _clean_filter(options.author),
+        "include_non_content": "true" if options.include_non_content else None,
         "genre": _clean_filter(options.genre),
         "tag": _clean_filter(options.tag),
     }

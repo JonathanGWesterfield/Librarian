@@ -184,7 +184,7 @@ class SQLiteSchemaMigrationTests(unittest.TestCase):
 
         failing_registry = SQLITE_SCHEMA_MIGRATIONS + (
             SQLiteSchemaMigration(
-                version=3,
+                version=len(SQLITE_SCHEMA_MIGRATIONS) + 1,
                 name="injected_failure",
                 apply=fail_after_writes,
             ),
@@ -204,7 +204,8 @@ class SQLiteSchemaMigrationTests(unittest.TestCase):
                 "SELECT value FROM migration_sentinel"
             ).fetchone()[0]
             failed_history = connection.execute(
-                "SELECT COUNT(*) FROM schema_migrations WHERE version = 3"
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = ?",
+                (len(SQLITE_SCHEMA_MIGRATIONS) + 1,),
             ).fetchone()[0]
             artifact = connection.execute(
                 """

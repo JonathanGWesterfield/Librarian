@@ -52,6 +52,7 @@ class OpenSearchChunkDocument:
     authors: list[str]
     publisher: str | None
     chunk_index: int
+    content_type: str
     text: str
     embedding_provider: str
     embedding_model: str
@@ -76,6 +77,7 @@ class OpenSearchChunkDocument:
             authors=record.authors,
             publisher=record.publisher,
             chunk_index=record.chunk_index,
+            content_type=record.content_type,
             text=record.text,
             embedding_provider=record.provider,
             embedding_model=record.model,
@@ -94,6 +96,7 @@ class OpenSearchChunkDocument:
             "authors": self.authors,
             "publisher": self.publisher,
             "chunk_index": self.chunk_index,
+            "content_type": self.content_type,
             "text": self.text,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
@@ -147,6 +150,7 @@ class OpenSearchClient:
                             "authors": {"type": "keyword"},
                             "publisher": {"type": "keyword"},
                             "chunk_index": {"type": "integer"},
+                            "content_type": {"type": "keyword"},
                             "text": {"type": "text"},
                             "embedding_provider": {"type": "keyword"},
                             "embedding_model": {"type": "keyword"},
@@ -243,6 +247,7 @@ class OpenSearchClient:
         book_id: str | None = None,
         book_title: str | None = None,
         author: str | None = None,
+        include_non_content: bool = False,
         genre: str | None = None,
         tag: str | None = None,
     ) -> list[OpenSearchHit]:
@@ -255,6 +260,7 @@ class OpenSearchClient:
             book_id=book_id,
             book_title=book_title,
             author=author,
+            include_non_content=include_non_content,
             genre=genre,
             tag=tag,
         )
@@ -267,6 +273,7 @@ class OpenSearchClient:
             book_id=book_id,
             book_title=book_title,
             author=author,
+            include_non_content=include_non_content,
             genre=genre,
             tag=tag,
         )
@@ -283,6 +290,7 @@ class OpenSearchClient:
         book_id: str | None = None,
         book_title: str | None = None,
         author: str | None = None,
+        include_non_content: bool = False,
         genre: str | None = None,
         tag: str | None = None,
     ) -> list[OpenSearchHit]:
@@ -294,6 +302,10 @@ class OpenSearchClient:
                         {
                             "multi_match": {
                                 "query": query,
+                                # A reader's one-character typo (for example,
+                                # "Chrisitanity") should not discard otherwise
+                                # relevant book prose from the keyword leg.
+                                "fuzziness": "AUTO",
                                 "fields": [
                                     "text^3",
                                     "title^2",
@@ -310,6 +322,7 @@ class OpenSearchClient:
                         book_id=book_id,
                         book_title=book_title,
                         author=author,
+                        include_non_content=include_non_content,
                         genre=genre,
                         tag=tag,
                     ),
@@ -331,6 +344,7 @@ class OpenSearchClient:
         book_id: str | None = None,
         book_title: str | None = None,
         author: str | None = None,
+        include_non_content: bool = False,
         genre: str | None = None,
         tag: str | None = None,
     ) -> list[OpenSearchHit]:
@@ -351,6 +365,7 @@ class OpenSearchClient:
                                     book_id=book_id,
                                     book_title=book_title,
                                     author=author,
+                                    include_non_content=include_non_content,
                                     genre=genre,
                                     tag=tag,
                                 )
@@ -519,6 +534,7 @@ def _opensearch_filters(
     book_id: str | None,
     book_title: str | None,
     author: str | None,
+    include_non_content: bool,
     genre: str | None,
     tag: str | None,
 ) -> list[dict[str, object]]:
@@ -532,6 +548,8 @@ def _opensearch_filters(
         filters.append({"match_phrase": {"title": book_title}})
     if author:
         filters.append({"term": {"authors": author}})
+    if not include_non_content:
+        filters.append({"term": {"content_type": "body"}})
     if genre:
         filters.append({"term": {"genres": genre}})
     if tag:
@@ -580,6 +598,7 @@ def _document_from_source(source: dict[str, object]) -> OpenSearchChunkDocument:
         authors=[str(author) for author in source.get("authors", [])],
         publisher=_optional_str(source.get("publisher")),
         chunk_index=int(source["chunk_index"]),
+        content_type=str(source.get("content_type") or "body"),
         text=str(source["text"]),
         embedding_provider=str(source["embedding_provider"]),
         embedding_model=str(source["embedding_model"]),

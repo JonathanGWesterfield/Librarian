@@ -17,9 +17,10 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
 try:
-    from librarian_ingestion.epub import parse_epub
+    from librarian_ingestion.epub import classify_epub_content_type, parse_epub
 except ModuleNotFoundError as error:
     parse_epub = None
+    classify_epub_content_type = None
     PARSER_IMPORT_ERROR = error
 else:
     PARSER_IMPORT_ERROR = None
@@ -80,6 +81,30 @@ class ParseEpubTests(unittest.TestCase):
         self.assertEqual(parsed.title, SAMPLE_TITLE)
         self.assertEqual(parsed.authors, SAMPLE_AUTHORS)
         self.assertIn("The clockwork garden woke at dawn.", parsed.text)
+
+    def test_classifies_publisher_and_catalog_documents_as_non_body_content(self) -> None:
+        """EPUB spine provenance must survive parsing instead of becoming UI heuristics."""
+        self.assertEqual(
+            classify_epub_content_type(
+                "text/copyright.xhtml",
+                "Copyright 1950. All rights reserved.",
+            ),
+            "front_matter",
+        )
+        self.assertEqual(
+            classify_epub_content_type(
+                "text/also-by.xhtml",
+                "Other books by this author.",
+            ),
+            "back_matter",
+        )
+        self.assertEqual(
+            classify_epub_content_type(
+                "text/chapter-01.xhtml",
+                "A reader confronts an ordinary moral choice.",
+            ),
+            "body",
+        )
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ class HybridSearchTests(unittest.TestCase):
         boosts exact phrase and metadata matches before returning the familiar
         ranked chunk response contract.
         """
-        with fake_opensearch_transport(), patch(
+        with fake_opensearch_transport() as transport, patch(
             "librarian_ingestion.embedding_ops.create_configured_embedder",
             return_value=_FakeQueryEmbedder(),
         ):
@@ -40,6 +40,35 @@ class HybridSearchTests(unittest.TestCase):
         self.assertEqual(response.results[0].chunk_id, "book-1:0")
         self.assertEqual(response.results[0].title, "The Clockwork Garden")
         self.assertGreater(response.results[0].score, 0)
+        for payload in transport.request_payloads:
+            self.assertIn('"content_type": "body"', json.dumps(payload))
+        self.assertEqual(
+            transport.request_payloads[0]["query"]["bool"]["must"][0]["multi_match"][
+                "fuzziness"
+            ],
+            "AUTO",
+        )
+
+    def test_hybrid_search_can_explicitly_include_non_body_content(self) -> None:
+        """Edition and publication searches can opt into indexed front matter."""
+        with fake_opensearch_transport() as transport, patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            response = hybrid_search_chunks(
+                HybridSearchOptions(
+                    query="publication details",
+                    opensearch_url="http://fake-opensearch.local",
+                    index_name="librarian-test",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    include_non_content=True,
+                )
+            )
+
+        self.assertEqual(response.filters["include_non_content"], "true")
+        for payload in transport.request_payloads:
+            self.assertNotIn('"content_type": "body"', json.dumps(payload))
 
     def test_hybrid_search_overfetches_before_reranking(self) -> None:
         """Verify the requested limit is applied after reranking candidates.

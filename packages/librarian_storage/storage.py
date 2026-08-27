@@ -15,6 +15,20 @@ SECONDS_PER_DAY = 24 * 60 * 60
 REQUEUEABLE_JOB_STATUSES = {"failed", "running"}
 JOB_DURATION_TABLES = {"summary_jobs", "metadata_jobs"}
 JOB_DURATION_AGGREGATES = {"SUM", "AVG", "MAX"}
+_LEGACY_FRONT_MATTER_MARKERS = (
+    "all rights reserved",
+    "cataloging-in-publication",
+    "library of congress",
+    "isbn",
+    "published by",
+    "copyright",
+)
+_LEGACY_BACK_MATTER_MARKERS = (
+    "also by ",
+    "other books by ",
+    "about the author",
+    "about the publisher",
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +59,7 @@ class ChunkRecord:
     character_count: int
     token_estimate: int
     chapter_title: Optional[str] = None
+    content_type: str = "body"
     created_at: str = field(default_factory=lambda: utc_now())
 
 
@@ -68,6 +83,7 @@ class StoredChunkRecord:
     character_count: int
     token_estimate: int
     chapter_title: Optional[str]
+    content_type: str
 
 
 @dataclass(frozen=True)
@@ -336,6 +352,7 @@ class SearchEmbeddingRecord:
     authors: list[str]
     publisher: Optional[str]
     chunk_index: int
+    content_type: str
     text: str
     provider: str
     model: str
@@ -431,6 +448,7 @@ class IngestionStore(Protocol):
         book_id: str | None = None,
         book_title: str | None = None,
         author: str | None = None,
+        include_non_content: bool = False,
     ) -> list[SearchEmbeddingRecord]:
         ...
 
@@ -853,9 +871,9 @@ class SQLiteIngestionStore:
                 """
                 INSERT INTO chunks (
                     id, book_id, chunk_index, chapter_title, text,
-                    character_count, token_estimate, created_at
+                    character_count, token_estimate, content_type, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -866,6 +884,7 @@ class SQLiteIngestionStore:
                         chunk.text,
                         chunk.character_count,
                         chunk.token_estimate,
+                        chunk.content_type,
                         chunk.created_at,
                     )
                     for chunk in chunks
@@ -928,7 +947,7 @@ class SQLiteIngestionStore:
         rows = self._connection.execute(
             """
             SELECT id, book_id, chunk_index, text, character_count,
-                   token_estimate, chapter_title
+                   token_estimate, chapter_title, content_type
             FROM chunks
             ORDER BY book_id ASC, chunk_index ASC
             LIMIT ? OFFSET ?
@@ -944,6 +963,7 @@ class SQLiteIngestionStore:
                 character_count=row[4],
                 token_estimate=row[5],
                 chapter_title=row[6],
+                content_type=row[7],
             )
             for row in rows
         ]
@@ -1027,6 +1047,7 @@ class SQLiteIngestionStore:
         book_id: str | None = None,
         book_title: str | None = None,
         author: str | None = None,
+        include_non_content: bool = False,
     ) -> list[SearchEmbeddingRecord]:
         rows = self._search_embedding_cursor(
             provider=provider,
@@ -1034,6 +1055,7 @@ class SQLiteIngestionStore:
             book_id=book_id,
             book_title=book_title,
             author=author,
+            include_non_content=include_non_content,
         ).fetchall()
         return [_search_embedding_from_row(row) for row in rows]
 
@@ -1041,7 +1063,11 @@ class SQLiteIngestionStore:
         self, *, provider: str, model: str, batch_size: int
     ) -> Iterator[list[SearchEmbeddingRecord]]:
         """Yield compatible embeddings in bounded SQLite result pages."""
-        cursor = self._search_embedding_cursor(provider=provider, model=model)
+        cursor = self._search_embedding_cursor(
+            provider=provider,
+            model=model,
+            include_non_content=True,
+        )
         while rows := cursor.fetchmany(max(1, batch_size)):
             yield [_search_embedding_from_row(row) for row in rows]
 
@@ -1053,6 +1079,7 @@ class SQLiteIngestionStore:
         book_id: str | None = None,
         book_title: str | None = None,
         author: str | None = None,
+        include_non_content: bool = False,
     ) -> sqlite3.Cursor:
         # Only compare vectors produced by the same provider/model. Different
         # embedding models do not share a meaningful vector space.
@@ -1070,12 +1097,15 @@ class SQLiteIngestionStore:
         if author:
             where.append("LOWER(books.authors_json) LIKE ?")
             parameters.append(f"%{author.strip().casefold()}%")
+        if not include_non_content:
+            where.append("chunks.content_type = ?")
+            parameters.append("body")
 
         return self._connection.execute(
             f"""
             SELECT chunk_embeddings.chunk_id, chunks.book_id, books.relative_path,
                    books.title, books.authors_json, books.publisher,
-                   chunks.chunk_index, chunks.text, chunk_embeddings.provider,
+                   chunks.chunk_index, chunks.content_type, chunks.text, chunk_embeddings.provider,
                    chunk_embeddings.model, chunk_embeddings.dimensions,
                    chunk_embeddings.vector_json
             FROM chunk_embeddings
@@ -2442,6 +2472,41 @@ def _migrate_summary_job_progress(connection: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_chunk_content_type(connection: sqlite3.Connection) -> None:
+    """Label legacy chunks so normal search can exclude publishing matter.
+
+    New ingestions retain EPUB-spine provenance. Older databases do not have
+    that provenance, so this one-time migration only classifies unmistakable
+    legal, catalog, and publication text; all other legacy chunks remain body
+    content rather than silently disappearing from search.
+    """
+    _add_column_if_missing(
+        connection,
+        "chunks",
+        "content_type",
+        "TEXT NOT NULL DEFAULT 'body'",
+    )
+    rows = connection.execute(
+        "SELECT id, text FROM chunks WHERE content_type = 'body'"
+    ).fetchall()
+    for chunk_id, text in rows:
+        content_type = _legacy_chunk_content_type(str(text))
+        if content_type != "body":
+            connection.execute(
+                "UPDATE chunks SET content_type = ? WHERE id = ?",
+                (content_type, chunk_id),
+            )
+
+
+def _legacy_chunk_content_type(text: str) -> str:
+    normalized = " ".join(text.casefold().split())
+    if any(marker in normalized for marker in _LEGACY_FRONT_MATTER_MARKERS):
+        return "front_matter"
+    if any(marker in normalized for marker in _LEGACY_BACK_MATTER_MARKERS):
+        return "back_matter"
+    return "body"
+
+
 SQLITE_SCHEMA_MIGRATIONS: tuple[SQLiteSchemaMigration, ...] = (
     SQLiteSchemaMigration(
         version=1,
@@ -2452,6 +2517,11 @@ SQLITE_SCHEMA_MIGRATIONS: tuple[SQLiteSchemaMigration, ...] = (
         version=2,
         name="summary_jobs_progress",
         apply=_migrate_summary_job_progress,
+    ),
+    SQLiteSchemaMigration(
+        version=3,
+        name="chunks_content_type",
+        apply=_migrate_chunk_content_type,
     ),
 )
 
@@ -2598,11 +2668,12 @@ def _search_embedding_from_row(row: sqlite3.Row | tuple[object, ...]) -> SearchE
         authors=_decode_authors(str(row[4])),
         publisher=row[5] if isinstance(row[5], str) else None,
         chunk_index=int(row[6]),
-        text=str(row[7]),
-        provider=str(row[8]),
-        model=str(row[9]),
-        dimensions=int(row[10]),
-        vector=_decode_vector(str(row[11])),
+        content_type=str(row[7]),
+        text=str(row[8]),
+        provider=str(row[9]),
+        model=str(row[10]),
+        dimensions=int(row[11]),
+        vector=_decode_vector(str(row[12])),
     )
 
 
@@ -2716,6 +2787,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     chapter_title TEXT,
+    content_type TEXT NOT NULL DEFAULT 'body',
     text TEXT NOT NULL,
     character_count INTEGER NOT NULL,
     token_estimate INTEGER NOT NULL,

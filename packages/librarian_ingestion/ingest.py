@@ -16,7 +16,7 @@ from librarian_config.config import (
     resolve_generation_provider,
 )
 from librarian_ingestion.embeddings import create_configured_embedder
-from librarian_ingestion.epub import parse_epub
+from librarian_ingestion.epub import ParsedBook, parse_epub
 from librarian_ingestion.scan import DiscoveredEpub, scan_epub_files
 from librarian_storage.storage import (
     BookRecord,
@@ -52,6 +52,17 @@ class BookIngestionResult:
     status: str
     chunk_count: int = 0
     message: str | None = None
+
+
+@dataclass(frozen=True)
+class ParsedTextChunk:
+    """Chunk text paired with the durable content role of its EPUB section."""
+
+    chunk_index: int
+    text: str
+    character_count: int
+    token_estimate: int
+    content_type: str
 
 
 @dataclass(frozen=True)
@@ -153,7 +164,7 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                     )
                     continue
 
-                chunks = chunk_text(parsed.text)
+                chunks = _chunk_parsed_sections(parsed)
                 chunk_completed_at = utc_now()
                 chunk_duration_seconds = _elapsed_seconds(chunk_started_perf)
                 book = _book_record(
@@ -175,6 +186,7 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
                         text=chunk.text,
                         character_count=chunk.character_count,
                         token_estimate=chunk.token_estimate,
+                        content_type=chunk.content_type,
                     )
                     for chunk in chunks
                 ]
@@ -261,6 +273,36 @@ def run_ingestion(options: IngestionOptions | None = None) -> IngestionResult:
         books=book_results,
         discovered=discovered,
     )
+
+
+def _chunk_parsed_sections(parsed: ParsedBook) -> list[ParsedTextChunk]:
+    """Chunk same-role spine runs without blending body and publishing text."""
+    chunks: list[ParsedTextChunk] = []
+    current_content_type: str | None = None
+    current_text: list[str] = []
+
+    def append_current_run() -> None:
+        if not current_text or current_content_type is None:
+            return
+        for chunk in chunk_text("\n\n".join(current_text)):
+            chunks.append(
+                ParsedTextChunk(
+                    chunk_index=len(chunks),
+                    text=chunk.text,
+                    character_count=chunk.character_count,
+                    token_estimate=chunk.token_estimate,
+                    content_type=current_content_type,
+                )
+            )
+
+    for section in parsed.sections:
+        if current_content_type is not None and section.content_type != current_content_type:
+            append_current_run()
+            current_text.clear()
+        current_content_type = section.content_type
+        current_text.append(section.text)
+    append_current_run()
+    return chunks
 
 
 def _summary_job_id(*, book_id: str, provider: str, model: str, detail: str) -> str:

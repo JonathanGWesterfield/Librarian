@@ -1,5 +1,7 @@
 import sys
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
@@ -10,6 +12,7 @@ from librarian_chat.chat import ChatOptions, answer_question
 from librarian_ingestion.embedding_ops import EmbedQueryResult
 from librarian_search.opensearch import OpenSearchError
 from librarian_search.search import SearchResponse, SearchResult
+from librarian_storage.storage import BookRecord, SQLiteIngestionStore, utc_now
 
 
 class ChatTests(unittest.TestCase):
@@ -133,6 +136,7 @@ class ChatTests(unittest.TestCase):
             "title": "All Quiet on the Western Front",
             "authors": ["Erich Maria Remarque"],
             "chunk_index": 0,
+            "content_type": "body",
             "text": "The front is a cage in which we must await fearfully.",
         })
         self.assertEqual(set(response.timings.to_dict()), {
@@ -183,6 +187,91 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(sqlite_options.book_id, "book")
         self.assertEqual(response.sources[0].source_id, "S1")
 
+    def test_author_view_question_auto_scopes_the_unique_named_author_for_spelled_and_misspelled_terms(self) -> None:
+        """Whole-library author questions must not leak evidence from other writers."""
+        with TemporaryDirectory() as temp_dir:
+            database_url = _seed_author_scope_database(Path(temp_dir) / "librarian.db")
+            for question in (
+                "What does C.S. Lewis say about modern Christianity?",
+                "What does C.S. Lewis say about modern Chrisitanity?",
+            ):
+                generator = _FakeGenerator()
+                fake_search = _author_search_response(question, count=10)
+                with (
+                    patch(
+                        "librarian_chat.chat.embed_query",
+                        return_value=_query_embedding_for(question),
+                    ),
+                    patch(
+                        "librarian_chat.chat.resolve_chat_retrieval_backend",
+                        return_value="opensearch",
+                    ),
+                    patch(
+                        "librarian_chat.chat.hybrid_search_chunks",
+                        return_value=fake_search,
+                    ) as hybrid_search,
+                    patch(
+                        "librarian_chat.chat.create_configured_generator",
+                        return_value=generator,
+                    ),
+                ):
+                    response = answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url=database_url,
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+
+                self.assertEqual(response.retrieval_backend, "opensearch")
+                self.assertEqual(hybrid_search.call_args.args[0].author, "C. S. Lewis")
+                self.assertEqual(hybrid_search.call_args.args[0].query, question)
+                self.assertNotIn("Other Author", generator.messages[-1].content)
+                self.assertIn("at least 10 distinct source IDs", generator.messages[-1].content)
+
+    def test_broad_author_question_with_only_one_body_source_does_not_generate(self) -> None:
+        """A single weak passage must never be turned into a model-prior synthesis."""
+        question = "What does C.S. Lewis say about modern Christianity?"
+        with TemporaryDirectory() as temp_dir:
+            database_url = _seed_author_scope_database(Path(temp_dir) / "librarian.db")
+            generator = _FakeGenerator()
+            with (
+                patch(
+                    "librarian_chat.chat.embed_query",
+                    return_value=_query_embedding_for(question),
+                ),
+                patch(
+                    "librarian_chat.chat.resolve_chat_retrieval_backend",
+                    return_value="sqlite",
+                ),
+                patch(
+                    "librarian_chat.chat.search_chunks",
+                    return_value=_author_search_response(question, count=1),
+                ),
+                patch(
+                    "librarian_chat.chat.create_configured_generator",
+                    return_value=generator,
+                ),
+            ):
+                response = answer_question(
+                    ChatOptions(
+                        question=question,
+                        database_url=database_url,
+                        embedding_provider="ollama",
+                        embedding_model="all-minilm",
+                        generation_provider="ollama",
+                        generation_model="qwen2.5:7b",
+                        answer_capability="quality",
+                    )
+                )
+
+        self.assertIn("enough distinct body-text passages", response.answer)
+        self.assertEqual(generator.messages, [])
+
 
 def _query_embedding() -> EmbedQueryResult:
     return EmbedQueryResult(
@@ -191,6 +280,67 @@ def _query_embedding() -> EmbedQueryResult:
         embedding_model="all-minilm",
         dimensions=2,
         vector=[1.0, 0.0],
+    )
+
+
+def _query_embedding_for(question: str) -> EmbedQueryResult:
+    return EmbedQueryResult(
+        query=question,
+        embedding_provider="ollama",
+        embedding_model="all-minilm",
+        dimensions=2,
+        vector=[1.0, 0.0],
+    )
+
+
+def _seed_author_scope_database(database_path: Path) -> str:
+    with SQLiteIngestionStore(database_path) as store:
+        for book_id, author in (("lewis", "C. S. Lewis"), ("other", "Other Author")):
+            store.save_book_with_chunks(
+                BookRecord(
+                    id=book_id,
+                    source_path=f"/books/{book_id}.epub",
+                    relative_path=f"{book_id}.epub",
+                    file_hash=book_id,
+                    size_bytes=100,
+                    title=f"{author} Book",
+                    authors=[author],
+                    status="ingested",
+                    ingested_at=utc_now(),
+                ),
+                [],
+            )
+    return f"sqlite:///{database_path}"
+
+
+def _author_search_response(question: str, *, count: int) -> SearchResponse:
+    return SearchResponse(
+        query=question,
+        embedding_provider="ollama",
+        embedding_model="all-minilm",
+        dimensions=2,
+        candidate_count=count,
+        filters={"author": "C. S. Lewis"},
+        results=[
+            SearchResult(
+                score=0.9 - (index / 100),
+                chunk_id=f"lewis:{index}",
+                book_id="lewis",
+                relative_path="screwtape.epub",
+                title="The Screwtape Letters",
+                authors=["C. S. Lewis"],
+                publisher=None,
+                chunk_index=index,
+                text=(
+                    "Lewis examines modern Christianity through ordinary moral choices "
+                    "and self-deception."
+                ),
+                embedding_provider="ollama",
+                embedding_model="all-minilm",
+                dimensions=2,
+            )
+            for index in range(count)
+        ],
     )
 
 

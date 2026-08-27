@@ -10,6 +10,7 @@ from librarian_chat.generation import (
     create_configured_generator,
 )
 from librarian_config.config import (
+    resolve_database_url,
     resolve_chat_retrieval_backend,
     resolve_generation_answer_capability,
 )
@@ -26,6 +27,7 @@ from librarian_search.search import (
     SearchResult,
     search_chunks,
 )
+from librarian_storage.storage import create_ingestion_store
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,42 @@ logger = logging.getLogger(__name__)
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
 _WORD = re.compile(r"[a-z0-9]+")
 _LOOKUP_QUESTION_PREFIXES = ("what", "who", "when", "where", "which")
+_AUTHOR_VIEW_TERMS = frozenset(
+    {
+        "argue",
+        "argues",
+        "believe",
+        "believes",
+        "opinion",
+        "position",
+        "say",
+        "says",
+        "teach",
+        "teaches",
+        "think",
+        "thinks",
+        "view",
+        "views",
+        "write",
+        "writes",
+    }
+)
+_BROAD_QUESTION_TERMS = (
+    "about",
+    "overview",
+    "theme",
+    "themes",
+    "what does the author",
+    "what do the author",
+)
+_PUBLICATION_METADATA_TERMS = (
+    "copyright",
+    "edition",
+    "isbn",
+    "publication",
+    "publisher",
+    "table of contents",
+)
 _QUESTION_STOP_WORDS = frozenset(
     {
         "a",
@@ -81,6 +119,7 @@ class ChatOptions:
     book_id: str | None = None
     book_title: str | None = None
     author: str | None = None
+    include_non_content: bool = False
 
 
 @dataclass(frozen=True)
@@ -94,6 +133,7 @@ class ChatSource:
     authors: list[str]
     chunk_index: int
     text: str
+    content_type: str = "body"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -160,6 +200,10 @@ def answer_question(options: ChatOptions) -> ChatResponse:
     )
 
     retrieval_limit = max(1, options.retrieval_limit)
+    effective_author = _effective_author_scope(options, question)
+    include_non_content = options.include_non_content or _asks_for_publication_metadata(
+        question
+    )
     embedding_started = perf_counter()
     query_embedding = embed_query(
         EmbedQueryOptions(
@@ -176,12 +220,19 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         options,
         query_embedding=query_embedding,
         retrieval_limit=retrieval_limit,
+        author=effective_author,
+        include_non_content=include_non_content,
     )
     retrieval_seconds = perf_counter() - retrieval_started
     sources = _to_sources(search_response.results)
 
     prompt_started = perf_counter()
-    messages = _build_messages(question, sources)
+    required_sources = _required_source_count(question, effective_author)
+    messages = _build_messages(
+        question,
+        sources,
+        required_sources=required_sources,
+    )
     prompt_construction_seconds = perf_counter() - prompt_started
 
     generation_started = perf_counter()
@@ -190,13 +241,19 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,
     )
-    answer = (
-        _lightweight_lookup_answer(question, sources)
-        if answer_capability == "lightweight"
-        else None
-    )
-    if answer is None:
-        answer = generator.generate(messages)
+    if not _has_sufficient_evidence(sources, required_sources=required_sources):
+        answer = _insufficient_evidence_answer(
+            include_non_content=include_non_content,
+            required_sources=required_sources,
+        )
+    else:
+        answer = (
+            _lightweight_lookup_answer(question, sources)
+            if answer_capability == "lightweight"
+            else None
+        )
+        if answer is None:
+            answer = generator.generate(messages)
     generation_seconds = perf_counter() - generation_started
 
     return ChatResponse(
@@ -227,6 +284,8 @@ def _retrieve_sources(
     *,
     query_embedding: EmbedQueryResult,
     retrieval_limit: int,
+    author: str | None,
+    include_non_content: bool,
 ) -> tuple[SearchResponse, str]:
     """Prefer OpenSearch hybrid retrieval and keep SQLite as a safe fallback.
 
@@ -250,7 +309,8 @@ def _retrieve_sources(
                         limit=retrieval_limit,
                         book_id=options.book_id,
                         book_title=options.book_title,
-                        author=options.author,
+                        author=author,
+                        include_non_content=include_non_content,
                         query_embedding=query_embedding,
                     )
                 ),
@@ -275,12 +335,112 @@ def _retrieve_sources(
                 limit=retrieval_limit,
                 book_id=options.book_id,
                 book_title=options.book_title,
-                author=options.author,
+                author=author,
+                include_non_content=include_non_content,
                 query_embedding=query_embedding,
             )
         ),
         "sqlite",
     )
+
+
+def _effective_author_scope(options: ChatOptions, question: str) -> str | None:
+    """Respect direct scope, otherwise apply only an unambiguous named author.
+
+    A question such as ``What does C.S. Lewis say ...`` should not mix every
+    author in a whole-library search.  Generic "the author" questions remain
+    unscoped because there is no safe author to infer.
+    """
+    if options.author or options.book_id or options.book_title:
+        return options.author
+    if not _asks_for_author_view(question):
+        return None
+
+    store = create_ingestion_store(resolve_database_url(options.database_url))
+    store.initialize()
+    try:
+        authors: set[str] = set()
+        offset = 0
+        while True:
+            books = store.list_books(status="ingested", limit=500, offset=offset)
+            authors.update(
+                author.strip()
+                for book in books
+                for author in book.authors
+                if author.strip()
+            )
+            if len(books) < 500:
+                break
+            offset += len(books)
+    finally:
+        store.close()
+
+    normalized_question = _author_identity(question)
+    matches: dict[str, set[str]] = {}
+    for author in authors:
+        identity = _author_identity(author)
+        # One short name such as "Lee" is too easy to match accidentally.
+        if len(identity) < 5 or identity not in normalized_question:
+            continue
+        matches.setdefault(identity, set()).add(author)
+
+    if len(matches) != 1:
+        return None
+    names = next(iter(matches.values()))
+    return next(iter(names)) if len(names) == 1 else None
+
+
+def _author_identity(value: str) -> str:
+    return "".join(_WORD.findall(value.casefold()))
+
+
+def _asks_for_author_view(question: str) -> bool:
+    terms = _meaningful_terms(question)
+    return bool(terms & _AUTHOR_VIEW_TERMS)
+
+
+def _asks_for_publication_metadata(question: str) -> bool:
+    normalized = " ".join(question.casefold().split())
+    return any(term in normalized for term in _PUBLICATION_METADATA_TERMS)
+
+
+def _required_source_count(question: str, author: str | None) -> int:
+    """Set an evidence floor before a broad synthesis reaches generation."""
+    normalized = " ".join(question.casefold().split())
+    if author and _asks_for_author_view(question):
+        return 10
+    if any(term in normalized for term in _BROAD_QUESTION_TERMS):
+        return 10
+    return 1
+
+
+def _has_sufficient_evidence(
+    sources: list[ChatSource], *, required_sources: int
+) -> bool:
+    distinct_sources = {source.chunk_id for source in sources}
+    if len(distinct_sources) < required_sources:
+        return False
+    # Negative-only cosine candidates mean there was no semantically useful
+    # match. OpenSearch scores are non-negative, so this leaves normal hybrid
+    # retrieval unaffected while protecting the SQLite fallback from noise.
+    return max(source.score for source in sources) >= 0.05
+
+
+def _insufficient_evidence_answer(
+    *, include_non_content: bool,
+    required_sources: int,
+) -> str:
+    if include_non_content:
+        return (
+            "I could not find enough relevant local evidence to answer that "
+            "reliably, even after including publication metadata."
+        )
+    if required_sources > 1:
+        return (
+            "I could not find enough distinct body-text passages to answer that "
+            "broad question reliably. Try narrowing the question or selecting a book."
+        )
+    return "I could not find enough relevant body-text evidence to answer that reliably."
 
 
 def _to_sources(results: list[SearchResult]) -> list[ChatSource]:
@@ -296,13 +456,19 @@ def _to_sources(results: list[SearchResult]) -> list[ChatSource]:
                 title=result.title,
                 authors=result.authors,
                 chunk_index=result.chunk_index,
+                content_type=result.content_type,
                 text=result.text,
             )
         )
     return sources
 
 
-def _build_messages(question: str, sources: list[ChatSource]) -> list[ChatMessage]:
+def _build_messages(
+    question: str,
+    sources: list[ChatSource],
+    *,
+    required_sources: int,
+) -> list[ChatMessage]:
     source_text = _format_sources(sources)
     return [
         ChatMessage(
@@ -319,7 +485,9 @@ def _build_messages(question: str, sources: list[ChatSource]) -> list[ChatMessag
             content=(
                 f"Question:\n{question}\n\n"
                 f"Source chunks:\n{source_text}\n\n"
-                "Write a concise answer grounded in the source chunks."
+                "Write a concise answer in your own words grounded in the source chunks. "
+                f"Use at least {required_sources} distinct source IDs when the evidence "
+                "supports that many; do not invent facts or citations."
             ),
         ),
     ]

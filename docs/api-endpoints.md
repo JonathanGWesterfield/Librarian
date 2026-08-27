@@ -269,6 +269,10 @@ The index document includes chunk text, vector, book metadata, generated tags,
 and generated genres. Run indexing with `--reset` after re-chunking, rebuilding
 embeddings, or regenerating tags/genres.
 
+The index also stores each chunk's durable `content_type`. After upgrading to a
+release that introduces or changes content classification, run the explicit
+reset/rebuild once so OpenSearch receives the new field for existing chunks.
+
 ### `POST /search/index`
 
 Deliberately indexes stored chunks into OpenSearch so clients can wait for this
@@ -322,7 +326,9 @@ whether `reset` was applied.
 Runs OpenSearch-backed hybrid retrieval. The endpoint embeds the query, sends
 both keyword and vector retrieval requests to OpenSearch, merges those results,
 reranks a slightly wider candidate pool with exact phrase and metadata match
-signals, and returns the same response shape as `/search`.
+signals, and returns the same response shape as `/search`. The keyword leg uses
+OpenSearch's automatic fuzziness so a simple reader typo such as
+`Chrisitanity` can still retrieve relevant `Christianity` passages.
 
 Request fields:
 
@@ -338,6 +344,10 @@ Request fields:
 - `book_id`: optional exact stored book id filter.
 - `book_title`: optional title contains filter.
 - `author`: optional author filter.
+- `include_non_content`: defaults to `false`, so publisher, catalog, title,
+  contents, and back-matter chunks do not compete with book prose. Set it to
+  `true` when looking for an edition, ISBN, publisher, or other publication
+  detail.
 - `genre`: optional generated genre filter.
 - `tag`: optional generated topic tag filter.
 
@@ -363,7 +373,8 @@ Response:
 - `candidate_count`: OpenSearch hybrid hits considered before final reranking
   and trimming to `limit`.
 - `filters`: book, author, tag, or genre filters applied.
-- `results`: ranked chunks with score, book metadata, chunk id, and text.
+- `results`: ranked chunks with score, book metadata, chunk id, durable
+  `content_type`, and text.
 
 ## Chat
 
@@ -404,6 +415,16 @@ Request fields:
   silently inherit the configured lightweight behavior.
 - `book_id`, `book_title`, `author`: optional library scope filters.
 - `retrieval_limit`: number of source chunks to retrieve; defaults to `30`.
+- `include_non_content`: opt into publisher, catalog, and other non-body EPUB
+  matter. Questions explicitly about publication metadata do this automatically.
+
+Normal search and chat suppress non-body EPUB chunks so copyright and publisher
+pages cannot become the apparent evidence for a book-level answer. For an
+unscoped question that explicitly names a stored author and asks for that
+author's view, Librarian applies that author only when the metadata match is
+unique. Broad author-view and overview questions require ten distinct source
+chunks before generation; otherwise the API returns an insufficiency response
+instead of asking the model to fill a gap from its prior knowledge.
 
 For example, a one-off native Ollama model must state its capability:
 

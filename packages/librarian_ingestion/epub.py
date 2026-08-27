@@ -11,12 +11,76 @@ from ebooklib import epub
 from pydantic import BaseModel, Field
 
 
+BODY_CONTENT_TYPE = "body"
+FRONT_MATTER_CONTENT_TYPE = "front_matter"
+BACK_MATTER_CONTENT_TYPE = "back_matter"
+
+_FRONT_MATTER_PATH_MARKERS = (
+    "copyright",
+    "colophon",
+    "imprint",
+    "titlepage",
+    "title-page",
+    "frontmatter",
+    "front-matter",
+    "dedication",
+    "epigraph",
+    "contents",
+    "toc",
+    "catalog",
+    "publisher",
+    "isbn",
+    "license",
+)
+_BACK_MATTER_PATH_MARKERS = (
+    "backmatter",
+    "back-matter",
+    "also-by",
+    "also_by",
+    "about-author",
+    "about_author",
+    "about-publisher",
+    "about_publisher",
+    "advert",
+    "other-books",
+    "other_books",
+    "index",
+)
+_FRONT_MATTER_TEXT_MARKERS = (
+    "all rights reserved",
+    "cataloging-in-publication",
+    "library of congress",
+    "isbn",
+    "published by",
+    "copyright",
+)
+_BACK_MATTER_TEXT_MARKERS = (
+    "also by ",
+    "other books by ",
+    "about the author",
+    "about the publisher",
+)
+
+
+class ParsedBookSection(BaseModel):
+    """One readable EPUB spine document with its retrieval content role."""
+
+    source_name: str
+    text: str
+    content_type: str = BODY_CONTENT_TYPE
+
+
 class ParsedBook(BaseModel):
     source_path: str
     title: Optional[str] = None
     authors: list[str] = Field(default_factory=list)
     publisher: Optional[str] = None
-    text: str
+    sections: list[ParsedBookSection] = Field(default_factory=list)
+
+    @property
+    def text(self) -> str:
+        """Retain the original parser text view for callers outside ingestion."""
+        return "\n\n".join(section.text for section in self.sections)
 
 
 def parse_epub(path: str | Path) -> ParsedBook:
@@ -32,7 +96,7 @@ def _parse_with_ebooklib(source: Path) -> ParsedBook:
     title = _first_metadata(book, "DC", "title")
     authors = [value for value, _attrs in book.get_metadata("DC", "creator")]
     publisher = _first_metadata(book, "DC", "publisher")
-    text_parts: list[str] = []
+    sections: list[ParsedBookSection] = []
 
     for item in book.get_items_of_type(ITEM_DOCUMENT):
         if hasattr(item, "is_chapter") and not item.is_chapter():
@@ -40,14 +104,21 @@ def _parse_with_ebooklib(source: Path) -> ParsedBook:
         soup = BeautifulSoup(item.get_body_content(), "html.parser")
         text = soup.get_text("\n", strip=True)
         if text:
-            text_parts.append(text)
+            source_name = _item_source_name(item)
+            sections.append(
+                ParsedBookSection(
+                    source_name=source_name,
+                    text=text,
+                    content_type=classify_epub_content_type(source_name, text),
+                )
+            )
 
     return ParsedBook(
         source_path=str(source),
         title=title,
         authors=authors,
         publisher=publisher,
-        text="\n\n".join(text_parts),
+        sections=sections,
     )
 
 
@@ -58,7 +129,7 @@ def _parse_with_zip_fallback(source: Path) -> ParsedBook:
         metadata = _extract_opf_metadata(opf_root)
         spine_hrefs = _extract_spine_hrefs(opf_root)
         opf_dir = str(Path(opf_path).parent)
-        text_parts: list[str] = []
+        sections: list[ParsedBookSection] = []
 
         for href in spine_hrefs:
             item_path = str(Path(opf_dir) / href) if opf_dir != "." else href
@@ -69,15 +140,52 @@ def _parse_with_zip_fallback(source: Path) -> ParsedBook:
             soup = BeautifulSoup(content, "html.parser")
             text = soup.get_text("\n", strip=True)
             if text:
-                text_parts.append(text)
+                sections.append(
+                    ParsedBookSection(
+                        source_name=href,
+                        text=text,
+                        content_type=classify_epub_content_type(href, text),
+                    )
+                )
 
     return ParsedBook(
         source_path=str(source),
         title=metadata.get("title"),
         authors=metadata.get("authors", []),
         publisher=metadata.get("publisher"),
-        text="\n\n".join(text_parts),
+        sections=sections,
     )
+
+
+def classify_epub_content_type(source_name: str, text: str) -> str:
+    """Classify clear publishing matter without treating ordinary prose as metadata.
+
+    EPUB navigation and publisher pages often live in the same spine as the
+    book body.  Keep their role alongside chunks so retrieval can exclude them
+    by default while still making explicitly requested edition information
+    searchable.
+    """
+    normalized_source = source_name.replace("\\", "/").casefold()
+    normalized_text = " ".join(text.casefold().split())
+    if any(marker in normalized_source for marker in _FRONT_MATTER_PATH_MARKERS):
+        return FRONT_MATTER_CONTENT_TYPE
+    if any(marker in normalized_source for marker in _BACK_MATTER_PATH_MARKERS):
+        return BACK_MATTER_CONTENT_TYPE
+    if any(marker in normalized_text for marker in _FRONT_MATTER_TEXT_MARKERS):
+        return FRONT_MATTER_CONTENT_TYPE
+    if any(marker in normalized_text for marker in _BACK_MATTER_TEXT_MARKERS):
+        return BACK_MATTER_CONTENT_TYPE
+    return BODY_CONTENT_TYPE
+
+
+def _item_source_name(item: object) -> str:
+    for attribute in ("get_name", "file_name", "get_id"):
+        value = getattr(item, attribute, None)
+        if callable(value):
+            value = value()
+        if isinstance(value, str) and value.strip():
+            return value
+    return "unknown"
 
 
 def _find_opf_path(archive: ZipFile) -> str:
