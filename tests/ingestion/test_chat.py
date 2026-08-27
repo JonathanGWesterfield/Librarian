@@ -272,6 +272,147 @@ class ChatTests(unittest.TestCase):
         self.assertIn("enough distinct body-text passages", response.answer)
         self.assertEqual(generator.messages, [])
 
+    def test_lightweight_lookup_is_extractive_for_scoped_and_unscoped_gate_questions(self) -> None:
+        """A lightweight lookup must preserve Mara as the source sentence subject."""
+        question = "Who opens the garden gate?"
+        search_response = _chat_search_response(
+            question,
+            text=(
+                "The clockwork garden woke at dawn.\n"
+                "A brass robin counted three silver seeds.\n"
+                "Mara opened the gate with a borrowed key."
+            ),
+        )
+        for book_title in (None, "The Clockwork Garden"):
+            generator = _FakeGenerator()
+            with (
+                patch(
+                    "librarian_chat.chat.embed_query",
+                    return_value=_query_embedding_for(question),
+                ),
+                patch(
+                    "librarian_chat.chat.resolve_chat_retrieval_backend",
+                    return_value="sqlite",
+                ),
+                patch(
+                    "librarian_chat.chat.search_chunks", return_value=search_response
+                ) as search_chunks,
+                patch(
+                    "librarian_chat.chat.create_configured_generator",
+                    return_value=generator,
+                ),
+            ):
+                response = answer_question(
+                    ChatOptions(
+                        question=question,
+                        database_url="sqlite:///tmp/librarian.db",
+                        embedding_provider="ollama",
+                        embedding_model="all-minilm",
+                        generation_provider="ollama",
+                        generation_model="qwen2.5:1.5b",
+                        answer_capability="lightweight",
+                        book_title=book_title,
+                    )
+                )
+
+            self.assertEqual(response.answer, "Mara opened the gate with a borrowed key. [S1]")
+            self.assertEqual(search_chunks.call_args.args[0].book_title, book_title)
+            self.assertEqual(generator.messages, [])
+
+    def test_lightweight_lookup_refuses_when_no_source_sentence_supports_the_question(self) -> None:
+        """Never fall through to a small model after extractive support fails."""
+        question = "Who opens the garden gate?"
+        generator = _FakeGenerator()
+        with (
+            patch(
+                "librarian_chat.chat.embed_query",
+                return_value=_query_embedding_for(question),
+            ),
+            patch(
+                "librarian_chat.chat.resolve_chat_retrieval_backend",
+                return_value="sqlite",
+            ),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(
+                    question,
+                    text="A brass robin counted three silver seeds.",
+                ),
+            ),
+            patch(
+                "librarian_chat.chat.create_configured_generator",
+                return_value=generator,
+            ),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:1.5b",
+                    answer_capability="lightweight",
+                )
+            )
+
+        self.assertIn("enough relevant body-text evidence", response.answer)
+        self.assertEqual(generator.messages, [])
+
+    def test_publication_question_requires_non_body_publisher_evidence(self) -> None:
+        """Body prose cannot become a citation for a publisher question."""
+        question = "Who published The Clockwork Garden?"
+        body_only = _chat_search_response(
+            question,
+            text="The clockwork garden woke at dawn.",
+        )
+        front_matter = _chat_search_response(
+            question,
+            text="Published by Fixture Press in 2024.",
+            content_type="front_matter",
+        )
+        for search_response, expected_answer in (
+            (
+                body_only,
+                "I could not find publication or edition evidence in the local EPUB content to answer that reliably.",
+            ),
+            (front_matter, "Published by Fixture Press in 2024. [S1]"),
+        ):
+            generator = _FakeGenerator()
+            with (
+                patch(
+                    "librarian_chat.chat.embed_query",
+                    return_value=_query_embedding_for(question),
+                ),
+                patch(
+                    "librarian_chat.chat.resolve_chat_retrieval_backend",
+                    return_value="sqlite",
+                ),
+                patch(
+                    "librarian_chat.chat.search_chunks", return_value=search_response
+                ) as search_chunks,
+                patch(
+                    "librarian_chat.chat.create_configured_generator",
+                    return_value=generator,
+                ),
+            ):
+                response = answer_question(
+                    ChatOptions(
+                        question=question,
+                        database_url="sqlite:///tmp/librarian.db",
+                        embedding_provider="ollama",
+                        embedding_model="all-minilm",
+                        generation_provider="ollama",
+                        generation_model="qwen2.5:1.5b",
+                        answer_capability="lightweight",
+                    )
+                )
+
+            self.assertEqual(response.answer, expected_answer)
+            self.assertTrue(search_chunks.call_args.args[0].include_non_content)
+            self.assertEqual(generator.messages, [])
+        self.assertEqual(body_only.results[0].content_type, "body")
+
 
 def _query_embedding() -> EmbedQueryResult:
     return EmbedQueryResult(
@@ -340,6 +481,39 @@ def _author_search_response(question: str, *, count: int) -> SearchResponse:
                 dimensions=2,
             )
             for index in range(count)
+        ],
+    )
+
+
+def _chat_search_response(
+    question: str,
+    *,
+    text: str,
+    content_type: str = "body",
+) -> SearchResponse:
+    return SearchResponse(
+        query=question,
+        embedding_provider="ollama",
+        embedding_model="all-minilm",
+        dimensions=2,
+        candidate_count=1,
+        filters={},
+        results=[
+            SearchResult(
+                score=0.9,
+                chunk_id="clockwork:0",
+                book_id="clockwork",
+                relative_path="clockwork.epub",
+                title="The Clockwork Garden",
+                authors=["Test Author"],
+                publisher="Fixture Press",
+                chunk_index=0,
+                content_type=content_type,
+                text=text,
+                embedding_provider="ollama",
+                embedding_model="all-minilm",
+                dimensions=2,
+            )
         ],
     )
 
