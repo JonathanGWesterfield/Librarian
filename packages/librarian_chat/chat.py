@@ -235,9 +235,18 @@ def answer_question(options: ChatOptions) -> ChatResponse:
             if _is_publication_evidence(question, result.content_type, result.text)
         ]
     sources = _to_sources(retrieval_results)
+    required_sources = _required_source_count(question, effective_author)
+    evidence_sufficient = _has_sufficient_evidence(
+        sources,
+        required_sources=required_sources,
+    )
+    if not evidence_sufficient:
+        # Results that fail the guard are diagnostics, not answer evidence.
+        # Preserve candidate_count and timings, but never display misleading
+        # citations alongside an insufficiency response.
+        sources = []
 
     prompt_started = perf_counter()
-    required_sources = _required_source_count(question, effective_author)
     messages = _build_messages(
         question,
         sources,
@@ -251,7 +260,7 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,
     )
-    if not _has_sufficient_evidence(sources, required_sources=required_sources):
+    if not evidence_sufficient:
         answer = _insufficient_evidence_answer(
             publication_question=publication_question,
             required_sources=required_sources,
@@ -261,6 +270,10 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         if answer_capability == "lightweight":
             answer = _lightweight_lookup_answer(question, sources)
             if answer is None:
+                # The retrieval floor can pass even when no single sentence
+                # safely answers a factual lookup. Those chunks must not be
+                # shown as citations for the resulting refusal.
+                sources = []
                 answer = _insufficient_evidence_answer(
                     publication_question=publication_question,
                     required_sources=required_sources,
@@ -611,6 +624,8 @@ def _meaningful_terms(value: str) -> set[str]:
 
 def _term_stem(term: str) -> str:
     """Normalize only common English inflections used in factual lookups."""
+    if term in {"wake", "wakes", "woke", "waking"}:
+        return "wake"
     if term in {"publisher", "published", "publishing", "publishes"}:
         return "publish"
     if term.endswith("ies") and len(term) > 4:
