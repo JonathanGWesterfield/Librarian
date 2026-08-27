@@ -665,14 +665,17 @@ POST /embeddings/rebuild   body: database_url, embedding_provider,
 POST /embeddings/query     body: query, embedding_provider, embedding_model,
                             ollama_base_url
 POST /search               body: query, database_url, embedding_provider,
-                            embedding_model, ollama_base_url, limit
+                            embedding_model, ollama_base_url, limit,
+                            book_id, book_title, author, include_non_content
 POST /search/hybrid        body: query, opensearch_url, index_name,
                             embedding_provider, embedding_model,
-                            ollama_base_url, limit, genre, tag
+                            ollama_base_url, limit, book_id, book_title, author,
+                            include_non_content, genre, tag
 POST /chat                 body: question, database_url, embedding_provider,
                             embedding_model, generation_provider,
                             generation_model, answer_capability, ollama_base_url,
-                            retrieval_limit
+                            retrieval_limit, book_id, book_title, author,
+                            include_non_content
 POST /books/{book_id}/summary
                            body: database_url, generation_provider,
                             generation_model, ollama_base_url, detail,

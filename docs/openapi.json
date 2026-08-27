@@ -1746,6 +1746,11 @@
           "author": {
             "type": ["string", "null"],
             "description": "Restrict search to stored books whose author metadata contains this text."
+          },
+          "include_non_content": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include publisher, catalog, and other non-body EPUB content."
           }
         }
       },
@@ -1843,6 +1848,11 @@
             "type": ["string", "null"],
             "description": "Restrict search to stored books whose author metadata contains this text."
           },
+          "include_non_content": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include publisher, catalog, and other non-body EPUB content."
+          },
           "genre": {
             "type": ["string", "null"],
             "description": "Restrict search to documents with a generated genre."
@@ -1906,6 +1916,10 @@
           "author": {
             "type": "string"
           },
+          "include_non_content": {
+            "type": "string",
+            "enum": ["true"]
+          },
           "genre": {
             "type": "string"
           },
@@ -1926,6 +1940,7 @@
           "authors",
           "publisher",
           "chunk_index",
+          "content_type",
           "text",
           "embedding_provider",
           "embedding_model",
@@ -1960,6 +1975,10 @@
           "chunk_index": {
             "type": "integer",
             "minimum": 0
+          },
+          "content_type": {
+            "type": "string",
+            "enum": ["body", "front_matter", "back_matter"]
           },
           "text": {
             "type": "string"
@@ -2398,6 +2417,11 @@
           "author": {
             "type": ["string", "null"],
             "description": "Restrict retrieval to stored books whose author metadata contains this text."
+          },
+          "include_non_content": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include publisher, catalog, and other non-body EPUB content. Publication and edition questions enable this automatically."
           }
         }
       },
@@ -2513,6 +2537,7 @@
           "title",
           "authors",
           "chunk_index",
+          "content_type",
           "text"
         ],
         "properties": {
@@ -2545,6 +2570,11 @@
           "chunk_index": {
             "type": "integer",
             "minimum": 0
+          },
+          "content_type": {
+            "type": "string",
+            "enum": ["body", "front_matter", "back_matter"],
+            "default": "body"
           },
           "text": {
             "type": "string"

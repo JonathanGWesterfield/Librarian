@@ -75,9 +75,14 @@ class OpenSearchIndexingTests(unittest.TestCase):
         bulk_lines = transport.requests[2]["raw_body"].strip().splitlines()
         document = json.loads(bulk_lines[1])
         self.assertEqual(document["chunk_id"], "book-1:0")
+        self.assertEqual(document["content_type"], "body")
         self.assertEqual(document["vector"], [1.0, 0.0])
         self.assertEqual(document["tags"], ["clockwork garden"])
         self.assertEqual(document["genres"], ["Science Fiction"])
+        self.assertEqual(
+            transport.requests[1]["payload"]["mappings"]["properties"]["content_type"],
+            {"type": "keyword"},
+        )
         self.assertEqual(transport.requests[3]["method"], "POST")
         self.assertEqual(
             transport.requests[3]["url"],

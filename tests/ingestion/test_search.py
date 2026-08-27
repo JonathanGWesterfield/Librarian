@@ -154,6 +154,94 @@ class SearchChunksTests(unittest.TestCase):
         self.assertEqual(response.candidate_count, 0)
         self.assertEqual(response.results, [])
 
+    def test_search_chunks_excludes_publisher_matter_unless_explicitly_requested(self) -> None:
+        """Normal SQLite retrieval must not prefer catalog text over book prose."""
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(
+                BookRecord(
+                    id="front-matter-book",
+                    source_path="/books/front-matter.epub",
+                    relative_path="front-matter.epub",
+                    file_hash="front-matter-book",
+                    size_bytes=100,
+                    title="Publisher Matter",
+                    authors=["C. S. Lewis"],
+                    publisher="Fixture Press",
+                    status="ingested",
+                    ingested_at=utc_now(),
+                ),
+                [
+                    ChunkRecord(
+                        id="front-matter-book:0",
+                        book_id="front-matter-book",
+                        chunk_index=0,
+                        text="Copyright 1950. All rights reserved. Published by Fixture Press.",
+                        character_count=67,
+                        token_estimate=16,
+                        content_type="front_matter",
+                    ),
+                    ChunkRecord(
+                        id="front-matter-book:1",
+                        book_id="front-matter-book",
+                        chunk_index=1,
+                        text="Christian faith is lived through ordinary choices and charity.",
+                        character_count=61,
+                        token_estimate=15,
+                    ),
+                ],
+            )
+            store.save_chunk_embeddings(
+                [
+                    EmbeddingRecord(
+                        id="front-matter-book:0:ollama:all-minilm",
+                        chunk_id="front-matter-book:0",
+                        provider="ollama",
+                        model="all-minilm",
+                        vector=[1.0, 0.0],
+                        dimensions=2,
+                    ),
+                    EmbeddingRecord(
+                        id="front-matter-book:1:ollama:all-minilm",
+                        chunk_id="front-matter-book:1",
+                        provider="ollama",
+                        model="all-minilm",
+                        vector=[0.9, 0.1],
+                        dimensions=2,
+                    ),
+                ]
+            )
+
+        with patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            normal = search_chunks(
+                SearchOptions(
+                    query="publication details",
+                    database_url=self.database_url,
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    author="C. S. Lewis",
+                    limit=10,
+                )
+            )
+            publication = search_chunks(
+                SearchOptions(
+                    query="publication details",
+                    database_url=self.database_url,
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    author="C. S. Lewis",
+                    include_non_content=True,
+                    limit=10,
+                )
+            )
+
+        self.assertNotIn("front-matter-book:0", [result.chunk_id for result in normal.results])
+        self.assertEqual(normal.results[0].content_type, "body")
+        self.assertIn("front-matter-book:0", [result.chunk_id for result in publication.results])
+        self.assertEqual(publication.filters["include_non_content"], "true")
+
     def _seed_search_fixture(self) -> None:
         book = BookRecord(
             id="book-hash",
