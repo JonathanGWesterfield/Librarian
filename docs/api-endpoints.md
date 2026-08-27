@@ -455,7 +455,9 @@ matches a local source sentence is returned as that sentence with its source
 ID. This deliberately preserves subject/action relationships in small-model
 answers. If no source sentence verifies the lookup, lightweight mode returns an
 insufficiency response rather than asking the small model to paraphrase or
-guess; select a `quality` provider for supported synthesis questions.
+guess; select a `quality` provider for supported synthesis questions. An
+insufficiency response has no citations, because retrieved chunks that fail the
+evidence guard are diagnostics rather than support for the answer.
 
 ## Recommendations
 

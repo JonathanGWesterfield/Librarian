@@ -271,6 +271,7 @@ class ChatTests(unittest.TestCase):
 
         self.assertIn("enough distinct body-text passages", response.answer)
         self.assertEqual(generator.messages, [])
+        self.assertEqual(response.sources, [])
 
     def test_lightweight_lookup_is_extractive_for_scoped_and_unscoped_gate_questions(self) -> None:
         """A lightweight lookup must preserve Mara as the source sentence subject."""
@@ -319,6 +320,49 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(search_chunks.call_args.args[0].book_title, book_title)
             self.assertEqual(generator.messages, [])
 
+    def test_lightweight_lookup_safely_matches_wakes_to_woke_in_a_scoped_book(self) -> None:
+        """Irregular factual inflections still return the exact cited sentence."""
+        question = "What wakes at dawn?"
+        generator = _FakeGenerator()
+        with (
+            patch(
+                "librarian_chat.chat.embed_query",
+                return_value=_query_embedding_for(question),
+            ),
+            patch(
+                "librarian_chat.chat.resolve_chat_retrieval_backend",
+                return_value="sqlite",
+            ),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(
+                    question,
+                    text="The clockwork garden woke at dawn.",
+                ),
+            ) as search_chunks,
+            patch(
+                "librarian_chat.chat.create_configured_generator",
+                return_value=generator,
+            ),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:1.5b",
+                    answer_capability="lightweight",
+                    book_title="The Clockwork Garden",
+                )
+            )
+
+        self.assertEqual(response.answer, "The clockwork garden woke at dawn. [S1]")
+        self.assertEqual(response.sources[0].text, "The clockwork garden woke at dawn.")
+        self.assertEqual(search_chunks.call_args.args[0].book_title, "The Clockwork Garden")
+        self.assertEqual(generator.messages, [])
+
     def test_lightweight_lookup_refuses_when_no_source_sentence_supports_the_question(self) -> None:
         """Never fall through to a small model after extractive support fails."""
         question = "Who opens the garden gate?"
@@ -358,6 +402,7 @@ class ChatTests(unittest.TestCase):
 
         self.assertIn("enough relevant body-text evidence", response.answer)
         self.assertEqual(generator.messages, [])
+        self.assertEqual(response.sources, [])
 
     def test_publication_question_requires_non_body_publisher_evidence(self) -> None:
         """Body prose cannot become a citation for a publisher question."""
@@ -411,6 +456,8 @@ class ChatTests(unittest.TestCase):
             self.assertEqual(response.answer, expected_answer)
             self.assertTrue(search_chunks.call_args.args[0].include_non_content)
             self.assertEqual(generator.messages, [])
+            if search_response is body_only:
+                self.assertEqual(response.sources, [])
         self.assertEqual(body_only.results[0].content_type, "body")
 
 
