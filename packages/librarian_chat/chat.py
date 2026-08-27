@@ -69,6 +69,8 @@ _PUBLICATION_METADATA_TERMS = (
     "edition",
     "isbn",
     "publication",
+    "published",
+    "publishing",
     "publisher",
     "table of contents",
 )
@@ -224,7 +226,15 @@ def answer_question(options: ChatOptions) -> ChatResponse:
         include_non_content=include_non_content,
     )
     retrieval_seconds = perf_counter() - retrieval_started
-    sources = _to_sources(search_response.results)
+    publication_question = _asks_for_publication_metadata(question)
+    retrieval_results = search_response.results
+    if publication_question:
+        retrieval_results = [
+            result
+            for result in retrieval_results
+            if _is_publication_evidence(question, result.content_type, result.text)
+        ]
+    sources = _to_sources(retrieval_results)
 
     prompt_started = perf_counter()
     required_sources = _required_source_count(question, effective_author)
@@ -243,15 +253,18 @@ def answer_question(options: ChatOptions) -> ChatResponse:
     )
     if not _has_sufficient_evidence(sources, required_sources=required_sources):
         answer = _insufficient_evidence_answer(
-            include_non_content=include_non_content,
+            publication_question=publication_question,
             required_sources=required_sources,
         )
     else:
-        answer = (
-            _lightweight_lookup_answer(question, sources)
-            if answer_capability == "lightweight"
-            else None
-        )
+        answer = None
+        if answer_capability == "lightweight":
+            answer = _lightweight_lookup_answer(question, sources)
+            if answer is None:
+                answer = _insufficient_evidence_answer(
+                    publication_question=publication_question,
+                    required_sources=required_sources,
+                )
         if answer is None:
             answer = generator.generate(messages)
     generation_seconds = perf_counter() - generation_started
@@ -427,13 +440,12 @@ def _has_sufficient_evidence(
 
 
 def _insufficient_evidence_answer(
-    *, include_non_content: bool,
-    required_sources: int,
+    *, publication_question: bool, required_sources: int
 ) -> str:
-    if include_non_content:
+    if publication_question:
         return (
-            "I could not find enough relevant local evidence to answer that "
-            "reliably, even after including publication metadata."
+            "I could not find publication or edition evidence in the local EPUB "
+            "content to answer that reliably."
         )
     if required_sources > 1:
         return (
@@ -441,6 +453,31 @@ def _insufficient_evidence_answer(
             "broad question reliably. Try narrowing the question or selecting a book."
         )
     return "I could not find enough relevant body-text evidence to answer that reliably."
+
+
+def _is_publication_evidence(
+    question: str,
+    content_type: str,
+    text: str,
+) -> bool:
+    """Require publisher questions to cite the relevant non-body EPUB text."""
+    if content_type == "body":
+        return False
+    normalized_question = " ".join(question.casefold().split())
+    normalized_text = " ".join(text.casefold().split())
+    if "isbn" in normalized_question:
+        return "isbn" in normalized_text
+    if "copyright" in normalized_question:
+        return "copyright" in normalized_text
+    if "edition" in normalized_question:
+        return "edition" in normalized_text
+    if "publish" in normalized_question:
+        if normalized_question.startswith("who"):
+            return "published by" in normalized_text or "publisher" in normalized_text
+        return "published" in normalized_text or "publisher" in normalized_text
+    if "table of contents" in normalized_question:
+        return "contents" in normalized_text
+    return True
 
 
 def _to_sources(results: list[SearchResult]) -> list[ChatSource]:
@@ -521,11 +558,19 @@ def _lightweight_lookup_answer(question: str, sources: list[ChatSource]) -> str 
     lookup, preserving the source's subject/action relationship is more useful
     than asking that model to paraphrase adjacent sentences. This path is
     deliberately narrow: it only applies when a question-led source sentence
-    covers the request's meaningful terms. Broader questions still use the
-    configured generator.
+    covers the request's meaningful terms. Lightweight mode refuses rather
+    than falling through to generation when that support is absent.
     """
     question_terms = _meaningful_terms(question)
     if not _is_lookup_question(question) or not question_terms:
+        return None
+
+    if _asks_for_publication_metadata(question):
+        for source in sources:
+            if _is_publication_evidence(question, source.content_type, source.text):
+                sentences = _sentences(source.text)
+                if sentences:
+                    return f"{sentences[0]} [{source.source_id}]"
         return None
 
     best: tuple[float, int, ChatSource, str] | None = None
@@ -558,10 +603,25 @@ def _is_lookup_question(question: str) -> bool:
 
 def _meaningful_terms(value: str) -> set[str]:
     return {
-        term
+        _term_stem(term)
         for term in _WORD.findall(value.casefold())
         if term not in _QUESTION_STOP_WORDS and len(term) > 1
     }
+
+
+def _term_stem(term: str) -> str:
+    """Normalize only common English inflections used in factual lookups."""
+    if term in {"publisher", "published", "publishing", "publishes"}:
+        return "publish"
+    if term.endswith("ies") and len(term) > 4:
+        return f"{term[:-3]}y"
+    if term.endswith(("ches", "shes", "sses", "xes", "zes")) and len(term) > 4:
+        return term[:-2]
+    if term.endswith("ed") and len(term) > 4:
+        return term[:-2]
+    if term.endswith("s") and len(term) > 3:
+        return term[:-1]
+    return term
 
 
 def _sentences(text: str) -> list[str]:

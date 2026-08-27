@@ -425,6 +425,8 @@ author's view, Librarian applies that author only when the metadata match is
 unique. Broad author-view and overview questions require ten distinct source
 chunks before generation; otherwise the API returns an insufficiency response
 instead of asking the model to fill a gap from its prior knowledge.
+Publication questions retain only matching non-body EPUB evidence; if that
+evidence is absent, they return insufficiency rather than cite book prose.
 
 For example, a one-off native Ollama model must state its capability:
 
@@ -451,8 +453,9 @@ Malformed request fields remain FastAPI validation errors (`422`).
 For the configured `lightweight` Compose model, a direct factual lookup that
 matches a local source sentence is returned as that sentence with its source
 ID. This deliberately preserves subject/action relationships in small-model
-answers; broader or weakly matched questions still use the configured
-generator.
+answers. If no source sentence verifies the lookup, lightweight mode returns an
+insufficiency response rather than asking the small model to paraphrase or
+guess; select a `quality` provider for supported synthesis questions.
 
 ## Recommendations
 
