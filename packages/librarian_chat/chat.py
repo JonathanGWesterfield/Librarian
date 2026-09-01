@@ -65,6 +65,11 @@ _BROAD_QUESTION_TERMS = (
     "what does the author",
     "what do the author",
 )
+_EVENT_QUESTION_PREFIXES = (
+    "what happened",
+    "what happens",
+    "what occurred",
+)
 _PUBLICATION_METADATA_TERMS = (
     "copyright",
     "edition",
@@ -738,7 +743,9 @@ def _grounded_extractive_answer(
     factual language remains byte-for-byte source text. The relevance score is
     deliberately used only to decide which *existing* sentence to display.
     Broad questions require one relevant sentence from every required source;
-    a narrow question uses the strongest single sentence.
+    a narrow question uses the strongest single sentence. For a narrative event
+    question, the immediately following sentence can join that answer only
+    when it also shares question or primary-sentence terms.
     """
     question_terms = _meaningful_terms(question)
     if not question_terms:
@@ -794,7 +801,53 @@ def _grounded_extractive_answer(
         return None
     selected_sources = [candidate[4] for candidate in selected]
     tokens = [f"{candidate[5]} [{candidate[4].source_id}]" for candidate in selected]
+    if not broad_question:
+        primary = selected[0]
+        context_sentence = _event_context_sentence(
+            question,
+            source=primary[4],
+            primary_sentence=primary[5],
+        )
+        if context_sentence is not None:
+            tokens.append(f"{context_sentence} [{primary[4].source_id}]")
     return selected_sources, tokens
+
+
+def _event_context_sentence(
+    question: str,
+    *,
+    source: ChatSource,
+    primary_sentence: str,
+) -> str | None:
+    """Return one directly relevant next sentence for a narrative event query.
+
+    This deliberately keeps the context rule local and conservative. The next
+    source sentence must share at least one meaningful term with either the
+    question or the selected event sentence; adjacency alone never turns an
+    unrelated sentence into an answer claim.
+    """
+    if not _is_event_question(question):
+        return None
+    sentences = _sentences(source.text)
+    try:
+        primary_index = sentences.index(primary_sentence)
+    except ValueError:
+        return None
+    if primary_index + 1 >= len(sentences):
+        return None
+
+    context_sentence = sentences[primary_index + 1]
+    context_terms = _meaningful_terms(context_sentence)
+    if context_terms & _meaningful_terms(question):
+        return context_sentence
+    if context_terms & _meaningful_terms(primary_sentence):
+        return context_sentence
+    return None
+
+
+def _is_event_question(question: str) -> bool:
+    normalized = " ".join(question.casefold().split())
+    return normalized.startswith(_EVENT_QUESTION_PREFIXES)
 
 
 def _meaningful_terms(value: str) -> set[str]:
