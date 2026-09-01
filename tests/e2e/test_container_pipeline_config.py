@@ -78,6 +78,39 @@ class ContainerPipelineConfigTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8080/", web_service)
         self.assertNotIn("http://localhost:8080/", web_service)
 
+    def test_web_nginx_revalidates_the_spa_shell_but_keeps_hashed_assets_immutable(self) -> None:
+        """A same-origin reload must fetch the current Vite entry document.
+
+        The exact index location also receives the internal ``try_files``
+        fallback used for client-side routes. API proxying remains a separate
+        location and must not inherit either browser-cache rule.
+        """
+        nginx = (REPO_ROOT / "apps" / "web" / "nginx.conf").read_text(
+            encoding="utf-8"
+        )
+
+        index_location = nginx.split("location = /index.html", 1)[1].split(
+            "location ^~ /assets/", 1
+        )[0]
+        assets_location = nginx.split("location ^~ /assets/", 1)[1].split(
+            "location / {", 1
+        )[0]
+        api_location = nginx.split("location /api/", 1)[1].split(
+            "location = /index.html", 1
+        )[0]
+
+        self.assertIn("try_files $uri =404;", index_location)
+        self.assertIn(
+            'Cache-Control "no-cache, must-revalidate" always;',
+            index_location,
+        )
+        self.assertIn("try_files $uri =404;", assets_location)
+        self.assertIn(
+            'Cache-Control "public, max-age=31536000, immutable" always;',
+            assets_location,
+        )
+        self.assertNotIn("Cache-Control", api_location)
+
     def test_local_launchers_wait_for_one_shot_ollama_and_verify_models(self) -> None:
         """Launchers must not mistake creation of ollama-init for successful pulls."""
         bash = (REPO_ROOT / "scripts" / "start_local.sh").read_text(encoding="utf-8")
