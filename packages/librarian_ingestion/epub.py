@@ -15,36 +15,34 @@ BODY_CONTENT_TYPE = "body"
 FRONT_MATTER_CONTENT_TYPE = "front_matter"
 BACK_MATTER_CONTENT_TYPE = "back_matter"
 
-_FRONT_MATTER_PATH_MARKERS = (
-    "copyright",
-    "colophon",
-    "imprint",
-    "titlepage",
-    "title-page",
-    "frontmatter",
-    "front-matter",
-    "dedication",
-    "epigraph",
-    "contents",
-    "toc",
-    "catalog",
-    "publisher",
-    "isbn",
-    "license",
+_FRONT_MATTER_PATH_NAMES = frozenset(
+    {
+        "copyright",
+        "colophon",
+        "imprint",
+        "titlepage",
+        "frontmatter",
+        "dedication",
+        "epigraph",
+        "contents",
+        "tableofcontents",
+        "toc",
+        "catalog",
+        "publisher",
+        "isbn",
+        "license",
+    }
 )
-_BACK_MATTER_PATH_MARKERS = (
-    "backmatter",
-    "back-matter",
-    "also-by",
-    "also_by",
-    "about-author",
-    "about_author",
-    "about-publisher",
-    "about_publisher",
-    "advert",
-    "other-books",
-    "other_books",
-    "index",
+_BACK_MATTER_PATH_NAMES = frozenset(
+    {
+        "backmatter",
+        "alsoby",
+        "aboutauthor",
+        "aboutpublisher",
+        "advert",
+        "otherbooks",
+        "index",
+    }
 )
 _FRONT_MATTER_TEXT_MARKERS = (
     "all rights reserved",
@@ -165,17 +163,35 @@ def classify_epub_content_type(source_name: str, text: str) -> str:
     by default while still making explicitly requested edition information
     searchable.
     """
-    normalized_source = source_name.replace("\\", "/").casefold()
     normalized_text = " ".join(text.casefold().split())
-    if any(marker in normalized_source for marker in _FRONT_MATTER_PATH_MARKERS):
+    if _path_has_classified_name(source_name, _FRONT_MATTER_PATH_NAMES):
         return FRONT_MATTER_CONTENT_TYPE
-    if any(marker in normalized_source for marker in _BACK_MATTER_PATH_MARKERS):
+    if _path_has_classified_name(source_name, _BACK_MATTER_PATH_NAMES):
         return BACK_MATTER_CONTENT_TYPE
     if any(marker in normalized_text for marker in _FRONT_MATTER_TEXT_MARKERS):
         return FRONT_MATTER_CONTENT_TYPE
     if any(marker in normalized_text for marker in _BACK_MATTER_TEXT_MARKERS):
         return BACK_MATTER_CONTENT_TYPE
     return BODY_CONTENT_TYPE
+
+
+def _path_has_classified_name(source_name: str, names: frozenset[str]) -> bool:
+    """Match known publishing filenames without matching a marker substring.
+
+    EPUB producers use punctuation inconsistently (``also-by.xhtml`` versus
+    ``also_by.xhtml``), so normalize each complete path segment.  Deliberately
+    avoid scanning the whole path: a body filename such as
+    ``stock-market.xhtml`` must not become front matter simply because it
+    contains the letters ``toc``.
+    """
+    for segment in source_name.replace("\\", "/").split("/"):
+        stem = segment.rsplit(".", 1)[0]
+        canonical_name = "".join(
+            character for character in stem.casefold() if character.isalnum()
+        )
+        if canonical_name in names:
+            return True
+    return False
 
 
 def _item_source_name(item: object) -> str:

@@ -9,6 +9,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_search.search import SearchOptions, search_chunks
+from librarian_ingestion.epub import classify_epub_content_type
 from librarian_storage.storage import (
     BookRecord,
     ChunkRecord,
@@ -241,6 +242,71 @@ class SearchChunksTests(unittest.TestCase):
         self.assertEqual(normal.results[0].content_type, "body")
         self.assertIn("front-matter-book:0", [result.chunk_id for result in publication.results])
         self.assertEqual(publication.filters["include_non_content"], "true")
+
+    def test_search_chunks_keeps_body_chapter_with_incidental_path_marker(self) -> None:
+        """Normal search must retain a stock-market chapter instead of treating it as a TOC."""
+        content_type = classify_epub_content_type(
+            "text/stock-market.xhtml",
+            "The stock market opened after the bell.",
+        )
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(
+                BookRecord(
+                    id="stock-market-book",
+                    source_path="/books/stock-market.epub",
+                    relative_path="stock-market.epub",
+                    file_hash="stock-market-book",
+                    size_bytes=100,
+                    title="Market Novel",
+                    authors=["Test Author"],
+                    publisher="Fixture Press",
+                    status="ingested",
+                    ingested_at=utc_now(),
+                ),
+                [
+                    ChunkRecord(
+                        id="stock-market-book:0",
+                        book_id="stock-market-book",
+                        chunk_index=0,
+                        text="The stock market opened after the bell.",
+                        character_count=39,
+                        token_estimate=9,
+                        content_type=content_type,
+                    )
+                ],
+            )
+            store.save_chunk_embeddings(
+                [
+                    EmbeddingRecord(
+                        id="stock-market-book:0:ollama:all-minilm",
+                        chunk_id="stock-market-book:0",
+                        provider="ollama",
+                        model="all-minilm",
+                        vector=[1.0, 0.0],
+                        dimensions=2,
+                    )
+                ]
+            )
+
+        with patch(
+            "librarian_ingestion.embedding_ops.create_configured_embedder",
+            return_value=_FakeQueryEmbedder(),
+        ):
+            response = search_chunks(
+                SearchOptions(
+                    query="stock market",
+                    database_url=self.database_url,
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    book_title="Market Novel",
+                    limit=10,
+                )
+            )
+
+        self.assertEqual(content_type, "body")
+        self.assertEqual(
+            [result.chunk_id for result in response.results], ["stock-market-book:0"],
+        )
 
     def _seed_search_fixture(self) -> None:
         book = BookRecord(

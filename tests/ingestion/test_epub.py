@@ -106,6 +106,39 @@ class ParseEpubTests(unittest.TestCase):
             "body",
         )
 
+    def test_classifies_complete_publishing_filenames_not_marker_substrings(self) -> None:
+        """Body chapter names must not be hidden because they contain ``toc`` or ``index``."""
+        self.assertEqual(
+            classify_epub_content_type("text/toc.xhtml", "Chapter links."),
+            "front_matter",
+        )
+        self.assertEqual(
+            classify_epub_content_type(
+                "text/table-of-contents.xhtml", "Chapter links.",
+            ),
+            "front_matter",
+        )
+        self.assertEqual(
+            classify_epub_content_type("text/title-page.xhtml", "The Novel"),
+            "front_matter",
+        )
+        self.assertEqual(
+            classify_epub_content_type("text/about_author.xhtml", "Biography."),
+            "back_matter",
+        )
+        self.assertEqual(
+            classify_epub_content_type(
+                "text/stock-market.xhtml", "The market opened at dawn.",
+            ),
+            "body",
+        )
+        self.assertEqual(
+            classify_epub_content_type(
+                "text/indexing.xhtml", "The archivist arranged the shelves.",
+            ),
+            "body",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
