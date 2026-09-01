@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
 _WORD = re.compile(r"[a-z0-9]+")
-_LOOKUP_QUESTION_PREFIXES = ("what", "who", "when", "where", "which")
+_LOOKUP_QUESTION_PREFIXES = ("what", "who", "when", "where", "which", "name")
 _AUTHOR_VIEW_TERMS = frozenset(
     {
         "argue",
@@ -73,6 +73,16 @@ _PUBLICATION_METADATA_TERMS = (
     "publishing",
     "publisher",
     "table of contents",
+)
+_PUBLISHER_ENTITY_QUESTION = re.compile(
+    r"\b(?:who|which|what)\b[^?]*\bpublisher\b"
+    r"|\bname\b[^?]*\bpublisher\b"
+    r"|\b(?:who|which)\s+published\b"
+)
+_EXPLICIT_PUBLISHER_EVIDENCE = re.compile(r"\bpublisher\s*:\s*|\bpublished\s+by\b")
+_PUBLICATION_DATE_EVIDENCE = re.compile(
+    r"\b(?:published|publication)\b(?:\s+[\w-]+){0,5}[\s,:-]+"
+    r"(?:1[5-9]\d{2}|20\d{2}|21\d{2})\b"
 )
 _QUESTION_STOP_WORDS = frozenset(
     {
@@ -430,6 +440,25 @@ def _asks_for_publication_metadata(question: str) -> bool:
     return any(term in normalized for term in _PUBLICATION_METADATA_TERMS)
 
 
+def _asks_for_publisher_entity(question: str) -> bool:
+    """Identify questions that require a publisher name rather than a date."""
+    normalized = " ".join(question.casefold().split())
+    return bool(_PUBLISHER_ENTITY_QUESTION.search(normalized))
+
+
+def _asks_for_publication_date(question: str) -> bool:
+    """Identify publication questions whose answer may be a date."""
+    normalized = " ".join(question.casefold().split())
+    if "publish" not in normalized and "publication" not in normalized:
+        return False
+    return (
+        normalized.startswith("when ")
+        or "what year" in normalized
+        or "which year" in normalized
+        or "publication date" in normalized
+    )
+
+
 def _required_source_count(question: str, author: str | None) -> int:
     """Set an evidence floor before a broad synthesis reaches generation."""
     normalized = " ".join(question.casefold().split())
@@ -484,9 +513,11 @@ def _is_publication_evidence(
         return "copyright" in normalized_text
     if "edition" in normalized_question:
         return "edition" in normalized_text
+    if _asks_for_publisher_entity(question):
+        return bool(_EXPLICIT_PUBLISHER_EVIDENCE.search(normalized_text))
+    if _asks_for_publication_date(question):
+        return bool(_PUBLICATION_DATE_EVIDENCE.search(normalized_text))
     if "publish" in normalized_question:
-        if normalized_question.startswith("who"):
-            return "published by" in normalized_text or "publisher" in normalized_text
         return "published" in normalized_text or "publisher" in normalized_text
     if "table of contents" in normalized_question:
         return "contents" in normalized_text

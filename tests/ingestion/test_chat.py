@@ -460,6 +460,130 @@ class ChatTests(unittest.TestCase):
                 self.assertEqual(response.sources, [])
         self.assertEqual(body_only.results[0].content_type, "body")
 
+    def test_publication_fact_questions_reject_unrelated_front_matter(self) -> None:
+        """A publisher identity and a date each need their own evidence."""
+        cases = (
+            (
+                "Which publisher published The Clockwork Garden?",
+                "Published in 2024.",
+            ),
+            (
+                "What is the publication date of The Clockwork Garden?",
+                "Copyright 2024.",
+            ),
+        )
+        for question, evidence in cases:
+            with self.subTest(question=question):
+                generator = _FakeGenerator()
+                with (
+                    patch(
+                        "librarian_chat.chat.embed_query",
+                        return_value=_query_embedding_for(question),
+                    ),
+                    patch(
+                        "librarian_chat.chat.resolve_chat_retrieval_backend",
+                        return_value="sqlite",
+                    ),
+                    patch(
+                        "librarian_chat.chat.search_chunks",
+                        return_value=_chat_search_response(
+                            question,
+                            text=evidence,
+                            content_type="front_matter",
+                        ),
+                    ) as search_chunks,
+                    patch(
+                        "librarian_chat.chat.create_configured_generator",
+                        return_value=generator,
+                    ),
+                ):
+                    response = answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:1.5b",
+                            answer_capability="lightweight",
+                        )
+                    )
+
+                self.assertEqual(
+                    response.answer,
+                    "I could not find publication or edition evidence in the local EPUB "
+                    "content to answer that reliably.",
+                )
+                self.assertEqual(response.sources, [])
+                self.assertEqual(generator.messages, [])
+                self.assertTrue(search_chunks.call_args.args[0].include_non_content)
+
+    def test_publication_questions_require_evidence_for_the_requested_fact(self) -> None:
+        """Publisher labels answer entity questions while dates answer date questions."""
+        cases = (
+            (
+                "What publisher published The Clockwork Garden?",
+                "Publisher: Fixture Press.",
+                "Publisher: Fixture Press. [S1]",
+            ),
+            (
+                "Name the publisher of The Clockwork Garden.",
+                "Published by Fixture Press in 2024.",
+                "Published by Fixture Press in 2024. [S1]",
+            ),
+            (
+                "What year was The Clockwork Garden published?",
+                "Published in 2024.",
+                "Published in 2024. [S1]",
+            ),
+            (
+                "What is the publication date of The Clockwork Garden?",
+                "Publication date: 2024.",
+                "Publication date: 2024. [S1]",
+            ),
+        )
+        for question, evidence, expected_answer in cases:
+            with self.subTest(question=question):
+                generator = _FakeGenerator()
+                with (
+                    patch(
+                        "librarian_chat.chat.embed_query",
+                        return_value=_query_embedding_for(question),
+                    ),
+                    patch(
+                        "librarian_chat.chat.resolve_chat_retrieval_backend",
+                        return_value="sqlite",
+                    ),
+                    patch(
+                        "librarian_chat.chat.search_chunks",
+                        return_value=_chat_search_response(
+                            question,
+                            text=evidence,
+                            content_type="front_matter",
+                        ),
+                    ) as search_chunks,
+                    patch(
+                        "librarian_chat.chat.create_configured_generator",
+                        return_value=generator,
+                    ),
+                ):
+                    response = answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:1.5b",
+                            answer_capability="lightweight",
+                        )
+                    )
+
+                self.assertEqual(response.answer, expected_answer)
+                self.assertEqual(len(response.sources), 1)
+                self.assertEqual(generator.messages, [])
+                self.assertTrue(search_chunks.call_args.args[0].include_non_content)
+
 
 def _query_embedding() -> EmbedQueryResult:
     return EmbedQueryResult(
