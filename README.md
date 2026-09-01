@@ -61,10 +61,16 @@ Instead, ingestion is deterministic and local:
 4. Generate local embeddings.
 5. Store chunks, metadata, and vectors locally.
 
-For answer generation, Librarian can optionally call a host-side Codex broker
-after retrieval. That means only the user's question and a small set of relevant
-passages are sent to Codex CLI for synthesis. Codex uses the existing Codex
+For optional synthesis tasks such as summaries and recommendations, Librarian
+can call a host-side Codex broker. That means only the task input and a small
+set of relevant passages are sent to Codex CLI. Codex uses the existing Codex
 login rather than an OpenAI API key.
+
+Chat answers take a stricter path: after retrieval, Librarian selects directly
+relevant source sentences and returns those exact sentences with citations. It
+does not let an answer model rewrite, reverse, negate, or add causal claims to
+the evidence. This is intentionally conservative while the project builds a
+separate, semantically verified synthesis layer.
 
 Codex is not used as the embedding system. Embeddings require stable numeric
 vectors, so they should come from a local embedding model such as
@@ -122,10 +128,11 @@ work well alongside semantic queries.
 
 ### Generation
 
-Generation happens after retrieval. The generator receives a compact prompt
-containing the user question, retrieved passages, and citation metadata. The
-answer should cite the passages it uses and clearly say when the retrieved
-evidence is insufficient.
+Chat response construction happens after retrieval. Librarian selects exact,
+directly relevant source sentences, cites each one, and clearly says when the
+retrieved evidence is insufficient. Generation providers remain available for
+summaries, tagging, genres, and recommendations; they cannot rewrite chat
+claims until an entailment-verification layer is available.
 
 ### Codex Broker
 

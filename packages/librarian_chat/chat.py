@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Generator as IteratorGenerator, Iterator
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 import logging
 import re
 from time import perf_counter
 
 from librarian_chat.generation import (
-    ChatMessage,
     GenerationError,
     Generator,
-    StreamingGenerator,
     create_configured_generator,
 )
 from librarian_config.config import (
@@ -38,15 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
-_STREAM_COMPLETE_SENTENCE = re.compile(
-    r"(?P<sentence>.+?[.!?](?:\s*\[S\d+\])*)\s+(?=[^\s\[])",
-    re.DOTALL,
-)
 _WORD = re.compile(r"[a-z0-9]+")
-_SOURCE_CITATION = re.compile(r"\s*\[S\d+\]")
-_TRAILING_SOURCE_CITATIONS = re.compile(r"^.+[.!?](?:\s*\[S\d+\])+$")
-_TRAILING_COMPLETE_STREAM_SENTENCE = re.compile(r"^.+[.!?]$")
-_LOOKUP_QUESTION_PREFIXES = ("what", "who", "when", "where", "which", "name")
 _AUTHOR_VIEW_TERMS = frozenset(
     {
         "argue",
@@ -233,8 +223,8 @@ class PreparedChat:
     query_embedding_seconds: float
     retrieval_seconds: float
     prompt_construction_seconds: float
-    messages: list[ChatMessage]
     immediate_answer: str | None
+    grounded_tokens: list[str] = field(default_factory=list)
 
     def retrieval_event(
         self,
@@ -333,13 +323,10 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         # citations alongside an insufficiency response.
         sources = []
 
-    prompt_started = perf_counter()
-    messages = _build_messages(
-        question,
-        sources,
-        required_sources=required_sources,
-    )
-    prompt_construction_seconds = perf_counter() - prompt_started
+    # Preserve the timing field for existing API clients. The chat path does
+    # not build a generation prompt because it never asks a model to rewrite
+    # the source evidence.
+    prompt_construction_seconds = 0.0
 
     generator = create_configured_generator(
         provider=options.generation_provider,
@@ -347,23 +334,31 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         ollama_base_url=options.ollama_base_url,
     )
     immediate_answer: str | None = None
+    grounded_tokens: list[str] = []
     if not evidence_sufficient:
         immediate_answer = _insufficient_evidence_answer(
             publication_question=publication_question,
             required_sources=required_sources,
         )
     else:
-        if answer_capability == "lightweight":
-            immediate_answer = _lightweight_lookup_answer(question, sources)
-            if immediate_answer is None:
-                # The retrieval floor can pass even when no single sentence
-                # safely answers a factual lookup. Those chunks must not be
-                # shown as citations for the resulting refusal.
-                sources = []
-                immediate_answer = _insufficient_evidence_answer(
-                    publication_question=publication_question,
-                    required_sources=required_sources,
-                )
+        grounded_answer = _grounded_extractive_answer(
+            question,
+            sources,
+            required_sources=required_sources,
+        )
+        if grounded_answer is None:
+            # Retrieval candidates without a directly relevant source
+            # sentence are diagnostics, not answer evidence. This applies to
+            # every configured provider and capability: no model may alter or
+            # invent a claim from those chunks.
+            sources = []
+            immediate_answer = _insufficient_evidence_answer(
+                publication_question=publication_question,
+                required_sources=required_sources,
+            )
+        else:
+            sources, grounded_tokens = grounded_answer
+            immediate_answer = "\n\n".join(grounded_tokens)
     preparation = PreparedChat(
         total_started=total_started,
         question=question,
@@ -380,19 +375,22 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         query_embedding_seconds=query_embedding_seconds,
         retrieval_seconds=retrieval_seconds,
         prompt_construction_seconds=prompt_construction_seconds,
-        messages=messages,
         immediate_answer=immediate_answer,
+        grounded_tokens=grounded_tokens,
     )
     return preparation
 
 
 def answer_question(options: ChatOptions) -> ChatResponse:
-    """Return the established complete JSON chat response."""
+    """Return a complete response assembled only from cited source sentences."""
     preparation = prepare_answer_question(options)
     generation_started = perf_counter()
+    # ``prepare_answer_question`` chooses either extractive evidence or an
+    # insufficiency response. Keeping this route model-free prevents the JSON
+    # endpoint from making claims that the streaming endpoint would withhold.
     answer = preparation.immediate_answer
-    if answer is None:
-        answer = preparation.generator.generate(preparation.messages)
+    if answer is None:  # Defensive guard for future preparation changes.
+        raise RuntimeError("prepared chat did not contain a grounded answer")
     generation_seconds = perf_counter() - generation_started
 
     return _response_from_preparation(
@@ -403,13 +401,7 @@ def answer_question(options: ChatOptions) -> ChatResponse:
 
 
 def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEvent]:
-    """Yield only source-verified answer sentences over the streaming contract.
-
-    Native Ollama fragments are held until a sentence boundary and accepted
-    only when one retrieved source sentence covers every meaningful claim term.
-    This prevents a browser from displaying a plausible-but-unsupported token
-    before the normal final-response guard can correct it.
-    """
+    """Stream the same exact source sentences returned by the JSON contract."""
     generation_started = perf_counter()
     first_event_seconds: float | None = None
     first_token_seconds: float | None = None
@@ -435,18 +427,14 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
         # generation: the UI can show the grounded passages while strict
         # sentence verification continues to withhold answer text.
         yield emit_retrieval(response_sources)
-        if preparation.immediate_answer is not None:
-            answer = preparation.immediate_answer
-        elif isinstance(preparation.generator, StreamingGenerator):
-            (
-                answer,
-                response_sources,
-                first_token_seconds,
-            ) = yield from _stream_verified_ollama_answer(
-                preparation,
-            )
-        else:
-            answer = preparation.generator.generate(preparation.messages)
+        answer = preparation.immediate_answer
+        if answer is None:  # Defensive guard for future preparation changes.
+            raise RuntimeError("prepared chat did not contain a grounded answer")
+        for index, token in enumerate(preparation.grounded_tokens):
+            if first_token_seconds is None:
+                first_token_seconds = perf_counter() - preparation.total_started
+            text = token if index == 0 else f"\n\n{token}"
+            yield ChatStreamEvent("token", {"text": text})
 
         response = _response_from_preparation(
             preparation,
@@ -475,91 +463,6 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
                 },
             },
         )
-
-
-def _stream_verified_ollama_answer(
-    preparation: PreparedChat,
-) -> IteratorGenerator[
-    ChatStreamEvent,
-    None,
-    tuple[str, list[ChatSource], float | None],
-]:
-    """Validate native fragments before yielding any user-visible answer text.
-
-    The return tuple is consumed with ``yield from`` by ``stream_answer_question``:
-    answer, sources for the final response, and time-to-first-token. Retrieval
-    has already been safely emitted by ``stream_answer_question`` after the
-    evidence floor completes, so native generation cannot delay visible useful
-    progress.
-    """
-    buffered = ""
-    safe_sentences: list[str] = []
-    first_token_seconds: float | None = None
-    unsafe_generation = False
-
-    stream = preparation.generator.stream(preparation.messages)
-    try:
-        for text in stream:
-            if not text:
-                continue
-            buffered += text
-            sentences, buffered = _take_complete_stream_sentences(buffered)
-            for sentence in sentences:
-                if not _stream_sentence_is_source_supported(sentence, preparation.sources):
-                    unsafe_generation = True
-                    break
-                token = sentence if not safe_sentences else f" {sentence}"
-                if first_token_seconds is None:
-                    first_token_seconds = perf_counter() - preparation.total_started
-                safe_sentences.append(sentence)
-                yield ChatStreamEvent("token", {"text": token})
-            if unsafe_generation:
-                break
-    finally:
-        if unsafe_generation:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                close()
-
-    if not unsafe_generation and (
-        _TRAILING_SOURCE_CITATIONS.match(buffered.strip())
-        or _TRAILING_COMPLETE_STREAM_SENTENCE.match(buffered.strip())
-    ):
-        sentence = buffered.strip()
-        if _stream_sentence_is_source_supported(sentence, preparation.sources):
-            token = sentence if not safe_sentences else f" {sentence}"
-            if first_token_seconds is None:
-                first_token_seconds = perf_counter() - preparation.total_started
-            safe_sentences.append(sentence)
-            buffered = ""
-            yield ChatStreamEvent("token", {"text": token})
-        else:
-            unsafe_generation = True
-
-    if not unsafe_generation and buffered.strip():
-        # A partial fragment has no sentence boundary, so it is not safe to
-        # expose as an independently verifiable claim.
-        unsafe_generation = True
-
-    if safe_sentences:
-        return " ".join(safe_sentences), preparation.sources, first_token_seconds
-
-    fallback = _stream_extractive_fallback(preparation.question, preparation.sources)
-    if fallback is not None:
-        if first_token_seconds is None:
-            first_token_seconds = perf_counter() - preparation.total_started
-        yield ChatStreamEvent("token", {"text": fallback})
-        return fallback, preparation.sources, first_token_seconds
-
-    sources: list[ChatSource] = []
-    return (
-        _insufficient_evidence_answer(
-            publication_question=_asks_for_publication_metadata(preparation.question),
-            required_sources=preparation.required_sources,
-        ),
-        sources,
-        None,
-    )
 
 
 def _response_from_preparation(
@@ -823,161 +726,75 @@ def _to_sources(results: list[SearchResult]) -> list[ChatSource]:
     return sources
 
 
-def _build_messages(
+def _grounded_extractive_answer(
     question: str,
     sources: list[ChatSource],
     *,
     required_sources: int,
-) -> list[ChatMessage]:
-    source_text = _format_sources(sources)
-    return [
-        ChatMessage(
-            role="system",
-            content=(
-                "You are Librarian, a local reading assistant. Answer only from "
-                "the provided source chunks. If the chunks do not support an "
-                "answer, say that the local library context is insufficient. "
-                "Cite source IDs like [S1] when using a source."
-            ),
-        ),
-        ChatMessage(
-            role="user",
-            content=(
-                f"Question:\n{question}\n\n"
-                f"Source chunks:\n{source_text}\n\n"
-                "Write a concise answer in your own words grounded in the source chunks. "
-                f"Use at least {required_sources} distinct source IDs when the evidence "
-                "supports that many; do not invent facts or citations."
-            ),
-        ),
-    ]
+) -> tuple[list[ChatSource], list[str]] | None:
+    """Choose directly relevant, verbatim evidence for either chat transport.
 
-
-def _format_sources(sources: list[ChatSource]) -> str:
-    if not sources:
-        return "No source chunks were retrieved."
-
-    formatted: list[str] = []
-    for source in sources:
-        title = source.title or source.relative_path
-        authors = ", ".join(source.authors) if source.authors else "Unknown author"
-        formatted.append(
-            "\n".join(
-                [
-                    f"[{source.source_id}] {title} by {authors}",
-                    f"Path: {source.relative_path}",
-                    f"Chunk: {source.chunk_index}",
-                    f"Text: {source.text}",
-                ]
-            )
-        )
-    return "\n\n".join(formatted)
-
-
-def _take_complete_stream_sentences(text: str) -> tuple[list[str], str]:
-    """Split sentences only once a citation suffix or next sentence is known."""
-    sentences: list[str] = []
-    offset = 0
-    while match := _STREAM_COMPLETE_SENTENCE.match(text, offset):
-        sentences.append(match.group("sentence").strip())
-        offset = match.end()
-    return sentences, text[offset:]
-
-
-def _stream_sentence_is_source_supported(
-    sentence: str, sources: list[ChatSource]
-) -> bool:
-    """Accept a stream sentence only when one source covers all claim terms.
-
-    This deliberately does not try to prove an inference assembled across two
-    passages. A quality model can still synthesize in the complete JSON route,
-    but real-time output must meet the stronger no-speculation contract.
+    Selecting a source sentence is not an entailment claim: the user-visible
+    factual language remains byte-for-byte source text. The relevance score is
+    deliberately used only to decide which *existing* sentence to display.
+    Broad questions require one relevant sentence from every required source;
+    a narrow question uses the strongest single sentence.
     """
-    candidate_terms = _meaningful_terms(_SOURCE_CITATION.sub("", sentence))
-    if not candidate_terms:
-        return False
-    return any(
-        candidate_terms <= _meaningful_terms(source_sentence)
-        for source in sources
-        for source_sentence in _sentences(source.text)
-    )
-
-
-def _stream_extractive_fallback(
-    question: str, sources: list[ChatSource]
-) -> str | None:
-    """Return one relevant, verbatim sentence when synthesis is unsupported."""
-    lookup = _lightweight_lookup_answer(question, sources)
-    if lookup is not None:
-        return lookup
-
     question_terms = _meaningful_terms(question)
     if not question_terms:
-        return None
-    best: tuple[float, int, ChatSource, str] | None = None
-    for source in sources:
-        for sentence in _sentences(source.text):
-            overlap = len(question_terms & _meaningful_terms(sentence))
-            coverage = overlap / len(question_terms)
-            candidate = (coverage, overlap, source, sentence)
-            if best is None or candidate[:2] > best[:2]:
-                best = candidate
-    if best is None:
-        return None
-    coverage, overlap, source, sentence = best
-    if overlap == 0 or coverage < 0.5:
-        return None
-    return f"{sentence} [{source.source_id}]"
-
-
-def _lightweight_lookup_answer(question: str, sources: list[ChatSource]) -> str | None:
-    """Return an exact local sentence for a well-supported lookup question.
-
-    The default Compose model is intentionally small. For a short factual
-    lookup, preserving the source's subject/action relationship is more useful
-    than asking that model to paraphrase adjacent sentences. This path is
-    deliberately narrow: it only applies when a question-led source sentence
-    covers the request's meaningful terms. Lightweight mode refuses rather
-    than falling through to generation when that support is absent.
-    """
-    question_terms = _meaningful_terms(question)
-    if not _is_lookup_question(question) or not question_terms:
         return None
 
     if _asks_for_publication_metadata(question):
         for source in sources:
-            if _is_publication_evidence(question, source.content_type, source.text):
-                sentences = _sentences(source.text)
-                if sentences:
-                    return f"{sentences[0]} [{source.source_id}]"
+            for sentence in _sentences(source.text):
+                if _is_publication_evidence(question, source.content_type, sentence):
+                    return [source], [f"{sentence} [{source.source_id}]"]
         return None
 
-    best: tuple[float, int, ChatSource, str] | None = None
-    for source in sources:
-        for sentence in _sentences(source.text):
+    candidates: list[tuple[float, int, float, int, ChatSource, str]] = []
+    broad_question = required_sources > 1
+    for source_rank, source in enumerate(sources):
+        best: tuple[float, int, float, int, ChatSource, str] | None = None
+        for sentence_rank, sentence in enumerate(_sentences(source.text)):
             sentence_terms = _meaningful_terms(sentence)
             overlap = len(question_terms & sentence_terms)
+            if overlap == 0:
+                continue
             coverage = overlap / len(question_terms)
-            candidate = (coverage, overlap, source, sentence)
-            if best is None or candidate[:2] > best[:2]:
+            if not broad_question and coverage < 0.5:
+                continue
+            candidate = (
+                coverage,
+                overlap,
+                source.score,
+                -(source_rank * 1000 + sentence_rank),
+                source,
+                sentence,
+            )
+            if best is None or candidate[:4] > best[:4]:
                 best = candidate
+        if best is not None:
+            candidates.append(best)
 
-    if best is None:
+    if len(candidates) < required_sources:
         return None
-    coverage, overlap, source, sentence = best
-    required_overlap = 1 if len(question_terms) == 1 else 2
-    if overlap < required_overlap or coverage < 0.5:
+
+    candidates.sort(key=lambda candidate: candidate[:4], reverse=True)
+    selected: list[tuple[float, int, float, int, ChatSource, str]] = []
+    seen_sentence_text: set[str] = set()
+    for candidate in candidates:
+        sentence_key = " ".join(candidate[5].casefold().split())
+        if sentence_key in seen_sentence_text:
+            continue
+        seen_sentence_text.add(sentence_key)
+        selected.append(candidate)
+        if len(selected) == required_sources:
+            break
+    if len(selected) < required_sources:
         return None
-    return f"{sentence} [{source.source_id}]"
-
-
-def _is_lookup_question(question: str) -> bool:
-    first_word = ""
-    if question.strip():
-        first_word = question.lstrip().split(maxsplit=1)[0].casefold().rstrip("?:")
-    return first_word in _LOOKUP_QUESTION_PREFIXES or question.casefold().startswith(
-        ("how many", "how much")
-    )
+    selected_sources = [candidate[4] for candidate in selected]
+    tokens = [f"{candidate[5]} [{candidate[4].source_id}]" for candidate in selected]
+    return selected_sources, tokens
 
 
 def _meaningful_terms(value: str) -> set[str]:
