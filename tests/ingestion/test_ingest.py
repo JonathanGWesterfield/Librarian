@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zipfile import ZipFile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
@@ -9,6 +10,7 @@ sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_ingestion.ingest import IngestionOptions, run_ingestion
 from librarian_storage.storage import SQLiteIngestionStore
+from tests.ingestion.fixtures import SAMPLE_EPUB
 
 
 class IngestionServiceTests(unittest.TestCase):
@@ -99,6 +101,59 @@ class IngestionServiceTests(unittest.TestCase):
                     summary_detail="verbose",
                 )
             )
+
+    def test_ingestion_stores_a_body_chapter_with_an_incidental_marker_in_its_name(self) -> None:
+        """A chapter named stock-market must remain available to normal search."""
+        with TemporaryDirectory() as temp_dir:
+            books_dir = Path(temp_dir) / "books"
+            books_dir.mkdir()
+            _write_stock_market_epub(books_dir / "stock-market.epub")
+
+            result = run_ingestion(
+                IngestionOptions(
+                    books_dir=books_dir,
+                    database_url=self.database_url,
+                )
+            )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            stored_chunk = next(
+                chunk
+                for chunk in store.list_chunks()
+                if "The stock market opened after the bell." in chunk.text
+            )
+
+        self.assertEqual(result.parsed, 1)
+        self.assertEqual(stored_chunk.content_type, "body")
+
+
+def _write_stock_market_epub(destination: Path) -> None:
+    """Create a valid fixture EPUB with a body chapter whose name contains ``toc``."""
+    manifest_item = (
+        '    <item id="stock-market" href="stock-market.xhtml" '
+        'media-type="application/xhtml+xml"/>\n'
+    )
+    spine_item = '    <itemref idref="stock-market"/>\n'
+    chapter = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE html>
+<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>
+  <h1>Stock Market</h1>
+  <p>The stock market opened after the bell.</p>
+</body></html>
+"""
+    with ZipFile(SAMPLE_EPUB) as source, ZipFile(destination, "w") as target:
+        for entry in source.infolist():
+            content = source.read(entry.filename)
+            if entry.filename == "OEBPS/content.opf":
+                content = content.replace(
+                    b"  </manifest>",
+                    manifest_item.encode() + b"  </manifest>",
+                ).replace(
+                    b"  </spine>",
+                    spine_item.encode() + b"  </spine>",
+                )
+            target.writestr(entry, content)
+        target.writestr("OEBPS/stock-market.xhtml", chapter.encode())
 
 
 if __name__ == "__main__":
