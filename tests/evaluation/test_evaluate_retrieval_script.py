@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +20,37 @@ SCRIPT_PATH = REPO_ROOT / "scripts/evaluate_retrieval.py"
 
 
 class EvaluateRetrievalScriptTests(unittest.TestCase):
+    def test_optional_judge_uses_the_json_selected_codex_model(self) -> None:
+        """Enforcement cannot silently substitute a CLI or Ollama model choice."""
+        module = _load_script_module()
+        codex_judge = StaticJudge(
+            response=(
+                '{"evidence_verdict":"supported",'
+                '"citation_relevance":"not_applicable",'
+                '"missing_coverage":[],"unsupported_claims":[],'
+                '"reason":"Configured Codex fixture."}'
+            ),
+            provider="codex",
+            model="gpt-5.6",
+        )
+        with (
+            patch.object(
+                module,
+                "resolve_evaluation_judge",
+                return_value=SimpleNamespace(provider="codex", model="gpt-5.6"),
+            ),
+            patch.object(module, "create_judge", return_value=codex_judge) as create,
+        ):
+            judge = module._create_optional_judge(
+                enabled=True,
+                mode="enforcing",
+                ollama_base_url="http://unused",
+            )
+
+        self.assertIs(judge, codex_judge)
+        self.assertEqual(create.call_args.args[0], "codex")
+        self.assertEqual(create.call_args.kwargs["model"], "gpt-5.6")
+
     def test_generate_live_report_document_scores_golden_corpus_with_search_results(
         self,
     ) -> None:
@@ -434,7 +466,9 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
                     '"citation_relevance":"all_relevant",'
                     '"missing_coverage":[],"unsupported_claims":[],'
                     '"reason":"Deliberately wrong fixture response."}'
-                )
+                ),
+                provider="codex",
+                model="gpt-5.6",
             )
             arguments = [
                 "evaluate_retrieval.py",
@@ -452,7 +486,6 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
                 patch.object(sys, "argv", arguments),
                 patch.object(module, "configure_cli_logging"),
                 patch.object(module, "_create_optional_judge", return_value=wrong_judge),
-                patch.object(module, "_create_optional_fallback_judge", return_value=None),
             ):
                 result = module.main()
 
@@ -461,7 +494,104 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertEqual(document["llm_judge"]["expectation_mismatch_count"], 1)
+        self.assertEqual(document["llm_judge"]["mode"], "enforcing")
         self.assertIn("Expected-verdict mismatches", markdown)
+
+    def test_advisory_ollama_mismatch_writes_diagnostics_without_failing(self) -> None:
+        """Local judge disagreement is visible but cannot be a quality gate."""
+        module = _load_script_module()
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            benchmark_path = temp_path / "retrieval.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "unit"},
+                        "k_values": [1],
+                        "primary_k": 1,
+                        "cases": [
+                            {
+                                "id": "retrieval",
+                                "query": "query",
+                                "relevant_chunk_ids": ["chunk:1"],
+                                "results": [
+                                    {
+                                        "chunk_id": "chunk:1",
+                                        "book_id": "book",
+                                        "relative_path": "book.epub",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            answers_path = temp_path / "answers.json"
+            answers_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "answers"},
+                        "cases": [
+                            {
+                                "id": "negation",
+                                "question": "Did Mara open the gate?",
+                                "answer": "Mara opened the gate. [S1]",
+                                "sources": [
+                                    {
+                                        "source_id": "S1",
+                                        "text": "Mara did not open the gate.",
+                                    }
+                                ],
+                                "expected_judge_verdict": "contradicted",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_path = temp_path / "report.json"
+            markdown_path = temp_path / "report.md"
+            advisory_ollama = StaticJudge(
+                response=(
+                    '{"evidence_verdict":"supported",'
+                    '"citation_relevance":"all_relevant",'
+                    '"missing_coverage":[],"unsupported_claims":[],'
+                    '"reason":"Advisory fixture response."}'
+                ),
+                provider="ollama",
+                model="qwen2.5:1.5b",
+            )
+            arguments = [
+                "evaluate_retrieval.py",
+                "--benchmark",
+                str(benchmark_path),
+                "--answer-benchmark",
+                str(answers_path),
+                "--output",
+                str(output_path),
+                "--markdown-output",
+                str(markdown_path),
+                "--llm-judge",
+                "--judge-mode",
+                "advisory",
+            ]
+            with (
+                patch.object(sys, "argv", arguments),
+                patch.object(module, "configure_cli_logging"),
+                patch.object(
+                    module,
+                    "_create_optional_judge",
+                    return_value=advisory_ollama,
+                ),
+            ):
+                result = module.main()
+
+            document = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(document["llm_judge"]["mode"], "advisory")
+        self.assertEqual(document["llm_judge"]["expectation_mismatch_count"], 1)
 
 
 def _fake_search(_options) -> SearchResponse:

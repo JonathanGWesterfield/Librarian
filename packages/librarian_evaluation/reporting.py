@@ -486,8 +486,8 @@ def _render_llm_judge_section(llm_judge: dict[str, Any] | None) -> list[str]:
         return [
             "LLM-as-judge evaluation was not measured for this report.",
             "",
-            "Run `python3 scripts/evaluate_retrieval.py --llm-judge` to score",
-            "answer quality with Codex by default and Ollama as fallback.",
+            "Run `python3 scripts/evaluate_retrieval.py --llm-judge` to run",
+            "the JSON-configured enforcing Codex quality gate.",
         ]
 
     aggregate = llm_judge["aggregate"]
@@ -496,8 +496,7 @@ def _render_llm_judge_section(llm_judge: dict[str, Any] | None) -> list[str]:
         "| --- | ---: |",
         f"| Provider | `{llm_judge.get('provider', 'unknown')}` |",
         f"| Model | `{llm_judge.get('model', 'unknown')}` |",
-        f"| Fallback provider | `{llm_judge.get('fallback_provider', 'none')}` |",
-        f"| Fallback used | `{llm_judge.get('fallback_used', False)}` |",
+        f"| Judge mode | `{llm_judge.get('mode', 'unknown')}` |",
         f"| Expected semantic cases | `{llm_judge.get('expectation_case_count', 0)}` |",
         f"| Expected-verdict mismatches | `{llm_judge.get('expectation_mismatch_count', 0)}` |",
         f"| Case count | `{aggregate['case_count']}` |",

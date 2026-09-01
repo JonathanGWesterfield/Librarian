@@ -405,6 +405,13 @@ rewrite, or display answer prose. It runs only when the configured generation
 provider is direct Codex with `answer_capability: "quality"`. Docker and native
 Ollama always retain the deterministic extractive selector.
 
+The JSON `evaluation` section also separates fuzzy answer-quality evaluation
+from normal tests: only its Codex `enforcing_judge` can fail a semantic quality
+run. Its optional Ollama `advisory_judge` is explicitly non-blocking and useful
+only for local schema/reporting smoke checks. See
+[`docs/configuration.md`](docs/configuration.md) for the model policy and
+commands.
+
 The Compose database default is `sqlite:////data/librarian.db`, which is the
 absolute path of its bind-mounted `data/` directory. Commands run from the host
 repository continue to use `sqlite:///data/librarian.db`.
