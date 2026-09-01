@@ -1,5 +1,6 @@
 import sys
 import unittest
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -8,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
-from librarian_chat.chat import ChatResponse, ChatSource
+from librarian_chat.chat import ChatResponse, ChatSource, ChatStreamEvent
 from librarian_metadata.genres import BookGenreGenerationResult, GeneratedBookGenre
 from librarian_recommendations.recommendations import (
     BookRecommendation,
@@ -411,6 +412,71 @@ class IngestionApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(payload["sources"][0]["source_id"], "S1")
+
+    def test_chat_stream_endpoint_serializes_ordered_sse_events(self) -> None:
+        """The streaming route advertises evidence before answer text and completion."""
+        prepared = object()
+        events = iter(
+            [
+                ChatStreamEvent(
+                    "retrieval",
+                    {"question": "How brutal is war?", "sources": [{"source_id": "S1"}]},
+                ),
+                ChatStreamEvent("token", {"text": "War is "}),
+                ChatStreamEvent("token", {"text": "terrifying."}),
+                ChatStreamEvent(
+                    "complete",
+                    {
+                        "question": "How brutal is war?",
+                        "answer": "War is terrifying.",
+                        "sources": [{"source_id": "S1"}],
+                        "timings": {"time_to_first_token_seconds": 0.02, "total_seconds": 0.08},
+                    },
+                ),
+            ]
+        )
+        with (
+            patch("librarian_api.main.prepare_answer_question", return_value=prepared) as prepare,
+            patch("librarian_api.main.stream_answer_question", return_value=events),
+        ):
+            response = self.client.post(
+                "/chat/stream",
+                json={"question": "How brutal is war?"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+        self.assertEqual(response.headers["cache-control"], "no-cache")
+        parsed = _parse_sse_events(response.text)
+        self.assertEqual([event for event, _ in parsed], ["retrieval", "token", "token", "complete"])
+        self.assertEqual(parsed[0][1]["sources"], [{"source_id": "S1"}])
+        self.assertEqual(parsed[-1][1]["answer"], "War is terrifying.")
+        self.assertEqual(parsed[-1][1]["timings"]["time_to_first_token_seconds"], 0.02)
+        self.assertEqual(prepare.call_count, 1)
+
+    def test_chat_stream_endpoint_keeps_provider_failure_as_terminal_sse_error(self) -> None:
+        """An error after evidence validation is consumable by a streaming UI."""
+        with (
+            patch("librarian_api.main.prepare_answer_question", return_value=object()),
+            patch(
+                "librarian_api.main.stream_answer_question",
+                return_value=iter(
+                    [
+                        ChatStreamEvent("retrieval", {"sources": []}),
+                        ChatStreamEvent(
+                            "error",
+                            {"detail": "Ollama generation failed", "timings": {"total_seconds": 0.4}},
+                        ),
+                    ]
+                ),
+            ),
+        ):
+            response = self.client.post("/chat/stream", json={"question": "What happened?"})
+
+        self.assertEqual(response.status_code, 200)
+        parsed = _parse_sse_events(response.text)
+        self.assertEqual([event for event, _ in parsed], ["retrieval", "error"])
+        self.assertEqual(parsed[-1][1]["detail"], "Ollama generation failed")
 
     def test_chat_generator_override_requires_capability_and_keeps_json_default(self) -> None:
         """Provider/model overrides must state their product capability explicitly."""
@@ -944,6 +1010,23 @@ class IngestionApiTests(unittest.TestCase):
                     )
                 ]
             )
+
+def _parse_sse_events(payload: str) -> list[tuple[str, dict[str, object]]]:
+    """Decode the compact SSE framing emitted by the chat streaming route."""
+    events: list[tuple[str, dict[str, object]]] = []
+    for raw_event in payload.strip().split("\n\n"):
+        event_name = next(
+            line.removeprefix("event: ")
+            for line in raw_event.splitlines()
+            if line.startswith("event: ")
+        )
+        data = "\n".join(
+            line.removeprefix("data: ")
+            for line in raw_event.splitlines()
+            if line.startswith("data: ")
+        )
+        events.append((event_name, json.loads(data)))
+    return events
 
 
 class _FakeQueryEmbedder:

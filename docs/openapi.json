@@ -709,6 +709,42 @@
         }
       }
     },
+    "/chat/stream": {
+      "post": {
+        "tags": ["chat"],
+        "operationId": "streamAnswerQuestion",
+        "summary": "Stream an answer from local books",
+        "description": "Validates local evidence, emits a retrieval event with citations, forwards native Ollama answer fragments when available, and ends with a complete or error event.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A text/event-stream response. See docs/api-endpoints.md for event payloads.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
     "/recommendations": {
       "post": {
         "tags": ["recommendations"],

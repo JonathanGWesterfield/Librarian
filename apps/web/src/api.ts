@@ -35,6 +35,30 @@ export type ChatResponse = {
   sources: ChatSource[];
 };
 
+export type ChatStreamRetrieval = Omit<ChatResponse, "answer"> & {
+  timings: {
+    query_embedding_seconds: number;
+    retrieval_seconds: number;
+    prompt_construction_seconds: number;
+  };
+};
+
+export type ChatStreamCompletion = ChatResponse & {
+  timings: {
+    query_embedding_seconds: number;
+    retrieval_seconds: number;
+    prompt_construction_seconds: number;
+    generation_seconds: number;
+    total_seconds: number;
+    time_to_first_token_seconds: number | null;
+  };
+};
+
+export type ChatStreamHandlers = {
+  onRetrieval: (event: ChatStreamRetrieval) => void;
+  onToken: (text: string) => void;
+};
+
 export type ChatScopeFilter =
   | { bookId: string; author?: never }
   | { author: string; bookId?: never }
@@ -166,9 +190,16 @@ export async function refreshSearchIndex(
   });
 }
 
-export async function askChat(question: string, scope: ChatScopeFilter = {}): Promise<ChatResponse> {
-  return request<ChatResponse>("/chat", {
+export async function streamChat(
+  question: string,
+  scope: ChatScopeFilter,
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<ChatStreamCompletion> {
+  const response = await fetch(`${apiBaseUrl}/chat/stream`, {
     method: "POST",
+    signal,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       question,
       retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT,
@@ -176,6 +207,58 @@ export async function askChat(question: string, scope: ChatScopeFilter = {}): Pr
       ...(scope.author ? { author: scope.author } : {}),
     }),
   });
+  if (!response.ok) throw new Error(await errorMessage(response));
+  if (!response.body) throw new Error("The API did not provide a readable answer stream.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let completed: ChatStreamCompletion | null = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    buffered += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
+    let boundary = buffered.indexOf("\n\n");
+    while (boundary >= 0) {
+      const rawEvent = buffered.slice(0, boundary);
+      buffered = buffered.slice(boundary + 2);
+      const event = parseSseEvent(rawEvent);
+      if (event) {
+        if (event.name === "retrieval") handlers.onRetrieval(event.data as ChatStreamRetrieval);
+        else if (event.name === "token") {
+          const text = event.data.text;
+          if (typeof text !== "string") throw new Error("The API sent an invalid answer fragment.");
+          handlers.onToken(text);
+        } else if (event.name === "complete") completed = event.data as ChatStreamCompletion;
+        else if (event.name === "error") {
+          const detail = event.data.detail;
+          throw new Error(typeof detail === "string" ? detail : "The answer stream failed.");
+        }
+      }
+      boundary = buffered.indexOf("\n\n");
+    }
+    if (done) break;
+  }
+  if (!completed) throw new Error("The API ended before completing the answer stream.");
+  return completed;
+}
+
+function parseSseEvent(raw: string): { name: string; data: Record<string, unknown> } | null {
+  const eventLine = raw.split("\n").find((line) => line.startsWith("event:"));
+  const data = raw.split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trimStart())
+    .join("\n");
+  if (!eventLine || !data) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    throw new Error("The API sent malformed answer-stream data.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("The API sent an invalid answer-stream event.");
+  }
+  return { name: eventLine.slice("event:".length).trim(), data: parsed as Record<string, unknown> };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

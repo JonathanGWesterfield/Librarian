@@ -187,8 +187,10 @@ genres, and job status. OpenSearch is the rebuildable query index for vector,
 keyword/BM25, and filtered retrieval; its hybrid rank fusion improves exact
 term, name, and phrase matches alongside semantic search. The responsive React
 UI now supports library browsing, processing status, inspectable citations, and
-whole-library, author, or book chat scopes. Operational polish is the next
-planned phase.
+whole-library, author, or book chat scopes. Chat now streams evidence-ready
+citations first and native Ollama answer text as it is generated, while keeping
+the existing complete JSON API available to other clients. Operational polish is
+the next planned phase.
 
 ## Roadmap
 

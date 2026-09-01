@@ -3,13 +3,20 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+import json
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from librarian_api.config import get_settings
-from librarian_chat.chat import ChatOptions, answer_question
+from librarian_chat.chat import (
+    ChatOptions,
+    answer_question,
+    prepare_answer_question,
+    stream_answer_question,
+)
 from librarian_config.config import (
     resolve_embedding_model,
     resolve_embedding_provider,
@@ -481,30 +488,67 @@ def index_search_endpoint(request: SearchIndexRequest) -> dict[str, object]:
 )
 def chat_endpoint(request: ChatRequest) -> dict[str, object]:
     try:
-        result = answer_question(
-            ChatOptions(
-                question=request.question,
-                database_url=request.database_url or get_settings().database_url,
-                embedding_provider=request.embedding_provider,
-                embedding_model=request.embedding_model,
-                generation_provider=request.generation_provider,
-                generation_model=request.generation_model,
-                answer_capability=resolve_generation_answer_capability(
-                    answer_capability=request.answer_capability,
-                    generation_provider=request.generation_provider,
-                    generation_model=request.generation_model,
-                ),
-                ollama_base_url=request.ollama_base_url,
-                retrieval_limit=request.retrieval_limit,
-                book_id=request.book_id,
-                book_title=request.book_title,
-                author=request.author,
-                include_non_content=request.include_non_content,
-            )
-        )
+        result = answer_question(_chat_options(request))
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return result.to_dict()
+
+
+@app.post(
+    "/chat/stream",
+    response_class=StreamingResponse,
+    response_description=(
+        "Server-sent events: evidence-validated retrieval metadata, native "
+        "Ollama answer fragments when available, then one terminal completion."
+    ),
+    responses={
+        200: {
+            "description": "A text/event-stream response. See docs/api-endpoints.md for event payloads.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        },
+        400: _CHAT_BAD_REQUEST_RESPONSE,
+    },
+)
+def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
+    """Stream a grounded answer without changing the established ``POST /chat`` JSON API."""
+    try:
+        preparation = prepare_answer_question(_chat_options(request))
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    def event_bytes():
+        for event in stream_answer_question(preparation):
+            payload = json.dumps(event.data, separators=(",", ":"))
+            yield f"event: {event.event}\ndata: {payload}\n\n".encode("utf-8")
+
+    return StreamingResponse(
+        event_bytes(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _chat_options(request: ChatRequest) -> ChatOptions:
+    """Map both chat transports through one override/capability boundary."""
+    return ChatOptions(
+        question=request.question,
+        database_url=request.database_url or get_settings().database_url,
+        embedding_provider=request.embedding_provider,
+        embedding_model=request.embedding_model,
+        generation_provider=request.generation_provider,
+        generation_model=request.generation_model,
+        answer_capability=resolve_generation_answer_capability(
+            answer_capability=request.answer_capability,
+            generation_provider=request.generation_provider,
+            generation_model=request.generation_model,
+        ),
+        ollama_base_url=request.ollama_base_url,
+        retrieval_limit=request.retrieval_limit,
+        book_id=request.book_id,
+        book_title=request.book_title,
+        author=request.author,
+        include_non_content=request.include_non_content,
+    )
 
 
 @app.post("/recommendations")

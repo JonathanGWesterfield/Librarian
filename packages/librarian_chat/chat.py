@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 import logging
 import re
@@ -7,6 +8,9 @@ from time import perf_counter
 
 from librarian_chat.generation import (
     ChatMessage,
+    GenerationError,
+    Generator,
+    StreamingGenerator,
     create_configured_generator,
 )
 from librarian_config.config import (
@@ -199,7 +203,63 @@ class ChatResponse:
         }
 
 
-def answer_question(options: ChatOptions) -> ChatResponse:
+@dataclass(frozen=True)
+class PreparedChat:
+    """Evidence-validated chat work shared by JSON and streaming responses.
+
+    Preparation intentionally performs the query embedding and retrieval once.
+    The two HTTP contracts then differ only in how they deliver generation.
+    """
+
+    total_started: float
+    question: str
+    generator: Generator
+    answer_capability: str
+    retrieval_limit: int
+    embedding_provider: str
+    embedding_model: str
+    candidate_count: int
+    filters: dict[str, str]
+    sources: list[ChatSource]
+    retrieval_backend: str
+    query_embedding_seconds: float
+    retrieval_seconds: float
+    prompt_construction_seconds: float
+    messages: list[ChatMessage]
+    immediate_answer: str | None
+
+    def retrieval_event(self) -> dict[str, object]:
+        """Return safe metadata after all evidence guards have run."""
+        return {
+            "question": self.question,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model": self.embedding_model,
+            "generation_provider": self.generator.provider,
+            "generation_model": self.generator.model,
+            "answer_capability": self.answer_capability,
+            "retrieval_limit": self.retrieval_limit,
+            "candidate_count": self.candidate_count,
+            "filters": self.filters,
+            "retrieval_backend": self.retrieval_backend,
+            "sources": [source.to_dict() for source in self.sources],
+            "timings": {
+                "query_embedding_seconds": self.query_embedding_seconds,
+                "retrieval_seconds": self.retrieval_seconds,
+                "prompt_construction_seconds": self.prompt_construction_seconds,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class ChatStreamEvent:
+    """One transport-neutral event in a prepared chat stream."""
+
+    event: str
+    data: dict[str, object]
+
+
+def prepare_answer_question(options: ChatOptions) -> PreparedChat:
+    """Retrieve and validate evidence once before choosing a delivery mode."""
     total_started = perf_counter()
     question = options.question.strip()
     if not question:
@@ -264,53 +324,145 @@ def answer_question(options: ChatOptions) -> ChatResponse:
     )
     prompt_construction_seconds = perf_counter() - prompt_started
 
-    generation_started = perf_counter()
     generator = create_configured_generator(
         provider=options.generation_provider,
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,
     )
+    immediate_answer: str | None = None
     if not evidence_sufficient:
-        answer = _insufficient_evidence_answer(
+        immediate_answer = _insufficient_evidence_answer(
             publication_question=publication_question,
             required_sources=required_sources,
         )
     else:
-        answer = None
         if answer_capability == "lightweight":
-            answer = _lightweight_lookup_answer(question, sources)
-            if answer is None:
+            immediate_answer = _lightweight_lookup_answer(question, sources)
+            if immediate_answer is None:
                 # The retrieval floor can pass even when no single sentence
                 # safely answers a factual lookup. Those chunks must not be
                 # shown as citations for the resulting refusal.
                 sources = []
-                answer = _insufficient_evidence_answer(
+                immediate_answer = _insufficient_evidence_answer(
                     publication_question=publication_question,
                     required_sources=required_sources,
                 )
-        if answer is None:
-            answer = generator.generate(messages)
-    generation_seconds = perf_counter() - generation_started
-
-    return ChatResponse(
+    preparation = PreparedChat(
+        total_started=total_started,
         question=question,
-        answer=answer,
+        generator=generator,
+        answer_capability=answer_capability,
+        retrieval_limit=retrieval_limit,
         embedding_provider=search_response.embedding_provider,
         embedding_model=search_response.embedding_model,
-        generation_provider=generator.provider,
-        generation_model=generator.model,
-        retrieval_limit=retrieval_limit,
         candidate_count=search_response.candidate_count,
         filters=search_response.filters,
         sources=sources,
-        answer_capability=answer_capability,
         retrieval_backend=retrieval_backend,
+        query_embedding_seconds=query_embedding_seconds,
+        retrieval_seconds=retrieval_seconds,
+        prompt_construction_seconds=prompt_construction_seconds,
+        messages=messages,
+        immediate_answer=immediate_answer,
+    )
+    return preparation
+
+
+def answer_question(options: ChatOptions) -> ChatResponse:
+    """Return the established complete JSON chat response."""
+    preparation = prepare_answer_question(options)
+    generation_started = perf_counter()
+    answer = preparation.immediate_answer
+    if answer is None:
+        answer = preparation.generator.generate(preparation.messages)
+    generation_seconds = perf_counter() - generation_started
+
+    return _response_from_preparation(
+        preparation,
+        answer=answer,
+        generation_seconds=generation_seconds,
+    )
+
+
+def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEvent]:
+    """Yield an evidence-ready event, answer text, and one terminal event.
+
+    Ollama's native newline-delimited streaming protocol is preserved all the
+    way to the caller. Other generators deliberately retain their established
+    complete-response transport and emit their answer in ``complete``.
+    """
+    yield ChatStreamEvent("retrieval", preparation.retrieval_event())
+    generation_started = perf_counter()
+    first_token_seconds: float | None = None
+    answer_parts: list[str] = []
+    try:
+        if preparation.immediate_answer is not None:
+            answer = preparation.immediate_answer
+        elif isinstance(preparation.generator, StreamingGenerator):
+            for text in preparation.generator.stream(preparation.messages):
+                if not text:
+                    continue
+                if first_token_seconds is None:
+                    first_token_seconds = perf_counter() - preparation.total_started
+                answer_parts.append(text)
+                yield ChatStreamEvent("token", {"text": text})
+            answer = "".join(answer_parts).strip()
+            if not answer:
+                raise GenerationError("generation provider returned no streamed answer text")
+        else:
+            answer = preparation.generator.generate(preparation.messages)
+
+        response = _response_from_preparation(
+            preparation,
+            answer=answer,
+            generation_seconds=perf_counter() - generation_started,
+        )
+        completed = response.to_dict()
+        timings = dict(response.timings.to_dict())
+        timings["time_to_first_token_seconds"] = first_token_seconds
+        completed["timings"] = timings
+        yield ChatStreamEvent("complete", completed)
+    except (GenerationError, RuntimeError, ValueError, NotImplementedError) as error:
+        yield ChatStreamEvent(
+            "error",
+            {
+                "detail": str(error),
+                "timings": {
+                    "generation_seconds": perf_counter() - generation_started,
+                    "total_seconds": perf_counter() - preparation.total_started,
+                    "time_to_first_token_seconds": first_token_seconds,
+                },
+            },
+        )
+
+
+def _response_from_preparation(
+    preparation: PreparedChat,
+    *,
+    answer: str,
+    generation_seconds: float,
+) -> ChatResponse:
+    """Build the existing JSON response shape from shared prepared evidence."""
+
+    return ChatResponse(
+        question=preparation.question,
+        answer=answer,
+        embedding_provider=preparation.embedding_provider,
+        embedding_model=preparation.embedding_model,
+        generation_provider=preparation.generator.provider,
+        generation_model=preparation.generator.model,
+        retrieval_limit=preparation.retrieval_limit,
+        candidate_count=preparation.candidate_count,
+        filters=preparation.filters,
+        sources=preparation.sources,
+        answer_capability=preparation.answer_capability,
+        retrieval_backend=preparation.retrieval_backend,
         timings=ChatTimings(
-            query_embedding_seconds=query_embedding_seconds,
-            retrieval_seconds=retrieval_seconds,
-            prompt_construction_seconds=prompt_construction_seconds,
+            query_embedding_seconds=preparation.query_embedding_seconds,
+            retrieval_seconds=preparation.retrieval_seconds,
+            prompt_construction_seconds=preparation.prompt_construction_seconds,
             generation_seconds=generation_seconds,
-            total_seconds=perf_counter() - total_started,
+            total_seconds=perf_counter() - preparation.total_started,
         ),
     )
 

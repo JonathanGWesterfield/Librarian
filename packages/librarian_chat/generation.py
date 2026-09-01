@@ -8,7 +8,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from collections.abc import Iterator
+from typing import Protocol, runtime_checkable
 from urllib import error, request
 
 from librarian_config.config import (
@@ -40,6 +41,14 @@ class Generator(Protocol):
     def generate(
         self, messages: list[ChatMessage], *, response_format: str | None = None
     ) -> str:
+        ...
+
+
+@runtime_checkable
+class StreamingGenerator(Protocol):
+    """A provider that can yield answer text before generation completes."""
+
+    def stream(self, messages: list[ChatMessage]) -> Iterator[str]:
         ...
 
 
@@ -100,6 +109,60 @@ class OllamaGenerator:
         if not isinstance(content, str):
             raise GenerationError("Ollama response message did not include content")
         return content.strip()
+
+    def stream(self, messages: list[ChatMessage]) -> Iterator[str]:
+        """Yield native Ollama ``/api/chat`` message fragments as they arrive.
+
+        Ollama sends one JSON object per line. Keeping the HTTP response open
+        here is what lets the API deliver a first token before local generation
+        finishes; it is intentionally not implemented by buffering ``generate``.
+        """
+        payload = json.dumps(
+            {
+                "model": self.model,
+                "messages": [
+                    {"role": message.role, "content": message.content}
+                    for message in messages
+                ],
+                "stream": True,
+            }
+        ).encode("utf-8")
+        endpoint = f"{self.base_url.rstrip('/')}/api/chat"
+        http_request = request.Request(
+            endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    try:
+                        payload_item = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise GenerationError("Ollama returned invalid streaming JSON") from exc
+                    if not isinstance(payload_item, dict):
+                        raise GenerationError("Ollama returned an invalid streaming event")
+                    error_message = payload_item.get("error")
+                    if isinstance(error_message, str) and error_message:
+                        raise GenerationError(f"Ollama generation failed: {error_message}")
+                    message = payload_item.get("message")
+                    if not isinstance(message, dict):
+                        if payload_item.get("done") is True:
+                            return
+                        raise GenerationError("Ollama streaming event did not include a message")
+                    content = message.get("content")
+                    if content is None:
+                        continue
+                    if not isinstance(content, str):
+                        raise GenerationError("Ollama streaming message did not include content")
+                    if content:
+                        yield content
+        except error.URLError as exc:
+            raise GenerationError(f"could not reach Ollama at {endpoint}: {exc}") from exc
 
 
 @dataclass(frozen=True)

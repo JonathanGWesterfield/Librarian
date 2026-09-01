@@ -122,19 +122,19 @@ describe("Librarian live API interactions", () => {
     await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    expect(screen.getByRole("status").textContent).toContain("Searching your local library");
+    expect(screen.getByRole("status").textContent).toContain("Finding evidence in your local library");
     expect(screen.getByRole("button", { name: "Asking…" }).hasAttribute("disabled")).toBe(true);
     await user.click(screen.getByRole("button", { name: "Asking…" }));
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]).toEqual([
-      "/api/chat",
+      "/api/chat/stream",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT }),
       }),
     ]);
 
-    pendingChat.resolve(jsonResponse(chatResponse));
+    pendingChat.resolve(sseResponse(chatResponse));
 
     expect(await screen.findByText(chatResponse.answer)).toBeTruthy();
     const citation = screen.getByRole("button", { name: /S1.*Foundation.*Chunk 8/ });
@@ -144,10 +144,30 @@ describe("Librarian live API interactions", () => {
     expect(screen.getByText(chatResponse.sources[0].text)).toBeTruthy();
   });
 
+  it("renders validated citations and answer text progressively from the stream", async () => {
+    const stream = deferredSseResponse(chatResponse);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(books))
+      .mockResolvedValueOnce(stream.response);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Foundation" });
+    await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    expect(await screen.findByRole("button", { name: /S1.*Foundation.*Chunk 8/ })).toBeTruthy();
+    expect(await screen.findByText("Psychohistory predicts")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Writing a grounded answer");
+
+    stream.complete();
+    expect(await screen.findByText(chatResponse.answer)).toBeTruthy();
+  });
+
   it("scopes chat to a selected book without automatically submitting", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(books))
-      .mockResolvedValueOnce(jsonResponse(chatResponse));
+      .mockResolvedValueOnce(sseResponse(chatResponse));
     const user = userEvent.setup();
 
     render(<App />);
@@ -165,7 +185,7 @@ describe("Librarian live API interactions", () => {
 
     await screen.findByText(chatResponse.answer);
     expect(fetchMock.mock.calls[1]).toEqual([
-      "/api/chat",
+      "/api/chat/stream",
       expect.objectContaining({
         body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, book_id: "book-1" }),
       }),
@@ -175,7 +195,7 @@ describe("Librarian live API interactions", () => {
   it("offers normalized author choices and sends exactly an author-scoped request", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(authorBooks))
-      .mockResolvedValueOnce(jsonResponse(chatResponse));
+      .mockResolvedValueOnce(sseResponse(chatResponse));
     const user = userEvent.setup();
 
     render(<App />);
@@ -198,7 +218,7 @@ describe("Librarian live API interactions", () => {
     await screen.findByText(chatResponse.answer);
 
     expect(fetchMock.mock.calls[1]).toEqual([
-      "/api/chat",
+      "/api/chat/stream",
       expect.objectContaining({
         body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, author: "Isaac Asimov" }),
       }),
@@ -208,7 +228,7 @@ describe("Librarian live API interactions", () => {
   it("keeps the last successful answer when a later chat request fails", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(books))
-      .mockResolvedValueOnce(jsonResponse(chatResponse))
+      .mockResolvedValueOnce(sseResponse(chatResponse))
       .mockResolvedValueOnce(jsonResponse({ detail: "Generator unavailable" }, 503));
     const user = userEvent.setup();
 
@@ -230,7 +250,7 @@ describe("Librarian live API interactions", () => {
   it("clears an existing answer and citations when the search scope changes", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(books))
-      .mockResolvedValueOnce(jsonResponse(chatResponse));
+      .mockResolvedValueOnce(sseResponse(chatResponse));
     const user = userEvent.setup();
 
     render(<App />);
@@ -255,7 +275,7 @@ describe("Librarian live API interactions", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(books))
       .mockReturnValueOnce(pendingWholeLibraryChat.promise)
-      .mockResolvedValueOnce(jsonResponse(scopedChatResponse));
+      .mockResolvedValueOnce(sseResponse(scopedChatResponse));
     const user = userEvent.setup();
 
     render(<App />);
@@ -265,15 +285,16 @@ describe("Librarian live API interactions", () => {
 
     await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
     await user.click(screen.getByRole("button", { name: "Ask" }));
-    expect(screen.getByRole("status").textContent).toContain("Searching your local library");
+    expect(screen.getByRole("status").textContent).toContain("Finding evidence in your local library");
 
     await user.click(within(card).getByRole("button", { name: /Ask about this book/ }));
     expect(screen.getByText("Current: Foundation")).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByRole("button", { name: "Ask" }).hasAttribute("disabled")).toBe(false);
+    expect((fetchMock.mock.calls[1][1] as RequestInit).signal?.aborted).toBe(true);
 
     await act(async () => {
-      pendingWholeLibraryChat.resolve(jsonResponse(chatResponse));
+      pendingWholeLibraryChat.resolve(sseResponse(chatResponse));
     });
 
     expect(screen.queryByText(chatResponse.answer)).toBeNull();
@@ -293,7 +314,7 @@ describe("Librarian live API interactions", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(authorBooks))
       .mockReturnValueOnce(pendingWholeLibraryChat.promise)
-      .mockResolvedValueOnce(jsonResponse(authorChatResponse));
+      .mockResolvedValueOnce(sseResponse(authorChatResponse));
     const user = userEvent.setup();
 
     render(<App />);
@@ -305,7 +326,7 @@ describe("Librarian live API interactions", () => {
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByRole("button", { name: "Ask" }).hasAttribute("disabled")).toBe(false);
 
-    await act(async () => pendingWholeLibraryChat.resolve(jsonResponse(chatResponse)));
+    await act(async () => pendingWholeLibraryChat.resolve(sseResponse(chatResponse)));
     expect(screen.queryByText(chatResponse.answer)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Ask" }));
@@ -319,7 +340,7 @@ describe("Librarian live API interactions", () => {
     const refreshedBooks = [{ ...books[0], id: "earthsea", title: "A Wizard of Earthsea", authors: ["Ursula K. Le Guin"] }];
     fetchMock
       .mockResolvedValueOnce(jsonResponse(authorBooks))
-      .mockResolvedValueOnce(jsonResponse(chatResponse))
+      .mockResolvedValueOnce(sseResponse(chatResponse))
       .mockResolvedValueOnce(jsonResponse(refreshedBooks));
     const user = userEvent.setup();
 
@@ -344,6 +365,58 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function sseResponse(response: typeof chatResponse): Response {
+  const { answer, ...retrieval } = response;
+  return sseResponseForEvents([
+    ["retrieval", retrieval],
+    ["token", { text: answer }],
+    ["complete", { ...response, timings: streamTimings() }],
+  ]);
+}
+
+function deferredSseResponse(response: typeof chatResponse): { response: Response; complete: () => void } {
+  const { answer, ...retrieval } = response;
+  const partial = "Psychohistory predicts";
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(encoder.encode(sseText("retrieval", retrieval)));
+      controller.enqueue(encoder.encode(sseText("token", { text: partial })));
+      await pending;
+      controller.enqueue(encoder.encode(sseText("token", { text: answer.slice(partial.length) })));
+      controller.enqueue(encoder.encode(sseText("complete", { ...response, timings: streamTimings() })));
+      controller.close();
+    },
+  });
+  return {
+    response: new Response(stream, { headers: { "Content-Type": "text/event-stream" } }),
+    complete: release,
+  };
+}
+
+function sseResponseForEvents(events: [string, unknown][]): Response {
+  return new Response(events.map(([event, data]) => sseText(event, data)).join(""), {
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+function sseText(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function streamTimings() {
+  return {
+    query_embedding_seconds: 0.01,
+    retrieval_seconds: 0.02,
+    prompt_construction_seconds: 0.01,
+    generation_seconds: 0.03,
+    total_seconds: 0.07,
+    time_to_first_token_seconds: 0.04,
+  };
 }
 
 function deferred<T>() {
