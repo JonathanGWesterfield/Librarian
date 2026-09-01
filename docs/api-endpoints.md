@@ -476,6 +476,14 @@ text. An insufficiency response has no citations, because retrieved chunks that
 fail the direct-relevance guard are diagnostics rather than support for the
 answer.
 
+When the user-owned JSON configuration explicitly enables the trusted Codex
+semantic selector, `quality` chat may use it to choose among the already
+retrieved, scope-filtered source-sentence IDs. The returned answer remains the
+exact selected book text with its existing citations. Invalid selector JSON,
+unknown or duplicate IDs, a failed selector call, or a selection that misses
+the evidence floor automatically uses the normal deterministic extractor.
+Ollama configurations never enable this selector.
+
 ### `POST /chat/stream`
 
 Uses the same JSON request fields, scope, retrieval backend, and evidence guard

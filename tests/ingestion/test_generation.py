@@ -183,6 +183,8 @@ class GenerationProviderTests(unittest.TestCase):
             popen.call_args.args[0][1:],
             [
                 "exec",
+                "--model",
+                "codex",
                 "--ephemeral",
                 "--ignore-user-config",
                 "--sandbox",
