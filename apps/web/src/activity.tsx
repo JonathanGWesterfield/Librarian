@@ -11,7 +11,7 @@ import {
 
 const STATUS_POLL_INTERVAL_MS = 5_000;
 
-type ActivityPhase = "idle" | "ingesting" | "indexing" | "ready" | "ingestion-error" | "index-error";
+type ActivityPhase = "idle" | "ingesting" | "reprocessing" | "indexing" | "ready" | "ingestion-error" | "index-error";
 
 type ActivitySectionProps = {
   onLibraryUpdated: () => Promise<void>;
@@ -26,6 +26,7 @@ export function ActivitySection({ onLibraryUpdated }: ActivitySectionProps) {
   const [operationError, setOperationError] = useState<string | null>(null);
   const [ingestionResult, setIngestionResult] = useState<IngestionRunResponse | null>(null);
   const [indexResult, setIndexResult] = useState<SearchIndexResponse | null>(null);
+  const [indexReset, setIndexReset] = useState(false);
   const mounted = useRef(true);
   const statusRequest = useRef<Promise<void> | null>(null);
   const operationGeneration = useRef(0);
@@ -65,7 +66,7 @@ export function ActivitySection({ onLibraryUpdated }: ActivitySectionProps) {
     };
   }, [loadStatus]);
 
-  const workflowActive = phase === "ingesting" || phase === "indexing";
+  const workflowActive = phase === "ingesting" || phase === "reprocessing" || phase === "indexing";
   const serverActive = status ? stages(status).some(([, stage]) => stage.running_books > 0 || stage.active_jobs.length > 0) : false;
 
   useEffect(() => {
@@ -79,10 +80,11 @@ export function ActivitySection({ onLibraryUpdated }: ActivitySectionProps) {
     await Promise.allSettled([onLibraryUpdated(), loadStatus()]);
   }
 
-  async function indexProcessedBooks(generation: number) {
+  async function indexProcessedBooks(generation: number, reset = false) {
+    setIndexReset(reset);
     setPhase("indexing");
     try {
-      const response = await refreshSearchIndex();
+      const response = await refreshSearchIndex({ reset });
       if (!isCurrent(generation)) return;
       setIndexResult(response);
       setPhase("ready");
@@ -94,20 +96,21 @@ export function ActivitySection({ onLibraryUpdated }: ActivitySectionProps) {
     }
   }
 
-  async function updateLibrary() {
+  async function updateLibrary(reprocessUnchanged = false) {
     if (operationActive.current) return;
     operationActive.current = true;
     setOperationBusy(true);
     const generation = ++operationGeneration.current;
-    setPhase("ingesting");
+    setPhase(reprocessUnchanged ? "reprocessing" : "ingesting");
     setOperationError(null);
     setIngestionResult(null);
     setIndexResult(null);
+    setIndexReset(reprocessUnchanged);
     try {
-      const response = await runIngestion();
+      const response = await runIngestion({ reprocessUnchanged });
       if (!isCurrent(generation)) return;
       setIngestionResult(response);
-      await indexProcessedBooks(generation);
+      await indexProcessedBooks(generation, reprocessUnchanged);
     } catch (error) {
       if (!isCurrent(generation)) return;
       setOperationError(messageFor(error, "Unable to update the library."));
@@ -128,7 +131,7 @@ export function ActivitySection({ onLibraryUpdated }: ActivitySectionProps) {
     setOperationError(null);
     setIndexResult(null);
     try {
-      await indexProcessedBooks(generation);
+      await indexProcessedBooks(generation, indexReset);
     } finally {
       if (generation === operationGeneration.current) {
         operationActive.current = false;
@@ -153,9 +156,14 @@ export function ActivitySection({ onLibraryUpdated }: ActivitySectionProps) {
           <h3>Processing status</h3>
           <p>Chunking, summaries, and metadata are tracked independently.</p>
         </div>
-        <button type="button" onClick={() => void updateLibrary()} disabled={operationBusy}>
-          {phase === "ingesting" ? "Processing books…" : phase === "indexing" ? "Refreshing search…" : "Update library"}
-        </button>
+        <div className="activity-action-buttons">
+          <button type="button" onClick={() => void updateLibrary()} disabled={operationBusy}>
+            {phase === "ingesting" ? "Processing books…" : phase === "indexing" ? "Refreshing search…" : "Update library"}
+          </button>
+          <button type="button" className="activity-secondary-action" onClick={() => void updateLibrary(true)} disabled={operationBusy}>
+            {phase === "reprocessing" ? "Reprocessing books…" : "Reprocess existing books"}
+          </button>
+        </div>
       </div>
 
       {statusLoading && !status && <p className="activity-state" role="status">Loading processing status…</p>}
@@ -164,6 +172,7 @@ export function ActivitySection({ onLibraryUpdated }: ActivitySectionProps) {
 
       <div className="activity-result" aria-live="polite">
         {phase === "ingesting" && <p role="status">Checking for new or changed books and generating search embeddings…</p>}
+        {phase === "reprocessing" && <p role="status">Reprocessing every existing EPUB with current rules and regenerating search embeddings. This can take as long as the original library import.</p>}
         {phase === "indexing" && <p role="status">Processing finished. Refreshing the search index; new books are not search-ready yet.</p>}
         {ingestionResult && <p>{ingestionSummary(ingestionResult)}</p>}
         {ingestionResult && ingestionResult.failed > 0 && <p className="activity-warning" role="alert">{ingestionResult.failed} {plural(ingestionResult.failed, "book")} failed during ingestion. Successfully processed books were still sent to the search index.</p>}

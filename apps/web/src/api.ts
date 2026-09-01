@@ -145,17 +145,24 @@ export async function getIngestionStatus(): Promise<IngestionStatusResponse> {
   return request<IngestionStatusResponse>("/ingestion/status");
 }
 
-export async function runIngestion(): Promise<IngestionRunResponse> {
+export async function runIngestion(
+  { reprocessUnchanged = false }: { reprocessUnchanged?: boolean } = {},
+): Promise<IngestionRunResponse> {
   return request<IngestionRunResponse>("/ingestion/run", {
     method: "POST",
-    body: JSON.stringify({ embed_chunks: true }),
+    body: JSON.stringify({
+      embed_chunks: true,
+      ...(reprocessUnchanged ? { reprocess_unchanged: true } : {}),
+    }),
   });
 }
 
-export async function refreshSearchIndex(): Promise<SearchIndexResponse> {
+export async function refreshSearchIndex(
+  { reset = false }: { reset?: boolean } = {},
+): Promise<SearchIndexResponse> {
   return request<SearchIndexResponse>("/search/index", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify(reset ? { reset: true } : {}),
   });
 }
 

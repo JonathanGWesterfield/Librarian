@@ -194,6 +194,10 @@ Request fields:
 - `books_dir`: EPUB source directory. Defaults to `paths.books_dir` in JSON.
 - `database_url`: local storage URL. Defaults to `paths.database_url` in JSON.
 - `force`: re-parse unchanged EPUB files.
+- `reprocess_unchanged`: deliberately re-parse every unchanged EPUB after a
+  parsing or content-classification upgrade. This is off by default so ordinary
+  library updates remain incremental. Use it with `embed_chunks: true` to
+  recreate the changed chunk roles and embeddings.
 - `list_epubs`: include discovered EPUB metadata in the response.
 - `embed_chunks`: generate embeddings for chunks created during the run.
 - `embedding_provider`: embedding provider, such as `noop` or `ollama`.
@@ -234,6 +238,21 @@ Ingest, embed, and queue summaries:
   "summary_generation_model": "qwen2.5:1.5b"
 }
 ```
+
+Reprocess an existing library after a parsing or content-role upgrade:
+
+```json
+{
+  "embed_chunks": true,
+  "reprocess_unchanged": true
+}
+```
+
+This intentionally reparses and re-embeds every discovered EPUB, so its runtime
+can be comparable to the initial library import. It does not run during a
+regular update. The web Activity action **Reprocess existing books** follows
+this request with `POST /search/index` using `reset: true`; wait for its
+successful response before treating the corrected passages as searchable.
 
 Response:
 

@@ -111,7 +111,7 @@
         "tags": ["ingestion"],
         "operationId": "runIngestion",
         "summary": "Run EPUB ingestion",
-        "description": "Scans EPUB files, parses text, chunks books, stores book and chunk rows, optionally generates embeddings, and can enqueue asynchronous summary jobs for newly ingested books.",
+        "description": "Scans EPUB files, parses text, chunks books, stores book and chunk rows, optionally generates embeddings, and can enqueue asynchronous summary jobs for newly ingested books. Set reprocess_unchanged only for a deliberate full-library reparse after a parsing or content-classification upgrade.",
         "requestBody": {
           "required": true,
           "content": {
@@ -139,6 +139,13 @@
                     "embedding_model": "all-minilm",
                     "ollama_base_url": "http://host.docker.internal:11434",
                     "embedding_batch_size": 16
+                  }
+                },
+                "reprocessUnchanged": {
+                  "summary": "Reprocess existing EPUBs after a parser upgrade",
+                  "value": {
+                    "embed_chunks": true,
+                    "reprocess_unchanged": true
                   }
                 },
                 "ingestAndQueueSummaries": {
@@ -1194,6 +1201,11 @@
             "type": "boolean",
             "default": false,
             "description": "Re-parse unchanged EPUB files."
+          },
+          "reprocess_unchanged": {
+            "type": "boolean",
+            "default": false,
+            "description": "Deliberately re-parse unchanged EPUBs to apply updated parsing or content-classification rules. This can take as long as a full library ingestion."
           },
           "list_epubs": {
             "type": "boolean",

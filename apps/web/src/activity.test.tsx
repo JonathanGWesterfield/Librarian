@@ -159,6 +159,71 @@ describe("ActivitySection", () => {
     ]);
   });
 
+  it("reprocesses unchanged books only on request and resets the index before readiness", async () => {
+    const pendingIngestion = deferred<Response>();
+    const pendingIndex = deferred<Response>();
+    const onLibraryUpdated = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(statusResponse))
+      .mockReturnValueOnce(pendingIngestion.promise)
+      .mockReturnValueOnce(pendingIndex.promise)
+      .mockResolvedValueOnce(jsonResponse(statusResponse));
+    const user = userEvent.setup();
+
+    render(<ActivitySection onLibraryUpdated={onLibraryUpdated} />);
+    await screen.findByRole("progressbar", { name: "Chunking progress" });
+    await user.click(screen.getByRole("button", { name: "Reprocess existing books" }));
+
+    expect(await screen.findByText(/Reprocessing every existing EPUB/i)).toBeTruthy();
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/ingestion/run",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ embed_chunks: true, reprocess_unchanged: true }),
+      }),
+    ]);
+
+    await act(async () => pendingIngestion.resolve(jsonResponse(ingestionResponse)));
+
+    expect(fetchMock.mock.calls[2]).toEqual([
+      "/api/search/index",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ reset: true }) }),
+    ]);
+    expect(screen.queryByText(/Search ready/)).toBeNull();
+
+    await act(async () => pendingIndex.resolve(jsonResponse({ ...indexResponse, reset: true })));
+
+    expect(await screen.findByText("Search ready. 80 documents seen; 12 documents indexed.")).toBeTruthy();
+    expect(onLibraryUpdated).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the reset requirement when a reprocess index rebuild is retried", async () => {
+    const pendingRetry = deferred<Response>();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(statusResponse))
+      .mockResolvedValueOnce(jsonResponse(ingestionResponse))
+      .mockResolvedValueOnce(jsonResponse({ detail: "OpenSearch unavailable" }, 503))
+      .mockReturnValueOnce(pendingRetry.promise)
+      .mockResolvedValueOnce(jsonResponse(statusResponse));
+    const user = userEvent.setup();
+
+    render(<ActivitySection onLibraryUpdated={vi.fn()} />);
+    await screen.findByRole("progressbar", { name: "Chunking progress" });
+    await user.click(screen.getByRole("button", { name: "Reprocess existing books" }));
+    await user.click(await screen.findByRole("button", { name: "Retry search index" }));
+
+    const indexCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/search/index");
+    expect(indexCalls).toHaveLength(2);
+    for (const [, request] of indexCalls) {
+      expect(request).toEqual(
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ reset: true }) }),
+      );
+    }
+
+    await act(async () => pendingRetry.resolve(jsonResponse({ ...indexResponse, reset: true })));
+    expect(await screen.findByText(/Search ready/)).toBeTruthy();
+  });
+
   it("offers an index-only retry after indexing fails and gates readiness until it succeeds", async () => {
     const pendingRetry = deferred<Response>();
     const onLibraryUpdated = vi.fn().mockResolvedValue(undefined);
