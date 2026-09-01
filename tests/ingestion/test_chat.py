@@ -25,7 +25,9 @@ class ChatTests(unittest.TestCase):
     def test_streamed_chat_reuses_prepared_evidence_and_emits_ordered_ollama_tokens(self) -> None:
         """Streaming must not re-embed/retrieve before delivering native fragments."""
         question = "How brutal is war?"
-        generator = _FakeStreamingGenerator(["War is ", "terrifying. [S1]"])
+        generator = _FakeStreamingGenerator(
+            ["The front is a cage ", "in which we must await fearfully."]
+        )
         with (
             patch("librarian_chat.chat.embed_query", return_value=_query_embedding()) as embed,
             patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
@@ -45,10 +47,16 @@ class ChatTests(unittest.TestCase):
             )
             events = list(stream_answer_question(preparation))
 
-        self.assertEqual([event.event for event in events], ["retrieval", "token", "token", "complete"])
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
         self.assertEqual(events[0].data["sources"][0]["source_id"], "S1")
-        self.assertEqual(events[1].data, {"text": "War is "})
-        self.assertEqual(events[-1].data["answer"], "War is terrifying. [S1]")
+        self.assertEqual(
+            events[1].data,
+            {"text": "The front is a cage in which we must await fearfully."},
+        )
+        self.assertEqual(
+            events[-1].data["answer"],
+            "The front is a cage in which we must await fearfully.",
+        )
         self.assertIsNotNone(events[-1].data["timings"]["time_to_first_token_seconds"])
         self.assertEqual(embed.call_count, 1)
         self.assertEqual(search.call_count, 1)
@@ -88,6 +96,253 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(events[-1].data["sources"], [])
         self.assertIn("enough relevant body-text evidence", events[-1].data["answer"])
         self.assertEqual(generator.generate_calls, 0)
+
+    def test_quality_stream_with_speculation_uses_a_grounded_extractive_fallback(self) -> None:
+        """Never expose the Mara/ticking inference UAT found in a live Ollama answer."""
+        question = "What happened when Mara opened the garden gate?"
+        source_text = (
+            "Mara opened the gate with a borrowed key. "
+            "The clockwork garden answered in careful ticking."
+        )
+        generator = _FakeStreamingGenerator(
+            [
+                "Mara's action was motivated by the garden's ticking. ",
+                "The garden responded to her presence.",
+            ]
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        emitted_text = " ".join(
+            event.data["text"] for event in events if event.event == "token"
+        )
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        self.assertEqual(emitted_text, "Mara opened the gate with a borrowed key. [S1]")
+        self.assertNotIn("motivated", emitted_text.casefold())
+        self.assertNotIn("presence", emitted_text.casefold())
+        self.assertEqual(events[-1].data["answer"], emitted_text)
+        self.assertEqual(events[-1].data["sources"][0]["source_id"], "S1")
+
+    def test_quality_stream_emits_a_supported_inflected_sentence_early(self) -> None:
+        """A genuine Ollama quality answer can stream once a source-backed sentence closes."""
+        question = "Who opens the garden gate?"
+        source_text = "Mara opened the garden gate with a borrowed key."
+        generator = _FakeStreamingGenerator(
+            ["Mara opens the garden ", "gate with a borrowed key."]
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        self.assertEqual(events[1].data["text"], "Mara opens the garden gate with a borrowed key.")
+        self.assertEqual(events[-1].data["answer"], events[1].data["text"])
+        self.assertIsNotNone(events[-1].data["timings"]["time_to_first_token_seconds"])
+
+    def test_quality_stream_waits_for_a_trailing_citation_split_across_fragments(self) -> None:
+        """Do not commit a sentence before a normal next-fragment citation arrives."""
+        question = "Who opens the garden gate?"
+        source_text = "Mara opened the garden gate with a borrowed key."
+        generator = _FakeStreamingGenerator(
+            ["Mara opened the garden gate with a borrowed key.", " [S1]"]
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        expected = "Mara opened the garden gate with a borrowed key. [S1]"
+        self.assertEqual(events[1].data["text"], expected)
+        self.assertEqual(events[-1].data["answer"], expected)
+
+    def test_quality_stream_splits_cited_sentences_when_the_next_sentence_begins(self) -> None:
+        """Each source-backed cited sentence streams separately across normal chunks."""
+        question = "Who opens the garden gate?"
+        generator = _FakeStreamingGenerator(
+            [
+                "Mara opens the garden gate with a borrowed key. [S1] The garden ",
+                "answers in careful ticking. [S2]",
+            ]
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_two_source_chat_search_response(question),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        expected_tokens = [
+            "Mara opens the garden gate with a borrowed key. [S1]",
+            " The garden answers in careful ticking. [S2]",
+        ]
+        self.assertEqual(
+            [event.event for event in events],
+            ["retrieval", "token", "token", "complete"],
+        )
+        self.assertEqual(
+            [event.data["text"] for event in events if event.event == "token"],
+            expected_tokens,
+        )
+        self.assertEqual(events[-1].data["answer"], "".join(expected_tokens))
+
+    def test_later_unsupported_sentence_keeps_completion_equal_to_visible_safe_text(self) -> None:
+        """Never append a fallback after already streaming a verified sentence."""
+        question = "Who opens the garden gate?"
+        source_text = "Mara opened the garden gate with a borrowed key."
+        generator = _FakeStreamingGenerator(
+            [
+                "Mara opens the garden gate with a borrowed key. "
+                "The garden loves Mara."
+            ]
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        self.assertEqual(events[-1].data["answer"], events[1].data["text"])
+        self.assertNotIn("loves", events[-1].data["answer"])
+
+    def test_unsupported_quality_stream_without_fallback_returns_no_citations_or_tokens(self) -> None:
+        """Semantic refusal has the same empty-evidence surface as the existing guard."""
+        question = "Who opens the garden gate?"
+        generator = _FakeStreamingGenerator(["The garden loves Mara."])
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(
+                    question,
+                    text="A brass robin counted three silver seeds.",
+                ),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "complete"])
+        self.assertEqual(events[0].data["sources"], [])
+        self.assertEqual(events[-1].data["sources"], [])
+        self.assertIn("enough relevant body-text evidence", events[-1].data["answer"])
+        self.assertIsNone(events[-1].data["timings"]["time_to_first_token_seconds"])
 
     def test_streamed_generation_failure_is_a_clear_terminal_error(self) -> None:
         """A provider error after retrieval should not make an SSE client hang."""
@@ -816,6 +1071,48 @@ def _chat_search_response(
                 embedding_model="all-minilm",
                 dimensions=2,
             )
+        ],
+    )
+
+
+def _two_source_chat_search_response(question: str) -> SearchResponse:
+    """Provide two separately citable sentences for stream-boundary coverage."""
+    return SearchResponse(
+        query=question,
+        embedding_provider="ollama",
+        embedding_model="all-minilm",
+        dimensions=2,
+        candidate_count=2,
+        filters={},
+        results=[
+            SearchResult(
+                score=0.9,
+                chunk_id="clockwork:0",
+                book_id="clockwork",
+                relative_path="clockwork.epub",
+                title="The Clockwork Garden",
+                authors=["Test Author"],
+                publisher="Fixture Press",
+                chunk_index=0,
+                text="Mara opened the garden gate with a borrowed key.",
+                embedding_provider="ollama",
+                embedding_model="all-minilm",
+                dimensions=2,
+            ),
+            SearchResult(
+                score=0.8,
+                chunk_id="clockwork:1",
+                book_id="clockwork",
+                relative_path="clockwork.epub",
+                title="The Clockwork Garden",
+                authors=["Test Author"],
+                publisher="Fixture Press",
+                chunk_index=1,
+                text="The clockwork garden answered in careful ticking.",
+                embedding_provider="ollama",
+                embedding_model="all-minilm",
+                dimensions=2,
+            ),
         ],
     )
 

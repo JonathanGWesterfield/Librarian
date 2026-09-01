@@ -485,16 +485,31 @@ supports `GET` requests.
 Events are emitted in this order:
 
 1. `retrieval`: metadata and the validated citations after retrieval and all
-   evidence guards have completed. An insufficient-evidence response therefore
-   has `sources: []` here.
+   evidence guards have completed. For native quality streaming it is emitted
+   immediately before the first source-verified answer sentence. An
+   insufficient-evidence response therefore has `sources: []` here.
 2. Zero or more `token` events, each with `{"text":"..."}`. The default
-   Compose Ollama generator forwards native `/api/chat` fragments immediately.
-   Codex, OpenAI-compatible gateways, and other non-streaming providers skip
-   these events and retain their established complete-response behavior.
+   Compose Ollama generator reads native `/api/chat` fragments immediately,
+   but buffers them through a sentence boundary before exposing them. A sentence
+   is emitted only when all of its meaningful terms (with safe inflection
+   normalization such as `opens`/`opened` and `wakes`/`woke`) occur in one
+   cited source sentence. Librarian also waits for a trailing citation fragment
+   before committing terminal punctuation, so a normal chunk boundary cannot
+   turn `[S1]` into a second response. Once text after that citation begins a
+   new sentence, the cited preceding sentence is emitted on its own; multi-
+   citation answers therefore remain incremental. Unsupported output is never
+   exposed. If no sentence has been emitted, Librarian returns a relevant verbatim
+   source-sentence fallback when possible, or the normal empty-citation
+   insufficiency response when it is not. If a later sentence fails validation,
+   the terminal answer remains exactly the already-streamed verified text.
+   Codex,
+   OpenAI-compatible gateways, and other non-streaming providers skip token
+   events and retain their established complete-response behavior.
 3. Exactly one terminal `complete` event with the authoritative full answer,
    citations, retrieval metadata, and timings. Its `timings` also includes
    `time_to_first_token_seconds`; it is `null` when the provider did not stream
-   text or the answer was an evidence refusal.
+   a verified sentence or the answer was an evidence refusal. It measures the
+   first user-visible validated answer event, not a raw model fragment.
 
 If generation fails after the `retrieval` event, the stream instead ends with
 one terminal `error` event:
@@ -520,10 +535,7 @@ event: retrieval
 data: {"question":"What is psychohistory?","retrieval_backend":"opensearch","sources":[{"source_id":"S1","text":"..."}]}
 
 event: token
-data: {"text":"Psychohistory "}
-
-event: token
-data: {"text":"models large populations. [S1]"}
+data: {"text":"Psychohistory models large populations. [S1]"}
 
 event: complete
 data: {"question":"What is psychohistory?","answer":"Psychohistory models large populations. [S1]","sources":[{"source_id":"S1","text":"..."}],"timings":{"query_embedding_seconds":0.01,"retrieval_seconds":0.02,"prompt_construction_seconds":0.01,"generation_seconds":0.3,"total_seconds":0.35,"time_to_first_token_seconds":0.08}}
