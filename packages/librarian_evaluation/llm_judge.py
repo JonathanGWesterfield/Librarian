@@ -63,6 +63,8 @@ class LLMJudgeCaseMetrics:
     missing_coverage: list[str]
     unsupported_claims: list[str]
     reason: str
+    expected_judge_verdict: EvidenceVerdict | None
+    expectation_met: bool | None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -101,6 +103,12 @@ class LLMJudgeReport:
             "fallback_used": self.fallback_used,
             "metric_type": self.metric_type,
             "aggregate": self.aggregate.to_dict(),
+            "expectation_case_count": sum(
+                case.expected_judge_verdict is not None for case in self.cases
+            ),
+            "expectation_mismatch_count": sum(
+                case.expectation_met is False for case in self.cases
+            ),
             "cases": [case.to_dict() for case in self.cases],
         }
 
@@ -124,7 +132,7 @@ class CodexJudge:
     def judge(self, prompt: str) -> str:
         try:
             completed = subprocess.run(
-                ["codex", "exec", "--ephemeral", prompt],
+                ["codex", "exec", "--model", self.model, "--ephemeral", prompt],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -334,6 +342,7 @@ def _case_metrics_from_response(
         )
         / 6
     )
+    expected_judge_verdict = _expected_judge_verdict(case)
     return LLMJudgeCaseMetrics(
         case_id=case.id,
         question=case.question,
@@ -351,7 +360,26 @@ def _case_metrics_from_response(
         missing_coverage=semantic.missing_coverage,
         unsupported_claims=semantic.unsupported_claims,
         reason=semantic.reason,
+        expected_judge_verdict=expected_judge_verdict,
+        expectation_met=(
+            semantic.evidence_verdict == expected_judge_verdict
+            if expected_judge_verdict is not None
+            else None
+        ),
     )
+
+
+def _expected_judge_verdict(
+    case: AnswerEvaluationCase,
+) -> EvidenceVerdict | None:
+    expected = case.expected_judge_verdict
+    if expected is None:
+        return None
+    if expected not in {"supported", "contradicted", "insufficient"}:
+        raise LLMJudgeError(
+            f"case {case.id!r} has invalid expected_judge_verdict: {expected!r}"
+        )
+    return expected
 
 
 def _semantic_result_from_payload(payload: dict[str, object]) -> SemanticJudgeResult:

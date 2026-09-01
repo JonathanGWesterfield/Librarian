@@ -495,8 +495,9 @@ Events are emitted in this order:
    did not open the gate” cannot become “Mara opened the gate,” and temporal
    wording cannot become an invented cause. For event questions such as “What
    happened when…?”, Librarian may append the immediately following exact
-   source sentence when it shares meaningful terms with the question or the
-   selected event sentence; adjacency alone is not enough. Broad answers emit
+   source sentence when it shares an event, object, or setting term with the
+   question or selected event sentence. A shared actor alone is not enough,
+   and adjacency alone is not enough. Broad answers emit
    one exact, directly relevant sentence per required source. Providers do not
    change this contract.
 3. Exactly one terminal `complete` event with the authoritative full answer,

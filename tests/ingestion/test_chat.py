@@ -189,6 +189,42 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn("brass robin", response.answer.casefold())
         self.assertEqual(generator.messages, [])
 
+    def test_event_context_rule_rejects_a_shared_actor_without_event_context(self) -> None:
+        """A repeated character name alone cannot make adjacent prose relevant."""
+        question = "What happened when Mara opened the garden gate?"
+        source_text = (
+            "Mara opened the garden gate with a borrowed key. "
+            "Mara recited a poem."
+        )
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:7b",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(
+            response.answer,
+            "Mara opened the garden gate with a borrowed key. [S1]",
+        )
+        self.assertNotIn("recited a poem", response.answer.casefold())
+        self.assertEqual(generator.messages, [])
+
     def test_json_quality_answer_preserves_a_source_negation(self) -> None:
         """A model cannot turn a cited denial into its positive opposite."""
         question = "Did Mara open the garden gate?"

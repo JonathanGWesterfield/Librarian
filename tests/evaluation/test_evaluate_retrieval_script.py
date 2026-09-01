@@ -373,6 +373,96 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
             1.0,
         )
 
+    def test_llm_judge_expectation_mismatch_writes_report_and_fails_command(self) -> None:
+        """Opt-in semantic-evaluation disagreement must fail after preserving evidence."""
+        module = _load_script_module()
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            benchmark_path = temp_path / "retrieval.json"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "unit"},
+                        "k_values": [1],
+                        "primary_k": 1,
+                        "cases": [
+                            {
+                                "id": "retrieval",
+                                "query": "query",
+                                "relevant_chunk_ids": ["chunk:1"],
+                                "results": [
+                                    {
+                                        "chunk_id": "chunk:1",
+                                        "book_id": "book",
+                                        "relative_path": "book.epub",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            answers_path = temp_path / "answers.json"
+            answers_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": {"name": "answers"},
+                        "cases": [
+                            {
+                                "id": "negation",
+                                "question": "Did Mara open the gate?",
+                                "answer": "Mara opened the gate. [S1]",
+                                "sources": [
+                                    {
+                                        "source_id": "S1",
+                                        "text": "Mara did not open the gate.",
+                                    }
+                                ],
+                                "expected_judge_verdict": "contradicted",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_path = temp_path / "report.json"
+            markdown_path = temp_path / "report.md"
+            wrong_judge = StaticJudge(
+                response=(
+                    '{"evidence_verdict":"supported",'
+                    '"citation_relevance":"all_relevant",'
+                    '"missing_coverage":[],"unsupported_claims":[],'
+                    '"reason":"Deliberately wrong fixture response."}'
+                )
+            )
+            arguments = [
+                "evaluate_retrieval.py",
+                "--benchmark",
+                str(benchmark_path),
+                "--answer-benchmark",
+                str(answers_path),
+                "--output",
+                str(output_path),
+                "--markdown-output",
+                str(markdown_path),
+                "--llm-judge",
+            ]
+            with (
+                patch.object(sys, "argv", arguments),
+                patch.object(module, "configure_cli_logging"),
+                patch.object(module, "_create_optional_judge", return_value=wrong_judge),
+                patch.object(module, "_create_optional_fallback_judge", return_value=None),
+            ):
+                result = module.main()
+
+            document = json.loads(output_path.read_text(encoding="utf-8"))
+            markdown = markdown_path.read_text(encoding="utf-8")
+
+        self.assertEqual(result, 1)
+        self.assertEqual(document["llm_judge"]["expectation_mismatch_count"], 1)
+        self.assertIn("Expected-verdict mismatches", markdown)
+
 
 def _fake_search(_options) -> SearchResponse:
     return SearchResponse(
