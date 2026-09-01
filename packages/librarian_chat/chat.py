@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Generator as IteratorGenerator, Iterator
+from collections.abc import Generator as IteratorGenerator, Iterator
 from dataclasses import asdict, dataclass, field
 import logging
 import re
@@ -237,10 +237,20 @@ class PreparedChat:
     immediate_answer: str | None
 
     def retrieval_event(
-        self, sources: list[ChatSource] | None = None
+        self,
+        sources: list[ChatSource] | None = None,
+        *,
+        time_to_first_event_seconds: float | None = None,
     ) -> dict[str, object]:
         """Return safe metadata after all evidence guards have run."""
         event_sources = self.sources if sources is None else sources
+        timings: dict[str, float] = {
+            "query_embedding_seconds": self.query_embedding_seconds,
+            "retrieval_seconds": self.retrieval_seconds,
+            "prompt_construction_seconds": self.prompt_construction_seconds,
+        }
+        if time_to_first_event_seconds is not None:
+            timings["time_to_first_event_seconds"] = time_to_first_event_seconds
         return {
             "question": self.question,
             "embedding_provider": self.embedding_provider,
@@ -253,11 +263,7 @@ class PreparedChat:
             "filters": self.filters,
             "retrieval_backend": self.retrieval_backend,
             "sources": [source.to_dict() for source in event_sources],
-            "timings": {
-                "query_embedding_seconds": self.query_embedding_seconds,
-                "retrieval_seconds": self.retrieval_seconds,
-                "prompt_construction_seconds": self.prompt_construction_seconds,
-            },
+            "timings": timings,
         }
 
 
@@ -405,31 +411,41 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
     before the normal final-response guard can correct it.
     """
     generation_started = perf_counter()
+    first_event_seconds: float | None = None
     first_token_seconds: float | None = None
     response_sources = preparation.sources
     retrieval_emitted = False
 
     def emit_retrieval(sources: list[ChatSource]) -> ChatStreamEvent:
-        nonlocal retrieval_emitted
+        nonlocal first_event_seconds, retrieval_emitted
+        if first_event_seconds is None:
+            first_event_seconds = perf_counter() - preparation.total_started
         retrieval_emitted = True
-        return ChatStreamEvent("retrieval", preparation.retrieval_event(sources))
+        return ChatStreamEvent(
+            "retrieval",
+            preparation.retrieval_event(
+                sources,
+                time_to_first_event_seconds=first_event_seconds,
+            ),
+        )
 
     try:
+        # Retrieval is already evidence-floor validated by preparation, so it
+        # is useful and safe progress in its own right. Emit it before native
+        # generation: the UI can show the grounded passages while strict
+        # sentence verification continues to withhold answer text.
+        yield emit_retrieval(response_sources)
         if preparation.immediate_answer is not None:
             answer = preparation.immediate_answer
-            yield emit_retrieval(response_sources)
         elif isinstance(preparation.generator, StreamingGenerator):
             (
                 answer,
                 response_sources,
                 first_token_seconds,
-                retrieval_emitted,
             ) = yield from _stream_verified_ollama_answer(
                 preparation,
-                emit_retrieval=emit_retrieval,
             )
         else:
-            yield emit_retrieval(response_sources)
             answer = preparation.generator.generate(preparation.messages)
 
         response = _response_from_preparation(
@@ -440,6 +456,7 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
         )
         completed = response.to_dict()
         timings = dict(response.timings.to_dict())
+        timings["time_to_first_event_seconds"] = first_event_seconds
         timings["time_to_first_token_seconds"] = first_token_seconds
         completed["timings"] = timings
         yield ChatStreamEvent("complete", completed)
@@ -453,6 +470,7 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
                 "timings": {
                     "generation_seconds": perf_counter() - generation_started,
                     "total_seconds": perf_counter() - preparation.total_started,
+                    "time_to_first_event_seconds": first_event_seconds,
                     "time_to_first_token_seconds": first_token_seconds,
                 },
             },
@@ -461,24 +479,22 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
 
 def _stream_verified_ollama_answer(
     preparation: PreparedChat,
-    *,
-    emit_retrieval: Callable[[list[ChatSource]], ChatStreamEvent],
 ) -> IteratorGenerator[
     ChatStreamEvent,
     None,
-    tuple[str, list[ChatSource], float | None, bool],
+    tuple[str, list[ChatSource], float | None],
 ]:
     """Validate native fragments before yielding any user-visible answer text.
 
     The return tuple is consumed with ``yield from`` by ``stream_answer_question``:
-    answer, sources for the final response, time-to-first-token, and whether
-    retrieval has been emitted.  Delaying retrieval until a first safe sentence
-    lets a semantic refusal use the existing no-citation response behavior.
+    answer, sources for the final response, and time-to-first-token. Retrieval
+    has already been safely emitted by ``stream_answer_question`` after the
+    evidence floor completes, so native generation cannot delay visible useful
+    progress.
     """
     buffered = ""
     safe_sentences: list[str] = []
     first_token_seconds: float | None = None
-    retrieval_emitted = False
     unsafe_generation = False
 
     stream = preparation.generator.stream(preparation.messages)
@@ -492,9 +508,6 @@ def _stream_verified_ollama_answer(
                 if not _stream_sentence_is_source_supported(sentence, preparation.sources):
                     unsafe_generation = True
                     break
-                if not retrieval_emitted:
-                    yield emit_retrieval(preparation.sources)
-                    retrieval_emitted = True
                 token = sentence if not safe_sentences else f" {sentence}"
                 if first_token_seconds is None:
                     first_token_seconds = perf_counter() - preparation.total_started
@@ -514,9 +527,6 @@ def _stream_verified_ollama_answer(
     ):
         sentence = buffered.strip()
         if _stream_sentence_is_source_supported(sentence, preparation.sources):
-            if not retrieval_emitted:
-                yield emit_retrieval(preparation.sources)
-                retrieval_emitted = True
             token = sentence if not safe_sentences else f" {sentence}"
             if first_token_seconds is None:
                 first_token_seconds = perf_counter() - preparation.total_started
@@ -532,22 +542,16 @@ def _stream_verified_ollama_answer(
         unsafe_generation = True
 
     if safe_sentences:
-        return " ".join(safe_sentences), preparation.sources, first_token_seconds, retrieval_emitted
+        return " ".join(safe_sentences), preparation.sources, first_token_seconds
 
     fallback = _stream_extractive_fallback(preparation.question, preparation.sources)
     if fallback is not None:
-        if not retrieval_emitted:
-            yield emit_retrieval(preparation.sources)
-            retrieval_emitted = True
         if first_token_seconds is None:
             first_token_seconds = perf_counter() - preparation.total_started
         yield ChatStreamEvent("token", {"text": fallback})
-        return fallback, preparation.sources, first_token_seconds, retrieval_emitted
+        return fallback, preparation.sources, first_token_seconds
 
     sources: list[ChatSource] = []
-    if not retrieval_emitted:
-        yield emit_retrieval(sources)
-        retrieval_emitted = True
     return (
         _insufficient_evidence_answer(
             publication_question=_asks_for_publication_metadata(preparation.question),
@@ -555,7 +559,6 @@ def _stream_verified_ollama_answer(
         ),
         sources,
         None,
-        retrieval_emitted,
     )
 
 

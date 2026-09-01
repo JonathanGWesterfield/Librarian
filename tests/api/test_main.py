@@ -430,7 +430,11 @@ class IngestionApiTests(unittest.TestCase):
                         "question": "How brutal is war?",
                         "answer": "War is terrifying.",
                         "sources": [{"source_id": "S1"}],
-                        "timings": {"time_to_first_token_seconds": 0.02, "total_seconds": 0.08},
+                        "timings": {
+                            "time_to_first_event_seconds": 0.01,
+                            "time_to_first_token_seconds": 0.02,
+                            "total_seconds": 0.08,
+                        },
                     },
                 ),
             ]
@@ -451,6 +455,7 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual([event for event, _ in parsed], ["retrieval", "token", "token", "complete"])
         self.assertEqual(parsed[0][1]["sources"], [{"source_id": "S1"}])
         self.assertEqual(parsed[-1][1]["answer"], "War is terrifying.")
+        self.assertEqual(parsed[-1][1]["timings"]["time_to_first_event_seconds"], 0.01)
         self.assertEqual(parsed[-1][1]["timings"]["time_to_first_token_seconds"], 0.02)
         self.assertEqual(prepare.call_count, 1)
 

@@ -188,8 +188,9 @@ keyword/BM25, and filtered retrieval; its hybrid rank fusion improves exact
 term, name, and phrase matches alongside semantic search. The responsive React
 UI now supports library browsing, processing status, inspectable citations, and
 whole-library, author, or book chat scopes. Chat now streams evidence-ready
-citations and source-verified native Ollama sentences as they are generated,
-while keeping the existing complete JSON API available to other clients.
+citations immediately after retrieval and source-verified native Ollama
+sentences when they are safe to expose, while keeping the existing complete
+JSON API available to other clients.
 Operational polish is the next planned phase.
 
 ## Roadmap

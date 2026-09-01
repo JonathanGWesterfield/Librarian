@@ -415,6 +415,7 @@ function streamTimings() {
     prompt_construction_seconds: 0.01,
     generation_seconds: 0.03,
     total_seconds: 0.07,
+    time_to_first_event_seconds: 0.03,
     time_to_first_token_seconds: 0.04,
   };
 }
