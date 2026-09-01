@@ -287,10 +287,10 @@ class RetrievalReportingTests(unittest.TestCase):
             {"answer": AnswerCandidate(answer="answer", sources=[])},
             judge=StaticJudge(
                 response=(
-                    '{"correctness": 0.7, "completeness": 0.7, '
-                    '"groundedness": 0.6, "citation_accuracy": 0.5, '
-                    '"refusal_quality": 1.0, "usefulness": 0.7, '
-                    '"overall_score": 0.7, "rationale": "Reasonable answer."}'
+                    '{"evidence_verdict":"supported",'
+                    '"citation_relevance":"not_applicable",'
+                    '"missing_coverage":[],"unsupported_claims":[],'
+                    '"reason":"Reasonable answer."}'
                 ),
                 provider="codex",
                 model="codex",
