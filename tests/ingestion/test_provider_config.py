@@ -58,6 +58,8 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.generation.model, "qwen2.5:1.5b")
         self.assertEqual(config.generation.answer_capability, "lightweight")
         self.assertEqual(config.search.opensearch_url, "http://opensearch:9200")
+        self.assertFalse(config.semantic_source_selector.enabled)
+        self.assertEqual(config.semantic_source_selector.provider, "codex")
 
     def test_base_profile_is_complete_without_tracking_its_gateway_token(self) -> None:
         """The tracked Codex-gateway baseline needs only a local ignored secret file."""
@@ -83,6 +85,40 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.generation.model, "codex")
         self.assertEqual(config.generation.answer_capability, "quality")
         self.assertEqual(config.generation.api_key, "test-bridge-token")
+        self.assertEqual(config.semantic_source_selector.model, "gpt-5.6")
+
+    def test_semantic_source_selector_is_json_configured_and_codex_only(self) -> None:
+        """Local models cannot be configured to choose semantic answer evidence."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "librarian.json"
+            _write_config(path)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["semantic_source_selector"] = {
+                "enabled": True,
+                "provider": "ollama",
+                "model": "qwen2.5:7b",
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                LibrarianConfigError,
+                "semantic_source_selector.provider must be codex",
+            ):
+                get_librarian_config(path)
+
+    def test_missing_optional_selector_is_safely_disabled_for_existing_json(self) -> None:
+        """Older user-owned config files remain usable without model selection."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "librarian.json"
+            _write_config(path)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload.pop("semantic_source_selector")
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            config = get_librarian_config(path)
+
+        self.assertFalse(config.semantic_source_selector.enabled)
+        self.assertEqual(config.semantic_source_selector.provider, "")
 
     def test_generation_capability_is_a_configured_product_default(self) -> None:
         """Capability is not inferred from a generation model name."""

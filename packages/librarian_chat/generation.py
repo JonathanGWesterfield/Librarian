@@ -240,6 +240,8 @@ class CodexGenerator:
         command = [
             executable,
             "exec",
+            "--model",
+            self.model,
             "--ephemeral",
             "--ignore-user-config",
             "--sandbox",

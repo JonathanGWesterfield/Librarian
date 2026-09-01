@@ -31,6 +31,7 @@ _ALLOWED_PROVIDER_MODES = {
     "codex",
 }
 _ALLOWED_ANSWER_CAPABILITIES = {"quality", "lightweight"}
+_ALLOWED_SEMANTIC_SELECTOR_PROVIDERS = {"codex"}
 _HTTP_HEADER_NAME = frozenset(
     "!#$%&'*+.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-"
 )
@@ -101,6 +102,20 @@ class SummarySettings:
 
 
 @dataclass(frozen=True)
+class SemanticSourceSelectorSettings:
+    """Explicit, opt-in model policy for choosing existing source sentences.
+
+    The selector is deliberately not a general generation provider.  Its only
+    job is to choose IDs from the exact retrieved sentences that chat already
+    considers eligible evidence.
+    """
+
+    enabled: bool
+    provider: str
+    model: str
+
+
+@dataclass(frozen=True)
 class ServiceSettings:
     api_port: int
     web_port: int
@@ -119,6 +134,7 @@ class LibrarianConfig:
     generation: ProviderSettings
     search: SearchSettings
     summaries: SummarySettings
+    semantic_source_selector: SemanticSourceSelectorSettings
     services: ServiceSettings
     codex_executable: str
 
@@ -175,6 +191,7 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
             "generation",
             "search",
             "summaries",
+            "semantic_source_selector",
             "services",
             "codex_executable",
         },
@@ -195,6 +212,9 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
         ),
         search=_parse_search(root.get("search")),
         summaries=_parse_summaries(root.get("summaries")),
+        semantic_source_selector=_parse_semantic_source_selector(
+            root.get("semantic_source_selector")
+        ),
         services=_parse_services(root.get("services")),
         codex_executable=_require_string(root.get("codex_executable"), "codex_executable"),
     )
@@ -465,6 +485,42 @@ def _parse_summaries(value: object) -> SummarySettings:
     timeout = _require_positive_number(summaries.get("chunk_timeout_seconds"), "summaries.chunk_timeout_seconds")
     parallel = _require_positive_int(summaries.get("max_parallel_chunks"), "summaries.max_parallel_chunks")
     return SummarySettings(chunk_timeout_seconds=timeout, max_parallel_chunks=parallel)
+
+
+def _parse_semantic_source_selector(value: object) -> SemanticSourceSelectorSettings:
+    """Parse the trusted, source-ID-only semantic selector policy.
+
+    Codex is intentionally the sole supported selector.  A small local model
+    may be useful for smoke testing JSON transport, but it is not trusted to
+    choose semantic evidence for user-visible answers.
+    """
+
+    # Existing user-owned version-1 JSON files predate this optional feature.
+    # Absence is a safe, disabled policy; enabling it always requires the full
+    # explicit JSON object below.
+    if value is None:
+        return SemanticSourceSelectorSettings(enabled=False, provider="", model="")
+    selector = _require_mapping(value, "semantic_source_selector")
+    _reject_unknown_keys(
+        selector,
+        {"enabled", "provider", "model"},
+        "semantic_source_selector",
+    )
+    enabled = selector.get("enabled")
+    if not isinstance(enabled, bool):
+        raise LibrarianConfigError("semantic_source_selector.enabled must be a boolean")
+    provider = _require_string(
+        selector.get("provider"), "semantic_source_selector.provider"
+    ).casefold()
+    if provider not in _ALLOWED_SEMANTIC_SELECTOR_PROVIDERS:
+        raise LibrarianConfigError(
+            "semantic_source_selector.provider must be codex"
+        )
+    return SemanticSourceSelectorSettings(
+        enabled=enabled,
+        provider=provider,
+        model=_require_string(selector.get("model"), "semantic_source_selector.model"),
+    )
 
 
 def _parse_services(value: object) -> ServiceSettings:

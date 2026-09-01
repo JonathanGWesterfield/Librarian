@@ -2,16 +2,21 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
+import json
 import logging
 import re
 from time import perf_counter
 
 from librarian_chat.generation import (
+    ChatMessage,
     GenerationError,
     Generator,
     create_configured_generator,
+    create_generator,
 )
 from librarian_config.config import (
+    LibrarianConfigError,
+    get_librarian_config,
     resolve_database_url,
     resolve_chat_retrieval_backend,
     resolve_generation_answer_capability,
@@ -270,6 +275,15 @@ class ChatStreamEvent:
     data: dict[str, object]
 
 
+@dataclass(frozen=True)
+class _SourceSentenceCandidate:
+    """One exact sentence that a trusted selector may choose, but never edit."""
+
+    sentence_id: str
+    source: ChatSource
+    sentence: str
+
+
 def prepare_answer_question(options: ChatOptions) -> PreparedChat:
     """Retrieve and validate evidence once before choosing a delivery mode."""
     total_started = perf_counter()
@@ -346,11 +360,19 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
             required_sources=required_sources,
         )
     else:
-        grounded_answer = _grounded_extractive_answer(
+        grounded_answer = _semantic_source_selection_answer(
             question,
             sources,
             required_sources=required_sources,
+            answer_capability=answer_capability,
+            generator=generator,
         )
+        if grounded_answer is None:
+            grounded_answer = _grounded_extractive_answer(
+                question,
+                sources,
+                required_sources=required_sources,
+            )
         if grounded_answer is None:
             # Retrieval candidates without a directly relevant source
             # sentence are diagnostics, not answer evidence. This applies to
@@ -811,6 +833,196 @@ def _grounded_extractive_answer(
         )
         if context_sentence is not None:
             tokens.append(f"{context_sentence} [{primary[4].source_id}]")
+    return selected_sources, tokens
+
+
+def _semantic_source_selection_answer(
+    question: str,
+    sources: list[ChatSource],
+    *,
+    required_sources: int,
+    answer_capability: str,
+    generator: Generator,
+) -> tuple[list[ChatSource], list[str]] | None:
+    """Use a trusted Codex selector to choose exact, already-retrieved text.
+
+    A selector gets no authority to draft an answer. It returns only IDs from
+    the candidate source sentences below; strict validation then maps those IDs
+    back to byte-for-byte book text. Every unavailable, malformed, or unsafe
+    result returns ``None`` so the deterministic selector remains the fallback.
+    """
+
+    if _asks_for_publication_metadata(question):
+        return None
+    selector = _trusted_semantic_selector(
+        answer_capability=answer_capability,
+        generator=generator,
+    )
+    if selector is None:
+        return None
+
+    candidates = _source_sentence_candidates(sources)
+    if not candidates:
+        return None
+    try:
+        raw_selection = selector.generate(
+            [
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "You select existing source sentence IDs for a book assistant. "
+                        "Never write an answer, summary, explanation, citation, or new "
+                        "sentence. Return only the requested JSON object."
+                    ),
+                ),
+                ChatMessage(
+                    role="user",
+                    content=_semantic_selector_prompt(
+                        question,
+                        candidates,
+                        required_sources=required_sources,
+                    ),
+                ),
+            ],
+            response_format="json",
+        )
+        return _validated_semantic_selection(
+            raw_selection,
+            candidates,
+            required_sources=required_sources,
+        )
+    except (GenerationError, ValueError, TypeError, json.JSONDecodeError) as error:
+        logger.info(
+            "Semantic source selector unavailable; using deterministic fallback: %s",
+            error,
+        )
+        return None
+
+
+def _trusted_semantic_selector(
+    *, answer_capability: str, generator: Generator
+) -> Generator | None:
+    """Return a selector only for an explicit quality Codex configuration.
+
+    Request overrides cannot silently enable semantic selection. This limits
+    semantic evidence choice to an administrator-owned JSON configuration and
+    keeps Docker Ollama on the deterministic extractive path.
+    """
+
+    if answer_capability != "quality" or generator.provider != "codex":
+        return None
+    try:
+        config = get_librarian_config()
+    except LibrarianConfigError:
+        return None
+    configured_generation = config.generation
+    selector = config.semantic_source_selector
+    if (
+        not selector.enabled
+        or selector.provider != "codex"
+        or configured_generation.provider != "codex"
+        or configured_generation.answer_capability != "quality"
+        or generator.model != configured_generation.model
+    ):
+        return None
+    try:
+        return create_generator("codex", model=selector.model)
+    except (GenerationError, LibrarianConfigError, ValueError) as error:
+        logger.info("Semantic source selector is not configured for use: %s", error)
+        return None
+
+
+def _source_sentence_candidates(
+    sources: list[ChatSource],
+) -> list[_SourceSentenceCandidate]:
+    """Give the selector stable IDs for exact sentences in scoped evidence."""
+
+    return [
+        _SourceSentenceCandidate(
+            sentence_id=f"{source.source_id}:{sentence_index}",
+            source=source,
+            sentence=sentence,
+        )
+        for source in sources
+        for sentence_index, sentence in enumerate(_sentences(source.text), start=1)
+    ]
+
+
+def _semantic_selector_prompt(
+    question: str,
+    candidates: list[_SourceSentenceCandidate],
+    *,
+    required_sources: int,
+) -> str:
+    """Build the source-ID-only contract sent to the trusted selector."""
+
+    candidate_payload = [
+        {
+            "sentence_id": candidate.sentence_id,
+            "source_id": candidate.source.source_id,
+            "book_id": candidate.source.book_id,
+            "title": candidate.source.title,
+            "authors": candidate.source.authors,
+            "sentence": candidate.sentence,
+        }
+        for candidate in candidates
+    ]
+    return (
+        "Select the exact source sentences needed to answer the question. "
+        "A differently worded question may refer to the same event, but do not "
+        "infer a cause, reverse a relationship, or turn a negation into a positive "
+        "claim. Select enough sentences to answer every part directly.\n\n"
+        "Return exactly this JSON schema and no other keys:\n"
+        '{"sentence_ids":["S1:1"]}\n\n'
+        f"At least {required_sources} distinct source IDs must be represented. "
+        "Every sentence_id must come from the candidate list and may appear once.\n\n"
+        f"Question:\n{question}\n\n"
+        f"Candidate source sentences:\n{json.dumps(candidate_payload, ensure_ascii=False)}"
+    )
+
+
+def _validated_semantic_selection(
+    raw_selection: str,
+    candidates: list[_SourceSentenceCandidate],
+    *,
+    required_sources: int,
+) -> tuple[list[ChatSource], list[str]] | None:
+    """Validate source IDs before mapping them back to exact cited text."""
+
+    payload = json.loads(raw_selection)
+    if not isinstance(payload, dict) or set(payload) != {"sentence_ids"}:
+        return None
+    sentence_ids = payload["sentence_ids"]
+    if (
+        not isinstance(sentence_ids, list)
+        or not sentence_ids
+        or any(
+            not isinstance(sentence_id, str) or not sentence_id
+            for sentence_id in sentence_ids
+        )
+        or len(set(sentence_ids)) != len(sentence_ids)
+    ):
+        return None
+
+    candidates_by_id = {candidate.sentence_id: candidate for candidate in candidates}
+    if any(sentence_id not in candidates_by_id for sentence_id in sentence_ids):
+        return None
+    selected = [candidates_by_id[sentence_id] for sentence_id in sentence_ids]
+    # A sentence repeated across chunks cannot inflate broad-question coverage.
+    normalized_sentences = {" ".join(item.sentence.casefold().split()) for item in selected}
+    if len(normalized_sentences) != len(selected):
+        return None
+    distinct_chunks = {item.source.chunk_id for item in selected}
+    if len(distinct_chunks) < required_sources:
+        return None
+
+    selected_sources: list[ChatSource] = []
+    seen_chunks: set[str] = set()
+    for item in selected:
+        if item.source.chunk_id not in seen_chunks:
+            selected_sources.append(item.source)
+            seen_chunks.add(item.source.chunk_id)
+    tokens = [f"{item.sentence} [{item.source.source_id}]" for item in selected]
     return selected_sources, tokens
 
 

@@ -398,6 +398,13 @@ generated Compose override.
 there and must instead be referenced through `header_files` below
 `config/secrets/`. This keeps every credential out of `librarian.json`.
 
+For difficult natural-language event questions, an administrator may opt into
+the JSON `semantic_source_selector` using a trusted Codex model. The selector
+can choose only IDs for already-retrieved book sentences; it cannot draft,
+rewrite, or display answer prose. It runs only when the configured generation
+provider is direct Codex with `answer_capability: "quality"`. Docker and native
+Ollama always retain the deterministic extractive selector.
+
 The Compose database default is `sqlite:////data/librarian.db`, which is the
 absolute path of its bind-mounted `data/` directory. Commands run from the host
 repository continue to use `sqlite:///data/librarian.db`.

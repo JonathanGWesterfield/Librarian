@@ -43,6 +43,7 @@ Every profile has the following top-level sections.
 | `generation` | Provider and model used to write grounded answers and summaries. |
 | `search` | OpenSearch URL/index and retrieval backend selection. |
 | `summaries` | Summary timeout and worker parallelism limits. |
+| `semantic_source_selector` | Optional trusted Codex policy that chooses IDs for existing source sentences. |
 | `services` | Published ports, OpenSearch heap, Ollama listener, and worker settings. |
 | `codex_executable` | Host executable used only by the direct `codex` generation mode. |
 
@@ -75,6 +76,38 @@ model-name guess. Use `lightweight` for a small local generator and `quality`
 for a capable provider. If an API request changes its generation provider or
 model, it must supply `answer_capability` too; otherwise `/chat` returns HTTP
 400 rather than silently inheriting the configured behavior.
+
+## Semantic source selection
+
+Chat always displays exact sentences from the retrieved EPUB evidence. The
+optional `semantic_source_selector` improves which exact sentences are chosen
+when a reader uses natural wording that has little keyword overlap with the
+book text. It does not generate or rewrite answer prose.
+
+```json
+{
+  "generation": {
+    "mode": "codex",
+    "model": "gpt-5.6",
+    "answer_capability": "quality"
+  },
+  "semantic_source_selector": {
+    "enabled": true,
+    "provider": "codex",
+    "model": "gpt-5.6"
+  }
+}
+```
+
+This is deliberately restrictive. The selector runs only when all of the
+following are true: it is enabled in JSON, its provider is `codex`, generation
+is configured as direct `codex`, generation has `quality` capability, and the
+request keeps the configured Codex model. API provider/model overrides cannot
+turn it on. Its only valid output is a JSON `sentence_ids` list whose entries
+exactly match retrieved, scope-filtered source sentences. Unknown, duplicate,
+empty, malformed, unavailable, or too-narrow selections fall back to the
+deterministic extractor. Docker and native Ollama never perform semantic source
+selection.
 
 ## Secrets and safe headers
 

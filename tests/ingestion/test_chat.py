@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import sleep
+from types import SimpleNamespace
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
@@ -15,6 +16,7 @@ from librarian_chat.chat import (
     prepare_answer_question,
     stream_answer_question,
 )
+import librarian_chat.chat as chat_module
 from librarian_chat.generation import GenerationError
 from librarian_ingestion.embedding_ops import EmbedQueryResult
 from librarian_search.opensearch import OpenSearchError
@@ -23,6 +25,143 @@ from librarian_storage.storage import BookRecord, SQLiteIngestionStore, utc_now
 
 
 class ChatTests(unittest.TestCase):
+    def test_trusted_codex_selector_handles_equivalent_event_wording_exactly(self) -> None:
+        """Codex may select both book sentences without writing a paraphrase."""
+        question = "What did Mara do, and how did the garden react?"
+        source_text = (
+            "Mara opened the garden gate with a borrowed key. "
+            "The clockwork garden answered in careful ticking."
+        )
+        generation = _FakeCodexGenerator(model="gpt-5.6")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6",
+            response='{"sentence_ids":["S1:1","S1:2"]}',
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(
+            response.answer,
+            "Mara opened the garden gate with a borrowed key. [S1]\n\n"
+            "The clockwork garden answered in careful ticking. [S1]",
+        )
+        self.assertEqual(response.sources[0].source_id, "S1")
+        self.assertIn("sentence_ids", selector.messages[-1].content)
+        self.assertEqual(generation.messages, [])
+
+    def test_trusted_selector_rejects_malicious_ids_and_falls_back_to_extraction(self) -> None:
+        """Malformed, duplicate, and out-of-scope IDs cannot alter source text."""
+        question = "What happened when Mara opened the garden gate?"
+        source_text = (
+            "Mara opened the garden gate with a borrowed key. "
+            "The clockwork garden answered in careful ticking."
+        )
+        for response in (
+            '{"sentence_ids":[]}',
+            '{"sentence_ids":["S1:1","S1:1"]}',
+            '{"sentence_ids":["S2:1"]}',
+            '{"sentence_ids":["S1:1"],"answer":"Mara caused ticking."}',
+        ):
+            with self.subTest(selector_response=response):
+                generation = _FakeCodexGenerator(model="gpt-5.6")
+                selector = _FakeCodexGenerator(model="gpt-5.6", response=response)
+                with (
+                    patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+                    patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+                    patch(
+                        "librarian_chat.chat.search_chunks",
+                        return_value=_chat_search_response(question, text=source_text),
+                    ),
+                    patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+                    patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+                    patch("librarian_chat.chat.create_generator", return_value=selector),
+                ):
+                    answer = answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            generation_provider="codex",
+                            generation_model="gpt-5.6",
+                            answer_capability="quality",
+                        )
+                    ).answer
+
+                self.assertEqual(
+                    answer,
+                    "Mara opened the garden gate with a borrowed key. [S1]\n\n"
+                    "The clockwork garden answered in careful ticking. [S1]",
+                )
+                self.assertNotIn("caused", answer)
+
+    def test_trusted_selector_preserves_negation_and_never_invents_causality(self) -> None:
+        """A trusted selector still returns exact book sentences, not model claims."""
+        question = "Why did the garden tick?"
+        source_text = (
+            "Mara did not open the garden gate. "
+            "The garden ticked after Mara left."
+        )
+        generation = _FakeCodexGenerator(model="gpt-5.6")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6",
+            response='{"sentence_ids":["S1:1","S1:2"]}',
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            answer = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6",
+                    answer_capability="quality",
+                )
+            ).answer
+
+        self.assertEqual(
+            answer,
+            "Mara did not open the garden gate. [S1]\n\n"
+            "The garden ticked after Mara left. [S1]",
+        )
+        self.assertNotIn("because", answer.casefold())
+
+    def test_ollama_cannot_enable_the_semantic_source_selector(self) -> None:
+        """Docker Ollama remains on the deterministic exact extraction path."""
+        self.assertIsNone(
+            chat_module._trusted_semantic_selector(
+                answer_capability="quality",
+                generator=_FakeGenerator(),
+            )
+        )
+
     def test_streamed_chat_reuses_prepared_evidence_and_emits_extractive_tokens(self) -> None:
         """Streaming reuses retrieval and never lets native fragments alter a claim."""
         question = "How brutal is war?"
@@ -1387,6 +1526,37 @@ class _FakeGenerator:
     def generate(self, messages, *, response_format=None):
         self.messages = messages
         return "War is described as terrifying. [S1]"
+
+
+class _FakeCodexGenerator(_FakeGenerator):
+    provider = "codex"
+
+    def __init__(self, *, model: str, response: str = "") -> None:
+        super().__init__()
+        self.model = model
+        self.response = response
+
+    def generate(self, messages, *, response_format=None):
+        self.messages = messages
+        self.response_format = response_format
+        return self.response
+
+
+def _trusted_codex_config():
+    """Return the minimum JSON-derived policy shape required by chat."""
+
+    return SimpleNamespace(
+        generation=SimpleNamespace(
+            provider="codex",
+            model="gpt-5.6",
+            answer_capability="quality",
+        ),
+        semantic_source_selector=SimpleNamespace(
+            enabled=True,
+            provider="codex",
+            model="gpt-5.6",
+        ),
+    )
 
 
 class _FakeStreamingGenerator(_FakeGenerator):
