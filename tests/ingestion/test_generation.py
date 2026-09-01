@@ -141,6 +141,27 @@ class GenerationProviderTests(unittest.TestCase):
         self.assertEqual(payload["format"], "json")
         self.assertEqual(answer, '{"tags":[]}')
 
+    def test_ollama_generator_streams_native_chat_fragments_without_buffering(self) -> None:
+        """Ollama's newline-delimited stream reaches chat orchestration token by token."""
+        response = _StreamingFakeResponse(
+            [
+                {"message": {"role": "assistant", "content": "Grounded "}, "done": False},
+                {"message": {"role": "assistant", "content": "answer."}, "done": False},
+                {"message": {"role": "assistant", "content": ""}, "done": True},
+            ]
+        )
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            chunks = list(
+                OllamaGenerator(model="llama3.2:3b", base_url="http://localhost:11434").stream(
+                    [ChatMessage(role="user", content="Question?")]
+                )
+            )
+
+        http_request = urlopen.call_args.args[0]
+        payload = json.loads(http_request.data.decode("utf-8"))
+        self.assertEqual(payload["stream"], True)
+        self.assertEqual(chunks, ["Grounded ", "answer."])
+
     def test_codex_generator_runs_codex_exec_with_prompt(self) -> None:
         """Verify the Codex adapter shells out through `codex exec`.
         The adapter keeps CLI usage behind the generator protocol so callers
@@ -236,6 +257,15 @@ class _FakeResponse:
 
     def read(self) -> bytes:
         return json.dumps(self.payload).encode("utf-8")
+
+
+class _StreamingFakeResponse(_FakeResponse):
+    def __init__(self, payloads: list[dict[str, object]]) -> None:
+        self.payloads = payloads
+
+    def __iter__(self):
+        for payload in self.payloads:
+            yield f"{json.dumps(payload)}\n".encode("utf-8")
 
 
 class _FakeStdin:

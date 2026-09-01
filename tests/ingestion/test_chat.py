@@ -8,7 +8,13 @@ REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_chat.chat import ChatOptions, answer_question
+from librarian_chat.chat import (
+    ChatOptions,
+    answer_question,
+    prepare_answer_question,
+    stream_answer_question,
+)
+from librarian_chat.generation import GenerationError
 from librarian_ingestion.embedding_ops import EmbedQueryResult
 from librarian_search.opensearch import OpenSearchError
 from librarian_search.search import SearchResponse, SearchResult
@@ -16,6 +22,131 @@ from librarian_storage.storage import BookRecord, SQLiteIngestionStore, utc_now
 
 
 class ChatTests(unittest.TestCase):
+    def test_streamed_chat_reuses_prepared_evidence_and_emits_ordered_ollama_tokens(self) -> None:
+        """Streaming must not re-embed/retrieve before delivering native fragments."""
+        question = "How brutal is war?"
+        generator = _FakeStreamingGenerator(["War is ", "terrifying. [S1]"])
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding()) as embed,
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=_search_response()) as search,
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            preparation = prepare_answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:7b",
+                    answer_capability="quality",
+                )
+            )
+            events = list(stream_answer_question(preparation))
+
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "token", "complete"])
+        self.assertEqual(events[0].data["sources"][0]["source_id"], "S1")
+        self.assertEqual(events[1].data, {"text": "War is "})
+        self.assertEqual(events[-1].data["answer"], "War is terrifying. [S1]")
+        self.assertIsNotNone(events[-1].data["timings"]["time_to_first_token_seconds"])
+        self.assertEqual(embed.call_count, 1)
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(generator.generate_calls, 0)
+
+    def test_streamed_insufficiency_never_exposes_diagnostic_citations(self) -> None:
+        """The retrieval event and completion both stay citation-free after a guard refusal."""
+        question = "Who opens the garden gate?"
+        generator = _FakeStreamingGenerator(["This must not run."])
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text="A brass robin counted three silver seeds."),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:1.5b",
+                            answer_capability="lightweight",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "complete"])
+        self.assertEqual(events[0].data["sources"], [])
+        self.assertEqual(events[-1].data["sources"], [])
+        self.assertIn("enough relevant body-text evidence", events[-1].data["answer"])
+        self.assertEqual(generator.generate_calls, 0)
+
+    def test_streamed_generation_failure_is_a_clear_terminal_error(self) -> None:
+        """A provider error after retrieval should not make an SSE client hang."""
+        generator = _FailingStreamingGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=_search_response()),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question="How brutal is war?",
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "error"])
+        self.assertIn("fixture stream failed", events[-1].data["detail"])
+        self.assertIsNone(events[-1].data["timings"]["time_to_first_token_seconds"])
+
+    def test_non_streaming_provider_completes_without_fake_token_timing(self) -> None:
+        """Codex/OpenAI-compatible style generators retain a correct completion path."""
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=_search_response()),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question="How brutal is war?",
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="codex",
+                            generation_model="codex",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "complete"])
+        self.assertEqual(events[-1].data["answer"], "War is described as terrifying. [S1]")
+        self.assertIsNone(events[-1].data["timings"]["time_to_first_token_seconds"])
+
     def test_answer_question_retrieves_sources_and_generates_answer(self) -> None:
         """Verify chat composes retrieval and local generation.
         This protects the end-to-end service boundary: search supplies ranked
@@ -726,6 +857,33 @@ class _FakeGenerator:
     def generate(self, messages, *, response_format=None):
         self.messages = messages
         return "War is described as terrifying. [S1]"
+
+
+class _FakeStreamingGenerator(_FakeGenerator):
+    """A structural Ollama-like generator for stream orchestration tests."""
+
+    def __init__(self, chunks: list[str]) -> None:
+        super().__init__()
+        self.chunks = chunks
+        self.generate_calls = 0
+
+    def generate(self, messages, *, response_format=None):
+        self.generate_calls += 1
+        return super().generate(messages, response_format=response_format)
+
+    def stream(self, messages):
+        self.messages = messages
+        yield from self.chunks
+
+
+class _FailingStreamingGenerator(_FakeStreamingGenerator):
+    def __init__(self) -> None:
+        super().__init__([])
+
+    def stream(self, messages):
+        self.messages = messages
+        raise GenerationError("fixture stream failed")
+        yield ""
 
 
 if __name__ == "__main__":

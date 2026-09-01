@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { askChat, getBooks, type ChatResponse, type LibraryBook } from "./api";
+import { getBooks, streamChat, type ChatResponse, type LibraryBook } from "./api";
 import { ActivitySection } from "./activity";
 import {
   WHOLE_LIBRARY_SCOPE,
@@ -33,9 +33,11 @@ export function App() {
   const [question, setQuestion] = useState("");
   const [chat, setChat] = useState<ChatResponse | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatPhase, setChatPhase] = useState<"finding" | "answering" | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [openCitation, setOpenCitation] = useState<number | null>(null);
   const chatRequestGeneration = useRef(0);
+  const chatAbortController = useRef<AbortController | null>(null);
   const booksRequestGeneration = useRef(0);
   const appMounted = useRef(true);
   const scopeRef = useRef<SearchScope>(WHOLE_LIBRARY_SCOPE);
@@ -47,11 +49,14 @@ export function App() {
     if (sameScope(nextScope, scopeRef.current)) return;
     scopeRef.current = nextScope;
     chatRequestGeneration.current += 1;
+    chatAbortController.current?.abort();
+    chatAbortController.current = null;
     setScope(nextScope);
     setChat(null);
     setOpenCitation(null);
     setChatError(null);
     setChatLoading(false);
+    setChatPhase(null);
   };
 
   useEffect(() => {
@@ -61,6 +66,7 @@ export function App() {
       appMounted.current = false;
       booksRequestGeneration.current += 1;
       chatRequestGeneration.current += 1;
+      chatAbortController.current?.abort();
     };
   }, []);
 
@@ -104,23 +110,43 @@ export function App() {
     if (!submittedQuestion || chatLoading) return;
 
     const requestGeneration = ++chatRequestGeneration.current;
+    chatAbortController.current?.abort();
+    const controller = new AbortController();
+    chatAbortController.current = controller;
     setChatLoading(true);
+    setChatPhase("finding");
     setChatError(null);
     try {
-      const response = await askChat(
+      const response = await streamChat(
         submittedQuestion,
         selectedBook ? { bookId: selectedBook.id } : selectedAuthor ? { author: selectedAuthor.name } : {},
+        {
+          onRetrieval: (retrieval) => {
+            if (requestGeneration !== chatRequestGeneration.current) return;
+            setChat({ ...retrieval, answer: "" });
+            setOpenCitation(null);
+            setChatPhase("answering");
+            document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          },
+          onToken: (text) => {
+            if (requestGeneration !== chatRequestGeneration.current) return;
+            setChat((current) => current ? { ...current, answer: `${current.answer}${text}` } : current);
+          },
+        },
+        controller.signal,
       );
       if (requestGeneration !== chatRequestGeneration.current) return;
       setChat(response);
       setOpenCitation(null);
-      document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
       if (requestGeneration !== chatRequestGeneration.current) return;
+      if (error instanceof Error && error.name === "AbortError") return;
       setChatError(messageFor(error, "Unable to answer that question right now."));
     } finally {
       if (requestGeneration === chatRequestGeneration.current) {
         setChatLoading(false);
+        setChatPhase(null);
+        chatAbortController.current = null;
       }
     }
   };
@@ -142,7 +168,7 @@ export function App() {
         <ScopePicker books={books} authors={authorOptions} scope={scope} disabled={booksLoading} onSelect={changeScope} />
         <button type="submit" disabled={chatLoading || !question.trim()}>{chatLoading ? "Asking…" : <>Ask <span aria-hidden="true">→</span></>}</button>
       </form>
-      {chatLoading && <p className="request-status" role="status">Searching your local library and preparing an evidence-backed answer…</p>}
+      {chatLoading && <p className="request-status" role="status">{chatPhase === "finding" ? "Finding evidence in your local library…" : "Writing a grounded answer from the retrieved passages…"}</p>}
       {chatError && <p className="request-error" role="alert">{chatError} Try again after checking that the local API is running.</p>}
       <div className="starter-row" aria-label="Suggested questions"><span>Try a question</span>{starterPrompts.map((prompt) => <button type="button" key={prompt} onClick={() => choosePrompt(prompt)} disabled={chatLoading}>{prompt}</button>)}</div>
     </section>

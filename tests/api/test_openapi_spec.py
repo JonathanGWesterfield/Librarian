@@ -96,19 +96,17 @@ class StaticOpenApiSpecTests(unittest.TestCase):
             self.assertEqual(property_schema["default"], False)
             self.assertIn("Deliberately re-parse unchanged EPUBs", property_schema["description"])
 
-    def test_openapi_does_not_advertise_unimplemented_chat_streaming(self) -> None:
-        """Keep the client contract aligned with the synchronous chat route.
-
-        The web UI receives one complete JSON response from ``POST /chat``.
-        Do not expose an SSE route in documentation before that route exists.
-        """
+    def test_openapi_advertises_documented_chat_streaming(self) -> None:
+        """The checked-in contract must expose the SSE route used by the web UI."""
         static_spec = json.loads((REPO_ROOT / "docs" / "openapi.json").read_text())
         live_spec = app.openapi()
 
         for spec in (static_spec, live_spec):
             self.assertIn("/chat", spec["paths"])
-            self.assertNotIn("/chat/stream", spec["paths"])
-            self.assertNotIn("text/event-stream", json.dumps(spec))
+            self.assertIn("/chat/stream", spec["paths"])
+            response = spec["paths"]["/chat/stream"]["post"]["responses"]["200"]
+            self.assertIn("text/event-stream", response["content"])
+            self.assertEqual(response["content"]["text/event-stream"]["schema"], {"type": "string"})
 
 
 if __name__ == "__main__":
