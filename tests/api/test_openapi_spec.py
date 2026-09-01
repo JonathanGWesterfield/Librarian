@@ -82,6 +82,20 @@ class StaticOpenApiSpecTests(unittest.TestCase):
             "#/components/schemas/ErrorResponse",
         )
 
+    def test_reprocess_unchanged_is_documented_as_an_explicit_ingestion_action(self) -> None:
+        """Clients must discover the costly remediation instead of forcing normal updates."""
+        static = json.loads((REPO_ROOT / "docs" / "openapi.json").read_text())
+        static_property = static["components"]["schemas"]["IngestionRunRequest"]["properties"][
+            "reprocess_unchanged"
+        ]
+        live_property = app.openapi()["components"]["schemas"]["IngestionRunRequest"]["properties"][
+            "reprocess_unchanged"
+        ]
+
+        for property_schema in (static_property, live_property):
+            self.assertEqual(property_schema["default"], False)
+            self.assertIn("Deliberately re-parse unchanged EPUBs", property_schema["description"])
+
     def test_openapi_does_not_advertise_unimplemented_chat_streaming(self) -> None:
         """Keep the client contract aligned with the synchronous chat route.
 

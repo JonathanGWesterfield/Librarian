@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib import error
 from unittest.mock import patch
+from zipfile import ZipFile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -16,9 +17,18 @@ sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from chat import main as chat_main
 from librarian import main as librarian_main
-from librarian_storage.storage import create_ingestion_store
+from librarian_ingestion.scan import scan_epub_files
+from librarian_storage.storage import (
+    BookRecord,
+    ChunkRecord,
+    EmbeddingRecord,
+    SQLiteIngestionStore,
+    create_ingestion_store,
+    utc_now,
+)
 from process_metadata_jobs import main as process_metadata_jobs_main
 from process_summary_jobs import main as process_summary_jobs_main
+from tests.ingestion.fixtures import SAMPLE_EPUB
 
 try:
     from fastapi.testclient import TestClient
@@ -358,6 +368,91 @@ class LocalPipelineApiE2ETests(unittest.TestCase):
             any(request["url"].endswith("/api/chat") for request in ollama.requests)
         )
 
+    def test_api_reprocesses_unchanged_epubs_and_restores_body_search(self) -> None:
+        """A deliberate API reprocess repairs legacy content roles and embeddings.
+
+        This models a library ingested before the exact filename classifier:
+        the unchanged stock-market EPUB already has a front-matter chunk, so
+        default search hides it. A normal update must still hash-skip the book;
+        the explicit remediation request reparses, re-embeds, and exposes it.
+        """
+        with TemporaryDirectory() as temp_dir:
+            books_dir = Path(temp_dir) / "books"
+            books_dir.mkdir()
+            _write_stock_market_epub(books_dir / "stock-market.epub")
+            discovered = scan_epub_files(books_dir)[0]
+            self._seed_legacy_stock_market_record(discovered)
+
+            with fake_ollama_transport() as ollama:
+                before = self.client.post(
+                    "/search",
+                    json={
+                        "query": "stock market",
+                        "database_url": self.database_url,
+                        "embedding_provider": "ollama",
+                        "embedding_model": "all-minilm",
+                        "ollama_base_url": ollama.base_url,
+                    },
+                )
+                ordinary_update = self.client.post(
+                    "/ingestion/run",
+                    json={
+                        "books_dir": str(books_dir),
+                        "database_url": self.database_url,
+                    },
+                )
+                reprocess = self.client.post(
+                    "/ingestion/run",
+                    json={
+                        "books_dir": str(books_dir),
+                        "database_url": self.database_url,
+                        "reprocess_unchanged": True,
+                        "embed_chunks": True,
+                        "embedding_provider": "ollama",
+                        "embedding_model": "all-minilm",
+                        "ollama_base_url": ollama.base_url,
+                    },
+                )
+                after = self.client.post(
+                    "/search",
+                    json={
+                        "query": "stock market",
+                        "database_url": self.database_url,
+                        "embedding_provider": "ollama",
+                        "embedding_model": "all-minilm",
+                        "ollama_base_url": ollama.base_url,
+                    },
+                )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            repaired_chunks = [
+                chunk
+                for chunk in store.list_chunks()
+                if "The stock market opened after the bell." in chunk.text
+            ]
+            repaired_embeddings = store.list_embeddings(
+                provider="ollama",
+                model="all-minilm",
+            )
+
+        self.assertEqual(before.status_code, 200)
+        self.assertEqual(before.json()["candidate_count"], 0)
+        self.assertEqual(ordinary_update.status_code, 200)
+        self.assertEqual(ordinary_update.json()["parsed"], 0)
+        self.assertEqual(ordinary_update.json()["skipped_unchanged"], 1)
+        self.assertEqual(reprocess.status_code, 200)
+        self.assertEqual(reprocess.json()["parsed"], 1)
+        self.assertGreater(reprocess.json()["stored_embeddings"], 0)
+        self.assertEqual([chunk.content_type for chunk in repaired_chunks], ["body"])
+        self.assertGreater(len(repaired_embeddings), 0)
+        self.assertEqual(after.status_code, 200)
+        self.assertTrue(
+            any(
+                "The stock market opened after the bell." in result["text"]
+                for result in after.json()["results"]
+            )
+        )
+
     def test_api_status_reports_background_summary_and_metadata_progress(self) -> None:
         """Verify the status endpoint reflects worker-completed background stages.
         This protects the future desktop progress view by checking the HTTP
@@ -417,6 +512,46 @@ class LocalPipelineApiE2ETests(unittest.TestCase):
             payload["tagging"]["details"],
         )
 
+    def _seed_legacy_stock_market_record(self, discovered) -> None:
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(
+                BookRecord(
+                    id=discovered.sha256,
+                    source_path=str(discovered.path),
+                    relative_path=discovered.relative_path,
+                    file_hash=discovered.sha256,
+                    size_bytes=discovered.size_bytes,
+                    title="The Clockwork Garden",
+                    authors=["Test Author"],
+                    publisher="Fixture Press",
+                    status="ingested",
+                    ingested_at=utc_now(),
+                ),
+                [
+                    ChunkRecord(
+                        id=f"{discovered.sha256}:0",
+                        book_id=discovered.sha256,
+                        chunk_index=0,
+                        text="The stock market opened after the bell.",
+                        character_count=39,
+                        token_estimate=9,
+                        content_type="front_matter",
+                    )
+                ],
+            )
+            store.save_chunk_embeddings(
+                [
+                    EmbeddingRecord(
+                        id=f"{discovered.sha256}:0:ollama:all-minilm",
+                        chunk_id=f"{discovered.sha256}:0",
+                        provider="ollama",
+                        model="all-minilm",
+                        vector=[0.5, 0.5, 0.0],
+                        dimensions=3,
+                    )
+                ]
+            )
+
 
 def _run_json(main_func, args: list[str]) -> dict[str, object]:
     output = StringIO()
@@ -425,6 +560,35 @@ def _run_json(main_func, args: list[str]) -> dict[str, object]:
     if exit_code != 0:
         raise AssertionError(f"command failed with {exit_code}: {output.getvalue()}")
     return json.loads(output.getvalue())
+
+
+def _write_stock_market_epub(destination: Path) -> None:
+    """Create a valid EPUB whose body chapter name contains the letters ``toc``."""
+    manifest_item = (
+        '    <item id="stock-market" href="stock-market.xhtml" '
+        'media-type="application/xhtml+xml"/>\n'
+    )
+    spine_item = '    <itemref idref="stock-market"/>\n'
+    chapter = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE html>
+<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>
+  <h1>Stock Market</h1>
+  <p>The stock market opened after the bell.</p>
+</body></html>
+"""
+    with ZipFile(SAMPLE_EPUB) as source, ZipFile(destination, "w") as target:
+        for entry in source.infolist():
+            content = source.read(entry.filename)
+            if entry.filename == "OEBPS/content.opf":
+                content = content.replace(
+                    b"  </manifest>",
+                    manifest_item.encode() + b"  </manifest>",
+                ).replace(
+                    b"  </spine>",
+                    spine_item.encode() + b"  </spine>",
+                )
+            target.writestr(entry, content)
+        target.writestr("OEBPS/stock-market.xhtml", chapter.encode())
 
 
 @contextmanager

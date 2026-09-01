@@ -64,6 +64,14 @@ class IngestionRunRequest(BaseModel):
     books_dir: Optional[str] = None
     database_url: Optional[str] = None
     force: bool = False
+    reprocess_unchanged: bool = Field(
+        default=False,
+        description=(
+            "Deliberately re-parse unchanged EPUBs to apply updated parsing or "
+            "content-classification rules. This can take as long as a full "
+            "library ingestion."
+        ),
+    )
     list_epubs: bool = False
     embed_chunks: bool = False
     embedding_provider: Optional[str] = None
@@ -313,7 +321,7 @@ def run_ingestion_endpoint(request: IngestionRunRequest) -> dict[str, object]:
             IngestionOptions(
                 books_dir=request.books_dir or get_settings().books_dir,
                 database_url=request.database_url or get_settings().database_url,
-                force=request.force,
+                force=request.force or request.reprocess_unchanged,
                 list_epubs=request.list_epubs,
                 embed_chunks=request.embed_chunks,
                 embedding_provider=request.embedding_provider,
