@@ -1,7 +1,7 @@
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from librarian_evaluation.answer import (
     AnswerCandidate,
@@ -10,6 +10,7 @@ from librarian_evaluation.answer import (
 )
 from librarian_evaluation.llm_judge import (
     LLMJudgeError,
+    CodexJudge,
     StaticJudge,
     create_judge,
     evaluate_answers_with_llm_judge,
@@ -55,6 +56,53 @@ class LLMJudgeTests(unittest.TestCase):
         self.assertEqual(report.aggregate.mean_overall_score, 1.0)
         self.assertEqual(report.cases[0].evidence_verdict, "supported")
         self.assertEqual(report.cases[0].reason, "Grounded and cited.")
+
+    def test_judge_records_a_wrong_adversarial_verdict(self) -> None:
+        """An opt-in semantic judge must expose disagreement with curated truth."""
+        case = AnswerEvaluationCase(
+            id="negation",
+            question="Did Mara open the garden gate?",
+            expected_judge_verdict="contradicted",
+        )
+
+        report = evaluate_answers_with_llm_judge(
+            [case],
+            {"negation": AnswerCandidate(answer="Mara opened it. [S1]", sources=[])},
+            judge=StaticJudge(response=_semantic_response("supported")),
+        )
+
+        self.assertEqual(report.to_dict()["expectation_mismatch_count"], 1)
+        self.assertEqual(report.cases[0].expected_judge_verdict, "contradicted")
+        self.assertFalse(report.cases[0].expectation_met)
+
+    def test_judge_records_a_matching_adversarial_verdict(self) -> None:
+        """Matching curated semantic verdicts remain visible as successful checks."""
+        case = AnswerEvaluationCase(
+            id="negation",
+            question="Did Mara open the garden gate?",
+            expected_judge_verdict="contradicted",
+        )
+
+        report = evaluate_answers_with_llm_judge(
+            [case],
+            {"negation": AnswerCandidate(answer="Mara opened it. [S1]", sources=[])},
+            judge=StaticJudge(response=_semantic_response("contradicted")),
+        )
+
+        self.assertEqual(report.to_dict()["expectation_mismatch_count"], 0)
+        self.assertTrue(report.cases[0].expectation_met)
+
+    def test_codex_judge_passes_the_requested_model_to_codex_exec(self) -> None:
+        """Codex's judge subprocess must use --judge-model rather than config default."""
+        completed = Mock(stdout='{"evidence_verdict":"supported"}')
+        with patch("librarian_evaluation.llm_judge.subprocess.run", return_value=completed) as run:
+            response = CodexJudge(model="gpt-5.6").judge("judge this answer")
+
+        self.assertEqual(response, '{"evidence_verdict":"supported"}')
+        self.assertEqual(
+            run.call_args.args[0],
+            ["codex", "exec", "--model", "gpt-5.6", "--ephemeral", "judge this answer"],
+        )
 
     def test_evaluate_answers_with_llm_judge_uses_fallback_provider(self) -> None:
         """Verify Ollama can take over when the primary Codex-style judge fails.
@@ -168,6 +216,18 @@ class _ConfiguredGenerator:
     def generate(self, _messages, *, response_format=None):
         assert response_format == "json"
         return '{"evidence_verdict":"supported"}'
+
+
+def _semantic_response(verdict: str) -> str:
+    return json.dumps(
+        {
+            "evidence_verdict": verdict,
+            "citation_relevance": "all_relevant",
+            "missing_coverage": [],
+            "unsupported_claims": [],
+            "reason": "Static semantic fixture verdict.",
+        }
+    )
 
 
 if __name__ == "__main__":

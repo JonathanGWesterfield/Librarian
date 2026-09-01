@@ -498,6 +498,8 @@ def _render_llm_judge_section(llm_judge: dict[str, Any] | None) -> list[str]:
         f"| Model | `{llm_judge.get('model', 'unknown')}` |",
         f"| Fallback provider | `{llm_judge.get('fallback_provider', 'none')}` |",
         f"| Fallback used | `{llm_judge.get('fallback_used', False)}` |",
+        f"| Expected semantic cases | `{llm_judge.get('expectation_case_count', 0)}` |",
+        f"| Expected-verdict mismatches | `{llm_judge.get('expectation_mismatch_count', 0)}` |",
         f"| Case count | `{aggregate['case_count']}` |",
         f"| Correctness | `{_decimal(aggregate['mean_correctness'])}` |",
         f"| Completeness | `{_decimal(aggregate['mean_completeness'])}` |",
@@ -509,14 +511,16 @@ def _render_llm_judge_section(llm_judge: dict[str, Any] | None) -> list[str]:
         "",
         "### LLM Judge Cases",
         "",
-        "| Case | Verdict | Citation relevance | Overall | Reason |",
-        "| --- | --- | --- | ---: | --- |",
+        "| Case | Verdict | Expected | Match | Citation relevance | Overall | Reason |",
+        "| --- | --- | --- | --- | --- | ---: | --- |",
     ]
     for case in llm_judge["cases"]:
         lines.append(
             "| "
             f"`{case['case_id']}` | "
             f"`{case.get('evidence_verdict', 'unknown')}` | "
+            f"`{case.get('expected_judge_verdict', 'none')}` | "
+            f"`{case.get('expectation_met', 'n/a')}` | "
             f"`{case.get('citation_relevance', 'unknown')}` | "
             f"`{_decimal(case['overall_score'])}` | "
             f"{case.get('reason', '')} |"

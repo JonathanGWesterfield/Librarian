@@ -21,6 +21,7 @@ class AnswerEvaluationCase:
     expected_terms: set[str] = field(default_factory=set)
     required_citations: bool = True
     should_refuse: bool = False
+    expected_judge_verdict: str | None = None
     insufficient_evidence_terms: set[str] = field(
         default_factory=lambda: {"insufficient", "not enough", "not provided"}
     )

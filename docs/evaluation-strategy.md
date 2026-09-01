@@ -182,6 +182,13 @@ python3 scripts/evaluate_retrieval.py --llm-judge \
   --answer-benchmark tests/fixtures/evaluation/groundedness_adversarial_cases.json
 ```
 
+Each curated adversarial case declares an `expected_judge_verdict`. When an
+opt-in `--llm-judge` run disagrees with one, its JSON and Markdown reports show
+the expected value and mismatch, then the command exits with status `1` after
+writing those reports for diagnosis. This is intentionally separate from
+`scripts/check.sh`: ordinary deterministic CI never invokes a judge or needs a
+subscription, network access, or local model.
+
 The judge is a fuzzy offline evaluation layer, not a production authorization
 mechanism. Deterministic tests still enforce transport contracts, citation
 counts, and known adversarial source-text behavior.

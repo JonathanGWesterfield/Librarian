@@ -745,7 +745,8 @@ def _grounded_extractive_answer(
     Broad questions require one relevant sentence from every required source;
     a narrow question uses the strongest single sentence. For a narrative event
     question, the immediately following sentence can join that answer only
-    when it also shares question or primary-sentence terms.
+    when it has a shared event, object, or setting term rather than only a
+    shared subject.
     """
     question_terms = _meaningful_terms(question)
     if not question_terms:
@@ -822,9 +823,10 @@ def _event_context_sentence(
     """Return one directly relevant next sentence for a narrative event query.
 
     This deliberately keeps the context rule local and conservative. The next
-    source sentence must share at least one meaningful term with either the
-    question or the selected event sentence; adjacency alone never turns an
-    unrelated sentence into an answer claim.
+    source sentence must share an event, object, or setting term with the
+    question or selected event sentence. A repeated actor or grammatical
+    subject alone is not enough: adjacency never turns unrelated prose into an
+    answer claim.
     """
     if not _is_event_question(question):
         return None
@@ -838,9 +840,10 @@ def _event_context_sentence(
 
     context_sentence = sentences[primary_index + 1]
     context_terms = _meaningful_terms(context_sentence)
-    if context_terms & _meaningful_terms(question):
-        return context_sentence
-    if context_terms & _meaningful_terms(primary_sentence):
+    event_context_terms = (
+        _meaningful_terms(question) | _meaningful_terms(primary_sentence)
+    ) - _leading_subject_terms(primary_sentence)
+    if context_terms & event_context_terms:
         return context_sentence
     return None
 
@@ -848,6 +851,22 @@ def _event_context_sentence(
 def _is_event_question(question: str) -> bool:
     normalized = " ".join(question.casefold().split())
     return normalized.startswith(_EVENT_QUESTION_PREFIXES)
+
+
+def _leading_subject_terms(sentence: str) -> set[str]:
+    """Return the first clause's simple subject term for adjacency filtering.
+
+    Event context is intentionally a narrow display aid, not semantic parsing.
+    Treating the leading meaningful word as the subject handles both character
+    names (``Mara opened …``) and simple noun phrases (``The garden …``) while
+    keeping the rule conservative when a full grammatical analysis is absent.
+    """
+    words = _WORD.findall(sentence.casefold())
+    for word in words:
+        if word in _QUESTION_STOP_WORDS or len(word) <= 1:
+            continue
+        return {_term_stem(word)}
+    return set()
 
 
 def _meaningful_terms(value: str) -> set[str]:

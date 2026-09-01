@@ -327,6 +327,9 @@ def main() -> int:
     )
     output_document = _with_comparison(output_document, args.compare_to)
     summary_document = _with_comparison(summary_document, args.compare_to)
+    judge_expectation_mismatch_count = _llm_judge_expectation_mismatch_count(
+        document
+    )
     golden_corpus = _load_optional_json(args.golden_corpus)
     rendered = json.dumps(document, indent=2, sort_keys=True) + "\n"
     rendered_markdown = render_evaluation_markdown(
@@ -361,6 +364,12 @@ def main() -> int:
             return 1
         if args.github_summary:
             _append_summary(args.github_summary, summary_markdown)
+        if judge_expectation_mismatch_count:
+            logger.error(
+                "LLM judge disagreed with %s adversarial expectation(s)",
+                judge_expectation_mismatch_count,
+            )
+            return 1
         return 0
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -371,6 +380,13 @@ def main() -> int:
         _append_summary(args.github_summary, summary_markdown)
     logger.info("Wrote retrieval evaluation report to %s", args.output)
     logger.info("Wrote human-readable evaluation report to %s", args.markdown_output)
+    if judge_expectation_mismatch_count:
+        logger.error(
+            "LLM judge disagreed with %s adversarial expectation(s); "
+            "the report was written for diagnosis",
+            judge_expectation_mismatch_count,
+        )
+        return 1
     return 0
 
 
@@ -723,6 +739,7 @@ def _answer_case_from_json(data: dict[str, Any]) -> AnswerEvaluationCase:
         expected_terms=set(data.get("expected_terms", [])),
         required_citations=data.get("required_citations", True),
         should_refuse=data.get("should_refuse", False),
+        expected_judge_verdict=data.get("expected_judge_verdict"),
         notes=data.get("notes"),
     )
 
@@ -805,6 +822,17 @@ def _report_is_stale(path: Path, expected: str, *, regenerate_hint: str) -> bool
         logger.error("Report is stale: %s", regenerate_hint)
         return True
     return False
+
+
+def _llm_judge_expectation_mismatch_count(document: dict[str, Any]) -> int:
+    """Return opt-in semantic-judge expectation failures recorded in a report."""
+    llm_judge = document.get("llm_judge")
+    if not isinstance(llm_judge, dict):
+        return 0
+    mismatch_count = llm_judge.get("expectation_mismatch_count", 0)
+    if not isinstance(mismatch_count, int) or mismatch_count < 0:
+        raise ValueError("LLM judge report has an invalid expectation mismatch count")
+    return mismatch_count
 
 
 def _append_summary(path: Path, markdown: str) -> None:
