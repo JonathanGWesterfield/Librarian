@@ -187,7 +187,10 @@ def main() -> int:
     parser.add_argument(
         "--judge-provider",
         default="codex",
-        help="LLM judge provider. Supported values: codex, ollama.",
+        help=(
+            "LLM judge provider. Supported values: codex, ollama, configured. "
+            "configured reuses generation settings and credentials from librarian.json."
+        ),
     )
     parser.add_argument(
         "--judge-model",
@@ -714,6 +717,9 @@ def _answer_case_from_json(data: dict[str, Any]) -> AnswerEvaluationCase:
     return AnswerEvaluationCase(
         id=data["id"],
         question=data["question"],
+        scope={
+            str(key): str(value) for key, value in data.get("scope", {}).items()
+        },
         expected_terms=set(data.get("expected_terms", [])),
         required_citations=data.get("required_citations", True),
         should_refuse=data.get("should_refuse", False),

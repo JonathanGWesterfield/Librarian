@@ -509,18 +509,17 @@ def _render_llm_judge_section(llm_judge: dict[str, Any] | None) -> list[str]:
         "",
         "### LLM Judge Cases",
         "",
-        "| Case | Overall | Correctness | Groundedness | Citation Accuracy | Rationale |",
-        "| --- | ---: | ---: | ---: | ---: | --- |",
+        "| Case | Verdict | Citation relevance | Overall | Reason |",
+        "| --- | --- | --- | ---: | --- |",
     ]
     for case in llm_judge["cases"]:
         lines.append(
             "| "
             f"`{case['case_id']}` | "
+            f"`{case.get('evidence_verdict', 'unknown')}` | "
+            f"`{case.get('citation_relevance', 'unknown')}` | "
             f"`{_decimal(case['overall_score'])}` | "
-            f"`{_decimal(case['correctness'])}` | "
-            f"`{_decimal(case['groundedness'])}` | "
-            f"`{_decimal(case['citation_accuracy'])}` | "
-            f"{case.get('rationale', '')} |"
+            f"{case.get('reason', '')} |"
         )
     return lines
 

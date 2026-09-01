@@ -1,0 +1,49 @@
+{
+  "benchmark": {
+    "name": "groundedness-adversarial-cases",
+    "description": "Source-only LLM-judge cases for contradictions, relationship reversals, unsupported causality, and broad-answer coverage.",
+    "mode": "static_answers"
+  },
+  "cases": [
+    {
+      "id": "negation-contradiction",
+      "question": "Did Mara open the garden gate?",
+      "scope": {"book_title": "The Clockwork Garden"},
+      "answer": "Mara opened the garden gate. [S1]",
+      "sources": [
+        {"source_id": "S1", "relative_path": "clockwork.epub", "text": "Mara did not open the garden gate; Theo opened it instead."}
+      ],
+      "expected_judge_verdict": "contradicted"
+    },
+    {
+      "id": "reversed-relationship",
+      "question": "Who followed Theo through the garden gate?",
+      "scope": {"book_title": "The Clockwork Garden"},
+      "answer": "Theo followed Mara through the garden gate. [S1]",
+      "sources": [
+        {"source_id": "S1", "relative_path": "clockwork.epub", "text": "Mara followed Theo through the garden gate."}
+      ],
+      "expected_judge_verdict": "contradicted"
+    },
+    {
+      "id": "unsupported-causality",
+      "question": "Why did the garden tick after Mara left?",
+      "scope": {"book_title": "The Clockwork Garden"},
+      "answer": "The garden ticked because Mara left. [S1]",
+      "sources": [
+        {"source_id": "S1", "relative_path": "clockwork.epub", "text": "The garden ticked after Mara left."}
+      ],
+      "expected_judge_verdict": "insufficient"
+    },
+    {
+      "id": "broad-author-coverage",
+      "question": "What does the author say about modern Christianity?",
+      "scope": {"author": "C. S. Lewis", "book_title": "The Screwtape Letters"},
+      "answer": "Christianity began going wrong in modern culture. [S1]",
+      "sources": [
+        {"source_id": "S1", "relative_path": "screwtape.epub", "text": "One passage says Christianity began going wrong in modern culture."}
+      ],
+      "expected_judge_verdict": "insufficient"
+    }
+  ]
+}

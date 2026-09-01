@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import asdict, dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib import error, request
 
+from librarian_chat.generation import (
+    ChatMessage,
+    GenerationError,
+    Generator,
+    create_configured_generator,
+)
 from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase
 
 
@@ -21,6 +28,23 @@ class LLMJudge(Protocol):
         ...
 
 
+EvidenceVerdict = Literal["supported", "contradicted", "insufficient"]
+CitationRelevance = Literal[
+    "all_relevant", "partially_relevant", "irrelevant", "not_applicable"
+]
+
+
+@dataclass(frozen=True)
+class SemanticJudgeResult:
+    """Strict, source-only semantic verdict returned by an LLM judge."""
+
+    evidence_verdict: EvidenceVerdict
+    citation_relevance: CitationRelevance
+    missing_coverage: list[str]
+    unsupported_claims: list[str]
+    reason: str
+
+
 @dataclass(frozen=True)
 class LLMJudgeCaseMetrics:
     case_id: str
@@ -34,7 +58,11 @@ class LLMJudgeCaseMetrics:
     refusal_quality: float
     usefulness: float
     overall_score: float
-    rationale: str
+    evidence_verdict: EvidenceVerdict
+    citation_relevance: CitationRelevance
+    missing_coverage: list[str]
+    unsupported_claims: list[str]
+    reason: str
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -108,6 +136,39 @@ class CodexJudge:
 
 
 @dataclass(frozen=True)
+class ConfiguredGeneratorJudge:
+    """Opt-in judge that uses the existing JSON-configured generation provider."""
+
+    generator: Generator
+
+    @property
+    def provider(self) -> str:
+        return self.generator.provider
+
+    @property
+    def model(self) -> str:
+        return self.generator.model
+
+    def judge(self, prompt: str) -> str:
+        try:
+            return self.generator.generate(
+                [
+                    ChatMessage(
+                        role="system",
+                        content=(
+                            "You are a strict source-only RAG evaluator. Return only "
+                            "the requested JSON object."
+                        ),
+                    ),
+                    ChatMessage(role="user", content=prompt),
+                ],
+                response_format="json",
+            )
+        except GenerationError as exc:
+            raise LLMJudgeError(f"configured judge failed: {exc}") from exc
+
+
+@dataclass(frozen=True)
 class OllamaJudge:
     model: str
     base_url: str = "http://localhost:11434"
@@ -159,6 +220,8 @@ def create_judge(
     ollama_base_url: str,
 ) -> LLMJudge:
     normalized = provider.strip().casefold()
+    if normalized == "configured":
+        return ConfiguredGeneratorJudge(create_configured_generator())
     if normalized == "codex":
         return CodexJudge(model=model or "codex")
     if normalized == "ollama":
@@ -191,6 +254,7 @@ def evaluate_answers_with_llm_judge(
         case_metrics.append(
             _case_metrics_from_response(
                 case,
+                candidate,
                 raw_response,
                 provider=active_judge.provider,
                 model=active_judge.model,
@@ -212,46 +276,171 @@ def _build_judge_prompt(
     case: AnswerEvaluationCase,
     candidate: AnswerCandidate,
 ) -> str:
+    cited_ids = set(_citation_ids(candidate.answer))
+    cited_sources = [
+        source for source in candidate.sources if source.source_id in cited_ids
+    ]
     sources = "\n\n".join(
         f"[{source.source_id}] {source.relative_path or 'unknown source'}\n{source.text}"
-        for source in candidate.sources
+        for source in cited_sources
     )
-    expected_terms = ", ".join(sorted(case.expected_terms)) or "none"
+    scope = (
+        json.dumps(case.scope, sort_keys=True)
+        if case.scope
+        else "No explicit scope."
+    )
     return (
-        "Evaluate the answer for a retrieval-augmented book assistant.\n"
-        "Return only valid JSON with numeric scores from 0.0 to 1.0 and a short rationale.\n"
-        "Use these keys exactly: correctness, completeness, groundedness, "
-        "citation_accuracy, refusal_quality, usefulness, overall_score, rationale.\n\n"
+        "Evaluate a retrieval-augmented book-assistant answer using ONLY the "
+        "question, scope, answer, and cited passages below. Do not use training "
+        "knowledge, assumptions about the book, or uncited passages.\n\n"
+        "Return exactly one JSON object with exactly these keys:\n"
+        '{"evidence_verdict":"supported|contradicted|insufficient",'
+        '"citation_relevance":"all_relevant|partially_relevant|irrelevant|not_applicable",'
+        '"missing_coverage":["short missing point"],'
+        '"unsupported_claims":["short unsupported claim"],'
+        '"reason":"concise source-only explanation"}\n\n'
+        "Use supported only when every material answer claim follows from the "
+        "cited passages. Use contradicted when a cited passage conflicts with a "
+        "claim. Use insufficient when the passages neither support nor contradict "
+        "a material claim. `not_applicable` is only for an answer with no citations.\n\n"
         f"Question:\n{case.question}\n\n"
-        f"Expected concepts:\n{expected_terms}\n\n"
-        f"Should refuse for insufficient evidence:\n{case.should_refuse}\n\n"
+        f"Scope:\n{scope}\n\n"
         f"Answer:\n{candidate.answer}\n\n"
-        f"Sources:\n{sources or 'No sources provided.'}"
+        f"Cited passages:\n{sources or 'No cited passages provided.'}"
     )
 
 
 def _case_metrics_from_response(
     case: AnswerEvaluationCase,
+    candidate: AnswerCandidate,
     response: str,
     *,
     provider: str,
     model: str,
 ) -> LLMJudgeCaseMetrics:
     payload = _extract_json_object(response)
+    semantic = _semantic_result_from_payload(payload)
+    correctness, completeness, groundedness, citation_accuracy, refusal_quality, usefulness = (
+        _scores_from_semantic_result(case, candidate, semantic)
+    )
+    overall_score = _score(
+        (
+            correctness
+            + completeness
+            + groundedness
+            + citation_accuracy
+            + refusal_quality
+            + usefulness
+        )
+        / 6
+    )
     return LLMJudgeCaseMetrics(
         case_id=case.id,
         question=case.question,
         provider=provider,
         model=model,
-        correctness=_score(payload.get("correctness")),
-        completeness=_score(payload.get("completeness")),
-        groundedness=_score(payload.get("groundedness")),
-        citation_accuracy=_score(payload.get("citation_accuracy")),
-        refusal_quality=_score(payload.get("refusal_quality")),
-        usefulness=_score(payload.get("usefulness")),
-        overall_score=_score(payload.get("overall_score")),
-        rationale=str(payload.get("rationale", "")).strip(),
+        correctness=correctness,
+        completeness=completeness,
+        groundedness=groundedness,
+        citation_accuracy=citation_accuracy,
+        refusal_quality=refusal_quality,
+        usefulness=usefulness,
+        overall_score=overall_score,
+        evidence_verdict=semantic.evidence_verdict,
+        citation_relevance=semantic.citation_relevance,
+        missing_coverage=semantic.missing_coverage,
+        unsupported_claims=semantic.unsupported_claims,
+        reason=semantic.reason,
     )
+
+
+def _semantic_result_from_payload(payload: dict[str, object]) -> SemanticJudgeResult:
+    expected_keys = {
+        "evidence_verdict",
+        "citation_relevance",
+        "missing_coverage",
+        "unsupported_claims",
+        "reason",
+    }
+    if set(payload) != expected_keys:
+        raise LLMJudgeError(
+            "LLM judge response must contain exactly the semantic verdict schema keys"
+        )
+    verdict = payload["evidence_verdict"]
+    relevance = payload["citation_relevance"]
+    if not isinstance(verdict, str) or verdict not in {
+        "supported",
+        "contradicted",
+        "insufficient",
+    }:
+        raise LLMJudgeError("LLM judge returned an invalid evidence_verdict")
+    if not isinstance(relevance, str) or relevance not in {
+        "all_relevant",
+        "partially_relevant",
+        "irrelevant",
+        "not_applicable",
+    }:
+        raise LLMJudgeError("LLM judge returned an invalid citation_relevance")
+    missing_coverage = _string_list(
+        payload["missing_coverage"], "missing_coverage"
+    )
+    unsupported_claims = _string_list(
+        payload["unsupported_claims"], "unsupported_claims"
+    )
+    reason = payload["reason"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise LLMJudgeError("LLM judge reason must be a non-empty string")
+    return SemanticJudgeResult(
+        evidence_verdict=verdict,
+        citation_relevance=relevance,
+        missing_coverage=missing_coverage,
+        unsupported_claims=unsupported_claims,
+        reason=reason.strip(),
+    )
+
+
+def _string_list(value: object, field_name: str) -> list[str]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise LLMJudgeError(
+            f"LLM judge {field_name} must be a list of non-empty strings"
+        )
+    return [item.strip() for item in value]
+
+
+def _scores_from_semantic_result(
+    case: AnswerEvaluationCase,
+    candidate: AnswerCandidate,
+    result: SemanticJudgeResult,
+) -> tuple[float, float, float, float, float, float]:
+    supported = result.evidence_verdict == "supported"
+    insufficient = result.evidence_verdict == "insufficient"
+    correctness = 1.0 if supported or (insufficient and case.should_refuse) else 0.0
+    completeness = 1.0 if not result.missing_coverage else 0.0
+    groundedness = 1.0 if supported and not result.unsupported_claims else 0.0
+    citation_accuracy = {
+        "all_relevant": 1.0,
+        "partially_relevant": 0.5,
+        "irrelevant": 0.0,
+        "not_applicable": 1.0 if not _citation_ids(candidate.answer) else 0.0,
+    }[result.citation_relevance]
+    refusal_quality = 1.0 if not case.should_refuse else float(insufficient)
+    usefulness = _score(
+        (correctness + completeness + groundedness + citation_accuracy) / 4
+    )
+    return (
+        _score(correctness),
+        _score(completeness),
+        _score(groundedness),
+        _score(citation_accuracy),
+        _score(refusal_quality),
+        usefulness,
+    )
+
+
+def _citation_ids(answer: str) -> list[str]:
+    return re.findall(r"\[(S\d+)\]", answer)
 
 
 def _extract_json_object(response: str) -> dict[str, object]:

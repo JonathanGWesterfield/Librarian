@@ -97,8 +97,9 @@ Use human grading to calibrate automated judging.
 
 ## LLM-as-Judge Evaluation
 
-An evaluator model can score answers against the query, expected answer notes,
-and retrieved source chunks.
+An evaluator model can score an answer against the question, selected scope,
+and the passages cited by that answer. It must not receive expected-answer
+notes or rely on knowledge of a book outside those cited passages.
 
 Benefits:
 
@@ -116,11 +117,31 @@ For Librarian, prefer local evaluation first when possible, with Codex/OpenAI as
 an optional evaluator for higher-quality offline reports.
 
 Librarian now supports optional LLM-as-judge scoring in evaluation reports. It
-is disabled by default so CI remains deterministic and free of model calls. When
-enabled, Codex is the default judge because it is expected to be substantially
-stronger than the tiny local models that fit comfortably on the Mac Mini.
-Ollama is wired as the fallback judge so local-only runs still have a path when
-Codex is unavailable.
+is disabled by default so CI remains deterministic and free of model calls. A
+judge must return this strict JSON result, rather than a free-form score:
+
+```json
+{
+  "evidence_verdict": "supported",
+  "citation_relevance": "all_relevant",
+  "missing_coverage": [],
+  "unsupported_claims": [],
+  "reason": "Each material claim follows from the cited passage."
+}
+```
+
+`evidence_verdict` is exactly `supported`, `contradicted`, or `insufficient`.
+`citation_relevance` is exactly `all_relevant`, `partially_relevant`,
+`irrelevant`, or `not_applicable`. The evaluator receives only the question,
+scope, answer, and passages actually cited by the answer. Invalid or incomplete
+judge JSON fails the optional run instead of silently becoming a passing score.
+
+Codex is the default judge because it is expected to be substantially stronger
+than the tiny local models that fit comfortably on the Mac Mini. Ollama is wired
+as the fallback judge so local-only runs still have a path when Codex is
+unavailable. Use `configured` to reuse the ignored `librarian.json` generation
+provider, model, and credential files, including an OpenAI-compatible
+subscription broker; this still runs only when `--llm-judge` is explicitly set.
 
 ```bash
 python3 scripts/evaluate_retrieval.py --llm-judge
@@ -150,6 +171,20 @@ python3 scripts/evaluate_retrieval.py --llm-judge \
 Use `--judge-fallback-provider none` to fail fast when Codex is unavailable.
 Use `--judge-provider ollama` when intentionally benchmarking local judge
 quality.
+
+To run the curated semantic failure cases (negation, reversed relationships,
+unsupported causality, and broad-answer coverage), pass their fixture as the
+answer benchmark. This invokes a judge only because `--llm-judge` is present:
+
+```bash
+python3 scripts/evaluate_retrieval.py --llm-judge \
+  --judge-provider configured \
+  --answer-benchmark tests/fixtures/evaluation/groundedness_adversarial_cases.json
+```
+
+The judge is a fuzzy offline evaluation layer, not a production authorization
+mechanism. Deterministic tests still enforce transport contracts, citation
+counts, and known adversarial source-text behavior.
 
 ## Pairwise Evaluation
 

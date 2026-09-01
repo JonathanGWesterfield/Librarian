@@ -17,6 +17,7 @@ class AnswerSource:
 class AnswerEvaluationCase:
     id: str
     question: str
+    scope: dict[str, str] = field(default_factory=dict)
     expected_terms: set[str] = field(default_factory=set)
     required_citations: bool = True
     should_refuse: bool = False

@@ -356,10 +356,10 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
                 answer_benchmark_path=answer_path,
                 judge=StaticJudge(
                     response=(
-                        '{"correctness": 0.8, "completeness": 0.8, '
-                        '"groundedness": 0.7, "citation_accuracy": 0.6, '
-                        '"refusal_quality": 1.0, "usefulness": 0.8, '
-                        '"overall_score": 0.78, "rationale": "Good enough."}'
+                        '{"evidence_verdict":"supported",'
+                        '"citation_relevance":"not_applicable",'
+                        '"missing_coverage":[],"unsupported_claims":[],'
+                        '"reason":"Good enough."}'
                     ),
                     provider="codex",
                     model="codex",
@@ -370,7 +370,7 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         self.assertEqual(document["llm_judge"]["provider"], "codex")
         self.assertEqual(
             document["llm_judge"]["aggregate"]["mean_overall_score"],
-            0.78,
+            1.0,
         )
 
 
