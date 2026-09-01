@@ -399,9 +399,12 @@ Response:
 
 ### `POST /chat`
 
-Retrieves local source chunks and asks the selected generation provider for a
-grounded answer. The normal provider, model, and answer capability come from
-the ignored, user-owned `config/librarian.json` file.
+Retrieves local source chunks and returns a deterministic, source-faithful
+answer. Each displayed factual sentence is copied from a selected local source
+sentence and carries that source ID. The normal provider, model, and answer
+capability are still reported from the ignored, user-owned
+`config/librarian.json` file for API/configuration compatibility, but they do
+not rewrite chat claims.
 
 Chat retrieval follows `search.retrieval_backend` in that JSON configuration:
 
@@ -439,8 +442,9 @@ pages cannot become the apparent evidence for a book-level answer. For an
 unscoped question that explicitly names a stored author and asks for that
 author's view, Librarian applies that author only when the metadata match is
 unique. Broad author-view and overview questions require ten distinct source
-chunks before generation; otherwise the API returns an insufficiency response
-instead of asking the model to fill a gap from its prior knowledge.
+chunks and ten directly relevant source sentences; otherwise the API returns an
+insufficiency response instead of asking a model to fill a gap from its prior
+knowledge.
 Publication questions retain only matching non-body EPUB evidence; if that
 evidence is absent, they return insufficiency rather than cite book prose.
 
@@ -463,17 +467,14 @@ the source chunks used as local evidence, the actual `retrieval_backend`, and
 the stage `timings`.
 
 `400` is also the intentional response for an unsupported provider/model
-selection, invalid configured generation input, or a local generation failure.
-Malformed request fields remain FastAPI validation errors (`422`).
+selection or invalid configured generation input. Malformed request fields
+remain FastAPI validation errors (`422`).
 
-For the configured `lightweight` Compose model, a direct factual lookup that
-matches a local source sentence is returned as that sentence with its source
-ID. This deliberately preserves subject/action relationships in small-model
-answers. If no source sentence verifies the lookup, lightweight mode returns an
-insufficiency response rather than asking the small model to paraphrase or
-guess; select a `quality` provider for supported synthesis questions. An
-insufficiency response has no citations, because retrieved chunks that fail the
-evidence guard are diagnostics rather than support for the answer.
+This policy is the same for `lightweight`, `quality`, Ollama, Codex, and
+OpenAI-compatible provider settings: no provider can rewrite the cited source
+text. An insufficiency response has no citations, because retrieved chunks that
+fail the direct-relevance guard are diagnostics rather than support for the
+answer.
 
 ### `POST /chat/stream`
 
@@ -484,42 +485,27 @@ supports `GET` requests.
 
 Events are emitted in this order:
 
-1. `retrieval`: metadata and the evidence-floor-validated citations after
+1. `retrieval`: metadata and the direct-relevance-validated citations after
    retrieval and all evidence guards have completed. It is always the first
-   event, before native generation begins, so the UI can show useful grounded
-   progress and source provenance while it waits for verified answer text. An
-   initial insufficient-evidence response has `sources: []` here. A later
-   semantic refusal can complete with no answer citations even though its
-   earlier retrieval event exposed the passages that the model was asked to
-   use.
-2. Zero or more `token` events, each with `{"text":"..."}`. The default
-   Compose Ollama generator reads native `/api/chat` fragments immediately,
-   but buffers them through a sentence boundary before exposing them. A sentence
-   is emitted only when all of its meaningful terms (with safe inflection
-   normalization such as `opens`/`opened` and `wakes`/`woke`) occur in one
-   cited source sentence. Librarian also waits for a trailing citation fragment
-   before committing terminal punctuation, so a normal chunk boundary cannot
-   turn `[S1]` into a second response. Once text after that citation begins a
-   new sentence, the cited preceding sentence is emitted on its own; multi-
-   citation answers therefore remain incremental. Unsupported output is never
-   exposed. If no sentence has been emitted, Librarian returns a relevant verbatim
-   source-sentence fallback when possible, or the normal empty-citation
-   insufficiency response when it is not. If a later sentence fails validation,
-   the terminal answer remains exactly the already-streamed verified text.
-   Codex,
-   OpenAI-compatible gateways, and other non-streaming providers skip token
-   events and retain their established complete-response behavior.
+   event, so the UI can show useful grounded progress and source provenance.
+   An insufficient-evidence response has `sources: []` here.
+2. Zero or more `token` events, each with `{"text":"..."}`. Every token is
+   one exact source sentence followed by its Librarian-assigned source ID. No
+   model fragment is sent to the client, so a source statement such as “Mara
+   did not open the gate” cannot become “Mara opened the gate,” and temporal
+   wording cannot become an invented cause. Broad answers emit one exact,
+   directly relevant sentence per required source. Providers do not change this
+   contract.
 3. Exactly one terminal `complete` event with the authoritative full answer,
    citations, retrieval metadata, and timings. Its `timings` also includes
    `time_to_first_event_seconds` and `time_to_first_token_seconds`.
    `time_to_first_event_seconds` measures the initial evidence event and is
    available even when no answer sentence can safely be shown.
-   `time_to_first_token_seconds` is `null` when the provider did not stream a
-   verified sentence or the answer was an evidence refusal. It measures the
-   first user-visible validated answer event, not a raw model fragment.
+   `time_to_first_token_seconds` is `null` for an evidence refusal. It measures
+   the first user-visible cited source sentence.
 
-If generation fails after the `retrieval` event, the stream instead ends with
-one terminal `error` event:
+If an unexpected service error occurs after the `retrieval` event, the stream
+instead ends with one terminal `error` event:
 
 ```text
 event: error

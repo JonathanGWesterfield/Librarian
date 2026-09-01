@@ -155,7 +155,7 @@ class SearchIndexRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """Request one grounded chat answer from the configured local library."""
+    """Request one source-faithful chat answer from the configured local library."""
 
     question: str
     database_url: Optional[str] = None
@@ -251,7 +251,7 @@ _CHAT_BAD_REQUEST_RESPONSE = {
     "model": ErrorResponse,
     "description": (
         "Invalid or unsupported chat provider/model configuration, missing "
-        "answer capability for an override, or a local generation failure."
+        "answer capability for an override."
     ),
 }
 
@@ -483,7 +483,7 @@ def index_search_endpoint(request: SearchIndexRequest) -> dict[str, object]:
 @app.post(
     "/chat",
     response_model=ChatResponse,
-    response_description="Grounded answer and the local source chunks used as context.",
+    response_description="Source-faithful answer and the local source chunks cited as evidence.",
     responses={400: _CHAT_BAD_REQUEST_RESPONSE},
 )
 def chat_endpoint(request: ChatRequest) -> dict[str, object]:
@@ -498,8 +498,8 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
     "/chat/stream",
     response_class=StreamingResponse,
     response_description=(
-        "Server-sent events: evidence-validated retrieval metadata, native "
-        "Ollama answer fragments when available, then one terminal completion."
+        "Server-sent events: source-validated retrieval metadata, exact cited "
+        "source-sentence tokens, then one terminal completion."
     ),
     responses={
         200: {
@@ -510,7 +510,7 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
     },
 )
 def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
-    """Stream a grounded answer without changing the established ``POST /chat`` JSON API."""
+    """Stream exact cited source sentences without changing the JSON API."""
     try:
         preparation = prepare_answer_question(_chat_options(request))
     except (ValueError, NotImplementedError, RuntimeError) as error:

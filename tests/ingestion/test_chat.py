@@ -23,8 +23,8 @@ from librarian_storage.storage import BookRecord, SQLiteIngestionStore, utc_now
 
 
 class ChatTests(unittest.TestCase):
-    def test_streamed_chat_reuses_prepared_evidence_and_emits_ordered_ollama_tokens(self) -> None:
-        """Streaming must not re-embed/retrieve before delivering native fragments."""
+    def test_streamed_chat_reuses_prepared_evidence_and_emits_extractive_tokens(self) -> None:
+        """Streaming reuses retrieval and never lets native fragments alter a claim."""
         question = "How brutal is war?"
         generator = _FakeStreamingGenerator(
             ["The front is a cage ", "in which we must await fearfully."]
@@ -52,11 +52,11 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(events[0].data["sources"][0]["source_id"], "S1")
         self.assertEqual(
             events[1].data,
-            {"text": "The front is a cage in which we must await fearfully."},
+            {"text": "War is brutal and terrifying at the front. [S1]"},
         )
         self.assertEqual(
             events[-1].data["answer"],
-            "The front is a cage in which we must await fearfully.",
+            "War is brutal and terrifying at the front. [S1]",
         )
         self.assertIsNotNone(events[-1].data["timings"]["time_to_first_token_seconds"])
         self.assertEqual(embed.call_count, 1)
@@ -98,7 +98,7 @@ class ChatTests(unittest.TestCase):
         self.assertIn("enough relevant body-text evidence", events[-1].data["answer"])
         self.assertEqual(generator.generate_calls, 0)
 
-    def test_quality_stream_with_speculation_uses_a_grounded_extractive_fallback(self) -> None:
+    def test_quality_stream_ignores_speculation_and_uses_the_grounded_answer(self) -> None:
         """Never expose the Mara/ticking inference UAT found in a live Ollama answer."""
         question = "What happened when Mara opened the garden gate?"
         source_text = (
@@ -146,8 +146,114 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(events[-1].data["answer"], emitted_text)
         self.assertEqual(events[-1].data["sources"][0]["source_id"], "S1")
 
-    def test_quality_stream_exposes_validated_retrieval_before_a_delayed_native_fallback(self) -> None:
-        """Useful source progress must not wait for an invalid slow model answer."""
+    def test_json_quality_answer_preserves_a_source_negation(self) -> None:
+        """A model cannot turn a cited denial into its positive opposite."""
+        question = "Did Mara open the garden gate?"
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(
+                    question,
+                    text="Mara did not open the garden gate; Theo opened it instead.",
+                ),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:7b",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(
+            response.answer,
+            "Mara did not open the garden gate; Theo opened it instead. [S1]",
+        )
+        self.assertEqual(generator.messages, [])
+
+    def test_stream_quality_answer_preserves_subject_object_relationships(self) -> None:
+        """A reversed relationship cannot pass merely because its words overlap."""
+        question = "Who followed Theo through the garden gate?"
+        generator = _FakeStreamingGenerator(["Theo followed Mara through the garden gate."])
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(
+                    question,
+                    text="Mara followed Theo through the garden gate.",
+                ),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            embedding_provider="ollama",
+                            embedding_model="all-minilm",
+                            generation_provider="ollama",
+                            generation_model="qwen2.5:7b",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        self.assertEqual(
+            events[1].data["text"],
+            "Mara followed Theo through the garden gate. [S1]",
+        )
+        self.assertNotIn("Theo followed Mara", events[-1].data["answer"])
+        self.assertEqual(generator.messages, [])
+
+    def test_json_quality_answer_does_not_invent_causality(self) -> None:
+        """Temporal source text cannot become a causal model conclusion."""
+        question = "Why did the garden tick after Mara left?"
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(
+                    question,
+                    text="The garden ticked after Mara left.",
+                ),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:7b",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(response.answer, "The garden ticked after Mara left. [S1]")
+        self.assertNotIn("because", response.answer.casefold())
+        self.assertEqual(generator.messages, [])
+
+    def test_quality_stream_exposes_retrieval_and_answer_without_waiting_for_a_model(self) -> None:
+        """Useful source progress and source text do not wait for an invalid model answer."""
         question = "Who opens the garden gate?"
         generator = _DelayedStreamingGenerator(
             ["The garden loves Mara."], delay_seconds=0.08
@@ -183,7 +289,7 @@ class ChatTests(unittest.TestCase):
 
         self.assertEqual(retrieval.event, "retrieval")
         self.assertEqual(retrieval.data["sources"][0]["source_id"], "S1")
-        self.assertEqual(generator.stream_calls, 1)
+        self.assertEqual(generator.stream_calls, 0)
         completion = remaining_events[-1]
         self.assertEqual([event.event for event in remaining_events], ["token", "complete"])
         self.assertEqual(
@@ -194,19 +300,11 @@ class ChatTests(unittest.TestCase):
             retrieval.data["timings"]["time_to_first_event_seconds"],
             0.04,
         )
-        self.assertGreater(
-            completion.data["timings"]["total_seconds"]
-            - completion.data["timings"]["time_to_first_event_seconds"],
-            0.04,
-        )
-        self.assertAlmostEqual(
-            completion.data["timings"]["time_to_first_token_seconds"],
-            completion.data["timings"]["total_seconds"],
-            delta=0.03,
-        )
+        self.assertIsNotNone(completion.data["timings"]["time_to_first_token_seconds"])
+        self.assertLess(completion.data["timings"]["total_seconds"], 0.04)
 
-    def test_quality_stream_emits_a_supported_inflected_sentence_early(self) -> None:
-        """A genuine Ollama quality answer can stream once a source-backed sentence closes."""
+    def test_quality_stream_emits_the_exact_source_sentence_early(self) -> None:
+        """Streaming preserves the source wording instead of an inflected rewrite."""
         question = "Who opens the garden gate?"
         source_text = "Mara opened the garden gate with a borrowed key."
         generator = _FakeStreamingGenerator(
@@ -238,12 +336,15 @@ class ChatTests(unittest.TestCase):
             )
 
         self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
-        self.assertEqual(events[1].data["text"], "Mara opens the garden gate with a borrowed key.")
+        self.assertEqual(
+            events[1].data["text"],
+            "Mara opened the garden gate with a borrowed key. [S1]",
+        )
         self.assertEqual(events[-1].data["answer"], events[1].data["text"])
         self.assertIsNotNone(events[-1].data["timings"]["time_to_first_token_seconds"])
 
-    def test_quality_stream_waits_for_a_trailing_citation_split_across_fragments(self) -> None:
-        """Do not commit a sentence before a normal next-fragment citation arrives."""
+    def test_quality_stream_does_not_consume_model_citation_fragments(self) -> None:
+        """The service owns citations and does not trust a model-provided source ID."""
         question = "Who opens the garden gate?"
         source_text = "Mara opened the garden gate with a borrowed key."
         generator = _FakeStreamingGenerator(
@@ -279,8 +380,8 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(events[1].data["text"], expected)
         self.assertEqual(events[-1].data["answer"], expected)
 
-    def test_quality_stream_splits_cited_sentences_when_the_next_sentence_begins(self) -> None:
-        """Each source-backed cited sentence streams separately across normal chunks."""
+    def test_quality_stream_uses_only_the_exact_relevant_source_sentence(self) -> None:
+        """A narrow question does not add unrelated model-selected passages."""
         question = "Who opens the garden gate?"
         generator = _FakeStreamingGenerator(
             [
@@ -313,13 +414,10 @@ class ChatTests(unittest.TestCase):
                 )
             )
 
-        expected_tokens = [
-            "Mara opens the garden gate with a borrowed key. [S1]",
-            " The garden answers in careful ticking. [S2]",
-        ]
+        expected_tokens = ["Mara opened the garden gate with a borrowed key. [S1]"]
         self.assertEqual(
             [event.event for event in events],
-            ["retrieval", "token", "token", "complete"],
+            ["retrieval", "token", "complete"],
         )
         self.assertEqual(
             [event.data["text"] for event in events if event.event == "token"],
@@ -366,8 +464,8 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(events[-1].data["answer"], events[1].data["text"])
         self.assertNotIn("loves", events[-1].data["answer"])
 
-    def test_unsupported_quality_stream_keeps_terminal_refusal_citation_free(self) -> None:
-        """Early validated retrieval must not make the terminal refusal look grounded."""
+    def test_irrelevant_quality_stream_keeps_terminal_refusal_citation_free(self) -> None:
+        """Irrelevant retrieval candidates never become evidence for a model claim."""
         question = "Who opens the garden gate?"
         generator = _FakeStreamingGenerator(["The garden loves Mara."])
         with (
@@ -399,14 +497,14 @@ class ChatTests(unittest.TestCase):
         )
 
         self.assertEqual([event.event for event in events], ["retrieval", "complete"])
-        self.assertEqual(events[0].data["sources"][0]["source_id"], "S1")
+        self.assertEqual(events[0].data["sources"], [])
         self.assertIsNotNone(events[0].data["timings"]["time_to_first_event_seconds"])
         self.assertEqual(events[-1].data["sources"], [])
         self.assertIn("enough relevant body-text evidence", events[-1].data["answer"])
         self.assertIsNone(events[-1].data["timings"]["time_to_first_token_seconds"])
 
-    def test_streamed_generation_failure_is_a_clear_terminal_error(self) -> None:
-        """A provider error after retrieval should not make an SSE client hang."""
+    def test_streaming_does_not_depend_on_a_failing_native_generator(self) -> None:
+        """A configured provider cannot make a source-faithful answer fail."""
         generator = _FailingStreamingGenerator()
         with (
             patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
@@ -430,12 +528,12 @@ class ChatTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual([event.event for event in events], ["retrieval", "error"])
-        self.assertIn("fixture stream failed", events[-1].data["detail"])
-        self.assertIsNone(events[-1].data["timings"]["time_to_first_token_seconds"])
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        self.assertEqual(events[-1].data["answer"], "War is brutal and terrifying at the front. [S1]")
+        self.assertIsNotNone(events[-1].data["timings"]["time_to_first_token_seconds"])
 
-    def test_non_streaming_provider_completes_without_fake_token_timing(self) -> None:
-        """Codex/OpenAI-compatible style generators retain a correct completion path."""
+    def test_non_streaming_provider_uses_the_same_extractive_stream_contract(self) -> None:
+        """Provider selection cannot change the factual claims exposed by SSE."""
         generator = _FakeGenerator()
         with (
             patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
@@ -459,16 +557,12 @@ class ChatTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual([event.event for event in events], ["retrieval", "complete"])
-        self.assertEqual(events[-1].data["answer"], "War is described as terrifying. [S1]")
-        self.assertIsNone(events[-1].data["timings"]["time_to_first_token_seconds"])
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        self.assertEqual(events[-1].data["answer"], "War is brutal and terrifying at the front. [S1]")
+        self.assertIsNotNone(events[-1].data["timings"]["time_to_first_token_seconds"])
 
-    def test_answer_question_retrieves_sources_and_generates_answer(self) -> None:
-        """Verify chat composes retrieval and local generation.
-        This protects the end-to-end service boundary: search supplies ranked
-        chunks, the prompt includes source IDs, and the response preserves
-        source metadata for citations.
-        """
+    def test_answer_question_retrieves_sources_and_assembles_an_extractive_answer(self) -> None:
+        """The JSON route returns exact source text and never invokes generation."""
         fake_search = SearchResponse(
             query="How brutal is war?",
             embedding_provider="ollama",
@@ -486,7 +580,7 @@ class ChatTests(unittest.TestCase):
                     authors=["Erich Maria Remarque"],
                     publisher=None,
                     chunk_index=0,
-                    text="The front is a cage in which we must await fearfully.",
+                    text="War is brutal and terrifying at the front.",
                     embedding_provider="ollama",
                     embedding_model="all-minilm",
                     dimensions=2,
@@ -519,7 +613,7 @@ class ChatTests(unittest.TestCase):
             )
 
         self.assertEqual(response.question, "How brutal is war?")
-        self.assertEqual(response.answer, "War is described as terrifying. [S1]")
+        self.assertEqual(response.answer, "War is brutal and terrifying at the front. [S1]")
         self.assertEqual(response.answer_capability, "quality")
         self.assertEqual(response.filters, {"author": "Erich Maria Remarque"})
         self.assertEqual(response.candidate_count, 2)
@@ -531,9 +625,7 @@ class ChatTests(unittest.TestCase):
         self.assertGreaterEqual(response.timings.prompt_construction_seconds, 0.0)
         self.assertGreaterEqual(response.timings.generation_seconds, 0.0)
         self.assertGreaterEqual(response.timings.total_seconds, 0.0)
-        prompt = generator.messages[-1].content
-        self.assertIn("[S1]", prompt)
-        self.assertIn("The front is a cage", prompt)
+        self.assertEqual(generator.messages, [])
 
     def test_answer_question_uses_opensearch_hybrid_when_auto_backend_is_healthy(self) -> None:
         """Auto chat retrieval should use the indexed hybrid path and keep scope."""
@@ -584,7 +676,7 @@ class ChatTests(unittest.TestCase):
             "authors": ["Erich Maria Remarque"],
             "chunk_index": 0,
             "content_type": "body",
-            "text": "The front is a cage in which we must await fearfully.",
+            "text": "War is brutal and terrifying at the front.",
         })
         self.assertEqual(set(response.timings.to_dict()), {
             "query_embedding_seconds",
@@ -677,8 +769,9 @@ class ChatTests(unittest.TestCase):
                 self.assertEqual(response.retrieval_backend, "opensearch")
                 self.assertEqual(hybrid_search.call_args.args[0].author, "C. S. Lewis")
                 self.assertEqual(hybrid_search.call_args.args[0].query, question)
-                self.assertNotIn("Other Author", generator.messages[-1].content)
-                self.assertIn("at least 10 distinct source IDs", generator.messages[-1].content)
+                self.assertEqual(generator.messages, [])
+                self.assertEqual(len(response.sources), 10)
+                self.assertEqual(response.answer.count("[S"), 10)
 
     def test_broad_author_question_with_only_one_body_source_does_not_generate(self) -> None:
         """A single weak passage must never be turned into a model-prior synthesis."""
@@ -1091,7 +1184,7 @@ def _author_search_response(question: str, *, count: int) -> SearchResponse:
                 publisher=None,
                 chunk_index=index,
                 text=(
-                    "Lewis examines modern Christianity through ordinary moral choices "
+                    f"Lewis examines modern Christianity through moral choice {index} "
                     "and self-deception."
                 ),
                 embedding_provider="ollama",
@@ -1196,7 +1289,7 @@ def _search_response() -> SearchResponse:
                 authors=["Erich Maria Remarque"],
                 publisher=None,
                 chunk_index=0,
-                text="The front is a cage in which we must await fearfully.",
+                text="War is brutal and terrifying at the front.",
                 embedding_provider="ollama",
                 embedding_model="all-minilm",
                 dimensions=2,
