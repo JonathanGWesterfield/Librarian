@@ -2,6 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import sleep
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
@@ -144,6 +145,65 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn("presence", emitted_text.casefold())
         self.assertEqual(events[-1].data["answer"], emitted_text)
         self.assertEqual(events[-1].data["sources"][0]["source_id"], "S1")
+
+    def test_quality_stream_exposes_validated_retrieval_before_a_delayed_native_fallback(self) -> None:
+        """Useful source progress must not wait for an invalid slow model answer."""
+        question = "Who opens the garden gate?"
+        generator = _DelayedStreamingGenerator(
+            ["The garden loves Mara."], delay_seconds=0.08
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(
+                    question,
+                    text="Mara opened the garden gate with a borrowed key.",
+                ),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            events = stream_answer_question(
+                prepare_answer_question(
+                    ChatOptions(
+                        question=question,
+                        database_url="sqlite:///tmp/librarian.db",
+                        embedding_provider="ollama",
+                        embedding_model="all-minilm",
+                        generation_provider="ollama",
+                        generation_model="qwen2.5:7b",
+                        answer_capability="quality",
+                    )
+                )
+            )
+            retrieval = next(events)
+            self.assertEqual(generator.stream_calls, 0)
+            remaining_events = list(events)
+
+        self.assertEqual(retrieval.event, "retrieval")
+        self.assertEqual(retrieval.data["sources"][0]["source_id"], "S1")
+        self.assertEqual(generator.stream_calls, 1)
+        completion = remaining_events[-1]
+        self.assertEqual([event.event for event in remaining_events], ["token", "complete"])
+        self.assertEqual(
+            completion.data["answer"],
+            "Mara opened the garden gate with a borrowed key. [S1]",
+        )
+        self.assertLess(
+            retrieval.data["timings"]["time_to_first_event_seconds"],
+            0.04,
+        )
+        self.assertGreater(
+            completion.data["timings"]["total_seconds"]
+            - completion.data["timings"]["time_to_first_event_seconds"],
+            0.04,
+        )
+        self.assertAlmostEqual(
+            completion.data["timings"]["time_to_first_token_seconds"],
+            completion.data["timings"]["total_seconds"],
+            delta=0.03,
+        )
 
     def test_quality_stream_emits_a_supported_inflected_sentence_early(self) -> None:
         """A genuine Ollama quality answer can stream once a source-backed sentence closes."""
@@ -306,8 +366,8 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(events[-1].data["answer"], events[1].data["text"])
         self.assertNotIn("loves", events[-1].data["answer"])
 
-    def test_unsupported_quality_stream_without_fallback_returns_no_citations_or_tokens(self) -> None:
-        """Semantic refusal has the same empty-evidence surface as the existing guard."""
+    def test_unsupported_quality_stream_keeps_terminal_refusal_citation_free(self) -> None:
+        """Early validated retrieval must not make the terminal refusal look grounded."""
         question = "Who opens the garden gate?"
         generator = _FakeStreamingGenerator(["The garden loves Mara."])
         with (
@@ -336,10 +396,11 @@ class ChatTests(unittest.TestCase):
                         )
                     )
                 )
-            )
+        )
 
         self.assertEqual([event.event for event in events], ["retrieval", "complete"])
-        self.assertEqual(events[0].data["sources"], [])
+        self.assertEqual(events[0].data["sources"][0]["source_id"], "S1")
+        self.assertIsNotNone(events[0].data["timings"]["time_to_first_event_seconds"])
         self.assertEqual(events[-1].data["sources"], [])
         self.assertIn("enough relevant body-text evidence", events[-1].data["answer"])
         self.assertIsNone(events[-1].data["timings"]["time_to_first_token_seconds"])
@@ -1170,6 +1231,21 @@ class _FakeStreamingGenerator(_FakeGenerator):
 
     def stream(self, messages):
         self.messages = messages
+        yield from self.chunks
+
+
+class _DelayedStreamingGenerator(_FakeStreamingGenerator):
+    """A slow native-like stream used to verify progress arrives before completion."""
+
+    def __init__(self, chunks: list[str], *, delay_seconds: float) -> None:
+        super().__init__(chunks)
+        self.delay_seconds = delay_seconds
+        self.stream_calls = 0
+
+    def stream(self, messages):
+        self.messages = messages
+        self.stream_calls += 1
+        sleep(self.delay_seconds)
         yield from self.chunks
 
 

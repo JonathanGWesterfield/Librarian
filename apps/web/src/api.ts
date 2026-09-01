@@ -40,6 +40,7 @@ export type ChatStreamRetrieval = Omit<ChatResponse, "answer"> & {
     query_embedding_seconds: number;
     retrieval_seconds: number;
     prompt_construction_seconds: number;
+    time_to_first_event_seconds: number;
   };
 };
 
@@ -50,6 +51,7 @@ export type ChatStreamCompletion = ChatResponse & {
     prompt_construction_seconds: number;
     generation_seconds: number;
     total_seconds: number;
+    time_to_first_event_seconds: number | null;
     time_to_first_token_seconds: number | null;
   };
 };

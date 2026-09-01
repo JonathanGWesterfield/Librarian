@@ -484,10 +484,14 @@ supports `GET` requests.
 
 Events are emitted in this order:
 
-1. `retrieval`: metadata and the validated citations after retrieval and all
-   evidence guards have completed. For native quality streaming it is emitted
-   immediately before the first source-verified answer sentence. An
-   insufficient-evidence response therefore has `sources: []` here.
+1. `retrieval`: metadata and the evidence-floor-validated citations after
+   retrieval and all evidence guards have completed. It is always the first
+   event, before native generation begins, so the UI can show useful grounded
+   progress and source provenance while it waits for verified answer text. An
+   initial insufficient-evidence response has `sources: []` here. A later
+   semantic refusal can complete with no answer citations even though its
+   earlier retrieval event exposed the passages that the model was asked to
+   use.
 2. Zero or more `token` events, each with `{"text":"..."}`. The default
    Compose Ollama generator reads native `/api/chat` fragments immediately,
    but buffers them through a sentence boundary before exposing them. A sentence
@@ -507,8 +511,11 @@ Events are emitted in this order:
    events and retain their established complete-response behavior.
 3. Exactly one terminal `complete` event with the authoritative full answer,
    citations, retrieval metadata, and timings. Its `timings` also includes
-   `time_to_first_token_seconds`; it is `null` when the provider did not stream
-   a verified sentence or the answer was an evidence refusal. It measures the
+   `time_to_first_event_seconds` and `time_to_first_token_seconds`.
+   `time_to_first_event_seconds` measures the initial evidence event and is
+   available even when no answer sentence can safely be shown.
+   `time_to_first_token_seconds` is `null` when the provider did not stream a
+   verified sentence or the answer was an evidence refusal. It measures the
    first user-visible validated answer event, not a raw model fragment.
 
 If generation fails after the `retrieval` event, the stream instead ends with
@@ -532,13 +539,13 @@ Example successful event sequence:
 
 ```text
 event: retrieval
-data: {"question":"What is psychohistory?","retrieval_backend":"opensearch","sources":[{"source_id":"S1","text":"..."}]}
+data: {"question":"What is psychohistory?","retrieval_backend":"opensearch","sources":[{"source_id":"S1","text":"..."}],"timings":{"time_to_first_event_seconds":0.04}}
 
 event: token
 data: {"text":"Psychohistory models large populations. [S1]"}
 
 event: complete
-data: {"question":"What is psychohistory?","answer":"Psychohistory models large populations. [S1]","sources":[{"source_id":"S1","text":"..."}],"timings":{"query_embedding_seconds":0.01,"retrieval_seconds":0.02,"prompt_construction_seconds":0.01,"generation_seconds":0.3,"total_seconds":0.35,"time_to_first_token_seconds":0.08}}
+data: {"question":"What is psychohistory?","answer":"Psychohistory models large populations. [S1]","sources":[{"source_id":"S1","text":"..."}],"timings":{"query_embedding_seconds":0.01,"retrieval_seconds":0.02,"prompt_construction_seconds":0.01,"generation_seconds":0.3,"total_seconds":0.35,"time_to_first_event_seconds":0.04,"time_to_first_token_seconds":0.08}}
 ```
 
 ## Recommendations
