@@ -12,7 +12,7 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatResponse, ChatSource
-from librarian_evaluation.llm_judge import StaticJudge
+from librarian_evaluation.llm_judge import LLMJudgeError, StaticJudge
 from librarian_search.hybrid import HybridSearchOptions
 from librarian_search.search import SearchResponse, SearchResult
 
@@ -50,6 +50,24 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         self.assertIs(judge, codex_judge)
         self.assertEqual(create.call_args.args[0], "codex")
         self.assertEqual(create.call_args.kwargs["model"], "gpt-5.6")
+
+    def test_codex_judge_transport_failure_is_a_safe_cli_failure(self) -> None:
+        """A nonzero Codex exit reaches operators without a traceback or fallback."""
+        module = _load_script_module()
+        failure = LLMJudgeError(
+            "Codex judge exited with code 17. Codex stderr: not logged in"
+        )
+        with (
+            patch.object(sys, "argv", ["evaluate_retrieval.py", "--llm-judge"]),
+            patch.object(module, "configure_cli_logging"),
+            patch.object(module, "_create_optional_judge", return_value=object()),
+            patch.object(module, "generate_report_document", side_effect=failure),
+            self.assertLogs(module.logger, level="ERROR") as logs,
+        ):
+            result = module.main()
+
+        self.assertEqual(result, 1)
+        self.assertIn("Codex judge exited with code 17", "\n".join(logs.output))
 
     def test_generate_live_report_document_scores_golden_corpus_with_search_results(
         self,

@@ -62,9 +62,10 @@ Instead, ingestion is deterministic and local:
 5. Store chunks, metadata, and vectors locally.
 
 For optional synthesis tasks such as summaries and recommendations, Librarian
-can call a host-side Codex broker. That means only the task input and a small
-set of relevant passages are sent to Codex CLI. Codex uses the existing Codex
-login rather than an OpenAI API key.
+can call a Compose-native Codex broker. That means only the task input and a
+small set of relevant passages are sent to Codex CLI. The broker keeps its own
+Codex login in a named Docker volume, rather than mounting host credentials or
+requiring an OpenAI API key.
 
 Chat answers take a stricter path: after retrieval, Librarian selects directly
 relevant source sentences and returns those exact sentences with citations. It
@@ -88,7 +89,7 @@ configured EPUB folder
   -> local embedding model
   -> local metadata/vector store
   -> retrieval service
-  -> optional Codex broker for answer synthesis
+  -> optional internal Codex broker for answer synthesis
   -> web/API clients
 ```
 
@@ -136,10 +137,11 @@ claims until an entailment-verification layer is available.
 
 ### Codex Broker
 
-The broker is a small host-side service that wraps `codex exec`. Containers can
-call the broker over HTTP instead of mounting Codex credentials into Docker. It
-is optional and should be treated as an answer synthesis layer, not as core
-storage or ingestion infrastructure.
+The broker is an optional internal-only Compose service that wraps `codex
+exec`. Containers call it over the Compose network; it has no host port. Its
+Codex session is retained only in the `codex-broker-session` named volume, so
+the host `~/.codex` directory is never mounted. It is an answer synthesis
+layer, not core storage or ingestion infrastructure.
 
 ## First Target
 
@@ -153,7 +155,7 @@ storage or ingestion infrastructure.
 
 ```text
 apps/api/              FastAPI application surface
-apps/codex_broker/     Host-side Codex CLI wrapper service
+apps/codex_broker/     Internal Compose Codex CLI broker
 packages/              Local Python packages:
   librarian_config      Shared environment/default resolution
   librarian_storage     SQLite storage adapter and storage records
@@ -378,9 +380,10 @@ All operational settings live in the ignored `config/librarian.json` file. The
 launcher creates it from [`config/librarian.example.json`](config/librarian.example.json)
 on first run. JSON is authoritative; `LIBRARIAN_*` shell variables are not read.
 
-For the populated, non-secret Codex-compatible gateway baseline, copy
-[`config/librarian.base.json`](config/librarian.base.json) and add its referenced
-token file under ignored `config/secrets/`. See
+For the populated, non-secret Compose Codex-broker baseline, copy
+[`config/librarian.base.json`](config/librarian.base.json), add its referenced
+API-to-broker token file under ignored `config/secrets/`, and complete the
+one-time broker `codex login` command in the configuration guide. See
 [`docs/configuration.md`](docs/configuration.md) for the full configuration
 reference, provider matrix, secret rules, and validation steps.
 
@@ -401,9 +404,9 @@ there and must instead be referenced through `header_files` below
 For difficult natural-language event questions, an administrator may opt into
 the JSON `semantic_source_selector` using a trusted Codex model. The selector
 can choose only IDs for already-retrieved book sentences; it cannot draft,
-rewrite, or display answer prose. It runs only when the configured generation
-provider is direct Codex with `answer_capability: "quality"`. Docker and native
-Ollama always retain the deterministic extractive selector.
+rewrite, or display answer prose. It runs only with `answer_capability:
+"quality"` through direct Codex or the explicit `docker_codex_broker` mode.
+Docker and native Ollama always retain the deterministic extractive selector.
 
 The JSON `evaluation` section also separates fuzzy answer-quality evaluation
 from normal tests: only its Codex `enforcing_judge` can fail a semantic quality

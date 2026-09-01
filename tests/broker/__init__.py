@@ -1,0 +1,1 @@
+"""Compose-broker contract coverage."""

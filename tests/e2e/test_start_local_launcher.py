@@ -81,7 +81,7 @@ if [[ "$*" == "compose version" || "$1" == "info" ]]; then
 fi
 if [[ "$*" == *"config-resolver run"* ]]; then
   mkdir -p .runtime
-  printf '%s\\n' '{' '  "docker_ollama_enabled": true,' '  "api_port": 8000,' '  "web_port": 3000' '}' > .runtime/librarian.state.json
+  printf '%s\\n' '{' '  "docker_ollama_enabled": true,' '  "docker_codex_broker_enabled": false,' '  "api_port": 8000,' '  "web_port": 3000' '}' > .runtime/librarian.state.json
   printf '%s\\n' '{' '  "services": {' '    "ollama-init": {' '      "environment": {' '        "OLLAMA_INIT_MODELS": "all-minilm,qwen2.5:1.5b"' '      }' '    }' '  }' '}' > .runtime/librarian.compose.json
   exit 0
 fi

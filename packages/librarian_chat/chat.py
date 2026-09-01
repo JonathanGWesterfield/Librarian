@@ -75,6 +75,9 @@ _EVENT_QUESTION_PREFIXES = (
     "what happens",
     "what occurred",
 )
+_EVENT_FOLLOWUP_MARKER = re.compile(
+    r"\b(?:after|afterward|immediately|next|then|following)\b"
+)
 _PUBLICATION_METADATA_TERMS = (
     "copyright",
     "edition",
@@ -791,7 +794,8 @@ def _grounded_extractive_answer(
             if overlap == 0:
                 continue
             coverage = overlap / len(question_terms)
-            if not broad_question and coverage < 0.5:
+            event_primary_match = _is_event_question(question) and overlap >= 2
+            if not broad_question and coverage < 0.5 and not event_primary_match:
                 continue
             candidate = (
                 coverage,
@@ -833,6 +837,20 @@ def _grounded_extractive_answer(
         )
         if context_sentence is not None:
             tokens.append(f"{context_sentence} [{primary[4].source_id}]")
+        else:
+            outcome = _event_outcome_from_retrieved_sources(
+                question,
+                sources=sources,
+                primary_source=primary[4],
+                primary_sentence=primary[5],
+            )
+            if outcome is not None:
+                outcome_source, outcome_sentence = outcome
+                tokens.append(f"{outcome_sentence} [{outcome_source.source_id}]")
+                if outcome_source.chunk_id not in {
+                    source.chunk_id for source in selected_sources
+                }:
+                    selected_sources.append(outcome_source)
     return selected_sources, tokens
 
 
@@ -909,7 +927,7 @@ def _trusted_semantic_selector(
     keeps Docker Ollama on the deterministic extractive path.
     """
 
-    if answer_capability != "quality" or generator.provider != "codex":
+    if answer_capability != "quality":
         return None
     try:
         config = get_librarian_config()
@@ -917,19 +935,33 @@ def _trusted_semantic_selector(
         return None
     configured_generation = config.generation
     selector = config.semantic_source_selector
+    configured_generation_mode = getattr(
+        configured_generation, "mode", configured_generation.provider
+    )
+    if not selector.enabled or configured_generation.answer_capability != "quality":
+        return None
+    if selector.model != configured_generation.model or generator.model != selector.model:
+        return None
     if (
-        not selector.enabled
-        or selector.provider != "codex"
-        or configured_generation.provider != "codex"
-        or configured_generation.answer_capability != "quality"
-        or generator.model != configured_generation.model
+        selector.provider == "codex"
+        and configured_generation_mode == "codex"
+        and generator.provider == "codex"
     ):
-        return None
-    try:
-        return create_generator("codex", model=selector.model)
-    except (GenerationError, LibrarianConfigError, ValueError) as error:
-        logger.info("Semantic source selector is not configured for use: %s", error)
-        return None
+        try:
+            return create_generator("codex", model=selector.model)
+        except (GenerationError, LibrarianConfigError, ValueError) as error:
+            logger.info("Semantic source selector is not configured for use: %s", error)
+            return None
+    if (
+        selector.provider == "docker_codex_broker"
+        and configured_generation_mode == "docker_codex_broker"
+        and generator.provider == "openai_compatible"
+    ):
+        # This transport is only available through the Compose-owned broker
+        # image. It carries a user-authenticated Codex CLI session, never a
+        # host credential mount, and uses the normal OpenAI-compatible adapter.
+        return generator
+    return None
 
 
 def _source_sentence_candidates(
@@ -1060,9 +1092,45 @@ def _event_context_sentence(
     return None
 
 
+def _event_outcome_from_retrieved_sources(
+    question: str,
+    *,
+    sources: list[ChatSource],
+    primary_source: ChatSource,
+    primary_sentence: str,
+) -> tuple[ChatSource, str] | None:
+    """Find a directly anchored follow-up event from another retrieved chunk.
+
+    Retrieval may split a short sequence at a chunk boundary.  For a question
+    explicitly asking what happened immediately after an action, include one
+    other retrieved sentence only when it shares a concrete object or setting
+    term with the question or primary event.  Actor-name overlap alone is not
+    enough, so unrelated adjacent narration stays out of the answer.
+    """
+
+    if not _is_event_question(question) or not _EVENT_FOLLOWUP_MARKER.search(question):
+        return None
+    primary_terms = _meaningful_terms(primary_sentence)
+    anchors = (_meaningful_terms(question) | primary_terms) - _leading_subject_terms(
+        primary_sentence
+    )
+    if not anchors:
+        return None
+    for source in sources:
+        if source.chunk_id == primary_source.chunk_id:
+            continue
+        for sentence in _sentences(source.text):
+            sentence_terms = _meaningful_terms(sentence)
+            if sentence_terms & anchors:
+                return source, sentence
+    return None
+
+
 def _is_event_question(question: str) -> bool:
     normalized = " ".join(question.casefold().split())
-    return normalized.startswith(_EVENT_QUESTION_PREFIXES)
+    return normalized.startswith(_EVENT_QUESTION_PREFIXES) or bool(
+        _EVENT_FOLLOWUP_MARKER.search(normalized)
+    )
 
 
 def _leading_subject_terms(sentence: str) -> set[str]:

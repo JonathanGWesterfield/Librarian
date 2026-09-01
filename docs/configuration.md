@@ -14,22 +14,34 @@ the tracked, credential-free profiles:
 | Profile | Use it when | Answer generation |
 | --- | --- | --- |
 | [`config/librarian.example.json`](../config/librarian.example.json) | You want the fully local default. The launchers copy this profile automatically on first run. | Docker Ollama, `qwen2.5:1.5b` |
-| [`config/librarian.base.json`](../config/librarian.base.json) | You run a Codex-compatible, OpenAI-style gateway on the host. This is the populated baseline used for the maintained host-broker workflow. | Gateway model `codex` |
+| [`config/librarian.base.json`](../config/librarian.base.json) | You want answer generation and optional exact-sentence selection through your Codex subscription in Docker Compose. | Internal Codex broker, `gpt-5.6` |
 
 To select the base profile explicitly:
 
 ```bash
 cp config/librarian.base.json config/librarian.json
 mkdir -p config/secrets
-# Put only the gateway token in this ignored file.
+# Create an API-to-broker token. This is not a Codex credential and stays ignored.
 printf '%s\n' 'replace-with-your-token' > config/secrets/codex-bridge-token.txt
+# Authenticate once inside the broker's named Docker volume. This never mounts
+# or copies the host's ~/.codex directory.
+docker compose --profile codex-broker run --rm codex-broker codex login
 scripts/start_local.sh
 ```
 
-The gateway profile keeps embeddings local: Docker Ollama downloads and uses
-`all-minilm`, while answer generation calls
-`http://host.docker.internal:3000/v1`. Docker Compose starts only the Docker
-Ollama models selected by the embedding and generation sections.
+The base profile keeps embeddings local: Docker Ollama downloads and uses
+`all-minilm`, while answer generation calls an internal-only Compose service at
+`http://codex-broker:3000/v1`. The broker stores its own Codex login/session in
+the named `codex-broker-session` volume. It exposes no host port and never
+mounts host Codex credentials. Docker Compose starts only the Docker Ollama
+models and Codex broker selected by JSON.
+
+Both `scripts/start_local.sh` and `scripts/start_local.ps1` run the JSON
+resolver first and automatically enable the `codex-broker` Compose profile when
+`generation.mode` is `docker_codex_broker`. They do not start Docker Ollama for
+broker generation itself; Docker Ollama starts only when `embedding` or another
+configured role explicitly uses `docker_ollama` (the base profile uses it for
+the local `all-minilm` embedding model).
 
 ## Configuration shape
 
@@ -46,7 +58,7 @@ Every profile has the following top-level sections.
 | `semantic_source_selector` | Optional trusted Codex policy that chooses IDs for existing source sentences. |
 | `evaluation` | Opt-in Codex enforcement and separate advisory local-judge model choices. |
 | `services` | Published ports, OpenSearch heap, Ollama listener, and worker settings. |
-| `codex_executable` | Host executable used only by the direct `codex` generation mode. |
+| `codex_executable` | Host executable used only by the direct `codex` generation mode and host-side evaluation judge. |
 
 For normal Docker startup, retain `paths.books_dir` as `/books`,
 `paths.database_url` as `sqlite:////data/librarian.db`, and
@@ -65,6 +77,7 @@ the required companion fields.
 | `docker_ollama` | Embedding and generation | `model` | Starts Compose Ollama and downloads the selected model. |
 | `native_ollama` | Embedding and generation | `model`, `base_url` | Calls an Ollama service already running on the host or network. |
 | `openai_compatible` | Embedding and generation | `model`, `base_url`, `api_key_file` | Calls a gateway and does not start Ollama for that section. |
+| `docker_codex_broker` | Generation only | `model`, `api_key_file` | Starts the internal-only Compose Codex broker. Its session stays in a named Docker volume; the token authenticates only API/worker-to-broker traffic. |
 | `codex` | Generation only | `model` | Runs the configured host Codex CLI; this is for host-side tooling, not the Docker API container. |
 
 For `native_ollama`, Docker Desktop users normally use
@@ -88,27 +101,31 @@ book text. It does not generate or rewrite answer prose.
 ```json
 {
   "generation": {
-    "mode": "codex",
+    "mode": "docker_codex_broker",
     "model": "gpt-5.6",
+    "api_key_file": "secrets/codex-bridge-token.txt",
     "answer_capability": "quality"
   },
   "semantic_source_selector": {
     "enabled": true,
-    "provider": "codex",
+    "provider": "docker_codex_broker",
     "model": "gpt-5.6"
   }
 }
 ```
 
 This is deliberately restrictive. The selector runs only when all of the
-following are true: it is enabled in JSON, its provider is `codex`, generation
-is configured as direct `codex`, generation has `quality` capability, and the
-request keeps the configured Codex model. API provider/model overrides cannot
-turn it on. Its only valid output is a JSON `sentence_ids` list whose entries
-exactly match retrieved, scope-filtered source sentences. Unknown, duplicate,
-empty, malformed, unavailable, or too-narrow selections fall back to the
-deterministic extractor. Docker and native Ollama never perform semantic source
-selection.
+following are true: it is enabled in JSON, its trusted transport is direct
+`codex` or the explicit `docker_codex_broker`, generation has `quality`
+capability, and the request keeps the configured Codex model. API
+provider/model overrides cannot turn it on. The Compose broker is the supported
+container path: authenticate once with `docker compose --profile codex-broker
+run --rm codex-broker codex login`, then the persisted named volume provides
+the session without a host credential mount. Its only valid output is a JSON
+`sentence_ids` list whose entries exactly match retrieved, scope-filtered source
+sentences. Unknown, duplicate, empty, malformed, unavailable, or too-narrow
+selections fall back to the deterministic extractor. Docker and native Ollama
+never perform semantic source selection.
 
 ## LLM-as-judge policy
 
@@ -135,6 +152,11 @@ the deterministic test suite. It has two deliberately different roles:
 model through `codex exec --model <model> --ephemeral` and returns failure on a
 transport problem, invalid judge schema, or mismatch with a curated
 `expected_judge_verdict`. There is no Ollama or configured-provider fallback.
+If Codex exits nonzero, the command reports the exit code and a concise,
+credential-redacted stderr diagnostic rather than a bare Python
+`CalledProcessError`. Complete the host Codex login, verify the configured
+model is available, and rerun the same command; an enforcing run never passes
+or downgrades to Ollama after that failure.
 
 `advisory_judge` may be Codex or Ollama. Run it only with
 `--judge-mode advisory`; it validates the same schema and records diagnostics,

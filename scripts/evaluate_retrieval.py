@@ -66,6 +66,7 @@ from librarian_chat.chat import ChatOptions, ChatResponse, answer_question
 from librarian_evaluation.comparison import compare_report_documents
 from librarian_evaluation.llm_judge import (
     LLMJudge,
+    LLMJudgeError,
     create_judge,
     evaluate_answers_with_llm_judge,
 )
@@ -266,37 +267,41 @@ def main() -> int:
         ollama_base_url=args.ollama_base_url,
     )
 
-    if args.live:
-        if args.output == DEFAULT_OUTPUT_PATH:
-            args.output = DEFAULT_LIVE_OUTPUT_PATH
-        if args.markdown_output == DEFAULT_MARKDOWN_OUTPUT_PATH:
-            args.markdown_output = DEFAULT_LIVE_MARKDOWN_OUTPUT_PATH
-        document = generate_live_report_document(
-            args.golden_corpus,
-            answer_benchmark_path=args.answer_benchmark,
-            live_answer_corpus_path=args.answer_corpus,
-            live_answers=args.live_answers,
-            database_url=args.database_url,
-            opensearch_url=args.opensearch_url,
-            index_name=args.index_name,
-            api_url=args.api_url,
-            embedding_provider=args.embedding_provider,
-            embedding_model=args.embedding_model,
-            generation_provider=args.generation_provider,
-            generation_model=args.generation_model,
-            ollama_base_url=args.ollama_base_url,
-            limit=args.limit,
-            retrieval_limit=args.retrieval_limit,
-            judge=judge,
-            judge_mode=args.judge_mode,
-        )
-    else:
-        document = generate_report_document(
-            args.benchmark,
-            answer_benchmark_path=args.answer_benchmark,
-            judge=judge,
-            judge_mode=args.judge_mode,
-        )
+    try:
+        if args.live:
+            if args.output == DEFAULT_OUTPUT_PATH:
+                args.output = DEFAULT_LIVE_OUTPUT_PATH
+            if args.markdown_output == DEFAULT_MARKDOWN_OUTPUT_PATH:
+                args.markdown_output = DEFAULT_LIVE_MARKDOWN_OUTPUT_PATH
+            document = generate_live_report_document(
+                args.golden_corpus,
+                answer_benchmark_path=args.answer_benchmark,
+                live_answer_corpus_path=args.answer_corpus,
+                live_answers=args.live_answers,
+                database_url=args.database_url,
+                opensearch_url=args.opensearch_url,
+                index_name=args.index_name,
+                api_url=args.api_url,
+                embedding_provider=args.embedding_provider,
+                embedding_model=args.embedding_model,
+                generation_provider=args.generation_provider,
+                generation_model=args.generation_model,
+                ollama_base_url=args.ollama_base_url,
+                limit=args.limit,
+                retrieval_limit=args.retrieval_limit,
+                judge=judge,
+                judge_mode=args.judge_mode,
+            )
+        else:
+            document = generate_report_document(
+                args.benchmark,
+                answer_benchmark_path=args.answer_benchmark,
+                judge=judge,
+                judge_mode=args.judge_mode,
+            )
+    except LLMJudgeError as exc:
+        logger.error("LLM semantic judge failed: %s", exc)
+        return 1
     should_record_run_metadata = args.live or args.record_run_metadata
     output_document = (
         _with_execution_metadata(document, started_at, started_perf)

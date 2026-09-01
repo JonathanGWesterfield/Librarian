@@ -12,7 +12,7 @@ from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase
 
 
 class LLMJudgeError(RuntimeError):
-    pass
+    """A semantic judge could not provide a trustworthy verdict."""
 
 
 class LLMJudge(Protocol):
@@ -140,9 +140,43 @@ class CodexJudge:
                 text=True,
                 timeout=self.timeout_seconds,
             )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise LLMJudgeError(f"could not run Codex judge: {exc}") from exc
+        except subprocess.CalledProcessError as exc:
+            raise LLMJudgeError(
+                f"Codex judge exited with code {exc.returncode}. "
+                f"{_safe_codex_stderr_diagnostic(exc.stderr)}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise LLMJudgeError(
+                f"Codex judge timed out after {self.timeout_seconds:.0f} seconds."
+            ) from exc
+        except OSError as exc:
+            raise LLMJudgeError(f"could not start Codex judge: {exc}") from exc
         return completed.stdout.strip()
+
+
+def _safe_codex_stderr_diagnostic(stderr: str | bytes | None) -> str:
+    """Keep a concise operator diagnostic without exposing bearer credentials."""
+
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    normalized = " ".join((stderr or "").split())
+    if not normalized:
+        return "Codex did not provide stderr; check Codex login, model access, and CLI configuration."
+    redacted = re.sub(
+        r"(?i)\bbearer\s+[^\s,;]+",
+        "Bearer [redacted]",
+        normalized,
+    )
+    redacted = re.sub(
+        r"(?i)\b(?:authorization|api[_ -]?key|token|secret|password|cookie)"
+        r"\s*(?:[:=]\s*|\s+)(?:(?:bearer)\s+)?[^\s,;]+",
+        "credential=[redacted]",
+        redacted,
+    )
+    redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "sk-[redacted]", redacted)
+    if len(redacted) > 800:
+        redacted = f"{redacted[:800]} [stderr truncated]"
+    return f"Codex stderr: {redacted}"
 
 
 @dataclass(frozen=True)
