@@ -39,6 +39,13 @@ contains no local host or provider configuration. Compose implements that
 route with the bundled Nginx proxy; another host must provide an equivalent
 reverse-proxy rule.
 
+## Caching
+
+The Nginx runtime revalidates `index.html` on every navigation, including the
+SPA fallback. This prevents a browser from keeping an old application shell
+after an image update changes Vite's hashed JavaScript or CSS filenames.
+Fingerprinted files under `/assets/` are cached as immutable for one year.
+
 ## Deploy
 
 Deploy `apps/web` to Cloudflare Pages with `npm run build` and `dist/` as the
