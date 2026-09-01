@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Generator as IteratorGenerator, Iterator
 from dataclasses import asdict, dataclass, field
 import logging
 import re
@@ -38,7 +38,14 @@ logger = logging.getLogger(__name__)
 
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+_STREAM_COMPLETE_SENTENCE = re.compile(
+    r"(?P<sentence>.+?[.!?](?:\s*\[S\d+\])*)\s+(?=[^\s\[])",
+    re.DOTALL,
+)
 _WORD = re.compile(r"[a-z0-9]+")
+_SOURCE_CITATION = re.compile(r"\s*\[S\d+\]")
+_TRAILING_SOURCE_CITATIONS = re.compile(r"^.+[.!?](?:\s*\[S\d+\])+$")
+_TRAILING_COMPLETE_STREAM_SENTENCE = re.compile(r"^.+[.!?]$")
 _LOOKUP_QUESTION_PREFIXES = ("what", "who", "when", "where", "which", "name")
 _AUTHOR_VIEW_TERMS = frozenset(
     {
@@ -216,6 +223,7 @@ class PreparedChat:
     generator: Generator
     answer_capability: str
     retrieval_limit: int
+    required_sources: int
     embedding_provider: str
     embedding_model: str
     candidate_count: int
@@ -228,8 +236,11 @@ class PreparedChat:
     messages: list[ChatMessage]
     immediate_answer: str | None
 
-    def retrieval_event(self) -> dict[str, object]:
+    def retrieval_event(
+        self, sources: list[ChatSource] | None = None
+    ) -> dict[str, object]:
         """Return safe metadata after all evidence guards have run."""
+        event_sources = self.sources if sources is None else sources
         return {
             "question": self.question,
             "embedding_provider": self.embedding_provider,
@@ -241,7 +252,7 @@ class PreparedChat:
             "candidate_count": self.candidate_count,
             "filters": self.filters,
             "retrieval_backend": self.retrieval_backend,
-            "sources": [source.to_dict() for source in self.sources],
+            "sources": [source.to_dict() for source in event_sources],
             "timings": {
                 "query_embedding_seconds": self.query_embedding_seconds,
                 "retrieval_seconds": self.retrieval_seconds,
@@ -353,6 +364,7 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         generator=generator,
         answer_capability=answer_capability,
         retrieval_limit=retrieval_limit,
+        required_sources=required_sources,
         embedding_provider=search_response.embedding_provider,
         embedding_model=search_response.embedding_model,
         candidate_count=search_response.candidate_count,
@@ -385,37 +397,46 @@ def answer_question(options: ChatOptions) -> ChatResponse:
 
 
 def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEvent]:
-    """Yield an evidence-ready event, answer text, and one terminal event.
+    """Yield only source-verified answer sentences over the streaming contract.
 
-    Ollama's native newline-delimited streaming protocol is preserved all the
-    way to the caller. Other generators deliberately retain their established
-    complete-response transport and emit their answer in ``complete``.
+    Native Ollama fragments are held until a sentence boundary and accepted
+    only when one retrieved source sentence covers every meaningful claim term.
+    This prevents a browser from displaying a plausible-but-unsupported token
+    before the normal final-response guard can correct it.
     """
-    yield ChatStreamEvent("retrieval", preparation.retrieval_event())
     generation_started = perf_counter()
     first_token_seconds: float | None = None
-    answer_parts: list[str] = []
+    response_sources = preparation.sources
+    retrieval_emitted = False
+
+    def emit_retrieval(sources: list[ChatSource]) -> ChatStreamEvent:
+        nonlocal retrieval_emitted
+        retrieval_emitted = True
+        return ChatStreamEvent("retrieval", preparation.retrieval_event(sources))
+
     try:
         if preparation.immediate_answer is not None:
             answer = preparation.immediate_answer
+            yield emit_retrieval(response_sources)
         elif isinstance(preparation.generator, StreamingGenerator):
-            for text in preparation.generator.stream(preparation.messages):
-                if not text:
-                    continue
-                if first_token_seconds is None:
-                    first_token_seconds = perf_counter() - preparation.total_started
-                answer_parts.append(text)
-                yield ChatStreamEvent("token", {"text": text})
-            answer = "".join(answer_parts).strip()
-            if not answer:
-                raise GenerationError("generation provider returned no streamed answer text")
+            (
+                answer,
+                response_sources,
+                first_token_seconds,
+                retrieval_emitted,
+            ) = yield from _stream_verified_ollama_answer(
+                preparation,
+                emit_retrieval=emit_retrieval,
+            )
         else:
+            yield emit_retrieval(response_sources)
             answer = preparation.generator.generate(preparation.messages)
 
         response = _response_from_preparation(
             preparation,
             answer=answer,
             generation_seconds=perf_counter() - generation_started,
+            sources=response_sources,
         )
         completed = response.to_dict()
         timings = dict(response.timings.to_dict())
@@ -423,6 +444,8 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
         completed["timings"] = timings
         yield ChatStreamEvent("complete", completed)
     except (GenerationError, RuntimeError, ValueError, NotImplementedError) as error:
+        if not retrieval_emitted:
+            yield emit_retrieval(response_sources)
         yield ChatStreamEvent(
             "error",
             {
@@ -436,11 +459,112 @@ def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEven
         )
 
 
+def _stream_verified_ollama_answer(
+    preparation: PreparedChat,
+    *,
+    emit_retrieval: Callable[[list[ChatSource]], ChatStreamEvent],
+) -> IteratorGenerator[
+    ChatStreamEvent,
+    None,
+    tuple[str, list[ChatSource], float | None, bool],
+]:
+    """Validate native fragments before yielding any user-visible answer text.
+
+    The return tuple is consumed with ``yield from`` by ``stream_answer_question``:
+    answer, sources for the final response, time-to-first-token, and whether
+    retrieval has been emitted.  Delaying retrieval until a first safe sentence
+    lets a semantic refusal use the existing no-citation response behavior.
+    """
+    buffered = ""
+    safe_sentences: list[str] = []
+    first_token_seconds: float | None = None
+    retrieval_emitted = False
+    unsafe_generation = False
+
+    stream = preparation.generator.stream(preparation.messages)
+    try:
+        for text in stream:
+            if not text:
+                continue
+            buffered += text
+            sentences, buffered = _take_complete_stream_sentences(buffered)
+            for sentence in sentences:
+                if not _stream_sentence_is_source_supported(sentence, preparation.sources):
+                    unsafe_generation = True
+                    break
+                if not retrieval_emitted:
+                    yield emit_retrieval(preparation.sources)
+                    retrieval_emitted = True
+                token = sentence if not safe_sentences else f" {sentence}"
+                if first_token_seconds is None:
+                    first_token_seconds = perf_counter() - preparation.total_started
+                safe_sentences.append(sentence)
+                yield ChatStreamEvent("token", {"text": token})
+            if unsafe_generation:
+                break
+    finally:
+        if unsafe_generation:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+    if not unsafe_generation and (
+        _TRAILING_SOURCE_CITATIONS.match(buffered.strip())
+        or _TRAILING_COMPLETE_STREAM_SENTENCE.match(buffered.strip())
+    ):
+        sentence = buffered.strip()
+        if _stream_sentence_is_source_supported(sentence, preparation.sources):
+            if not retrieval_emitted:
+                yield emit_retrieval(preparation.sources)
+                retrieval_emitted = True
+            token = sentence if not safe_sentences else f" {sentence}"
+            if first_token_seconds is None:
+                first_token_seconds = perf_counter() - preparation.total_started
+            safe_sentences.append(sentence)
+            buffered = ""
+            yield ChatStreamEvent("token", {"text": token})
+        else:
+            unsafe_generation = True
+
+    if not unsafe_generation and buffered.strip():
+        # A partial fragment has no sentence boundary, so it is not safe to
+        # expose as an independently verifiable claim.
+        unsafe_generation = True
+
+    if safe_sentences:
+        return " ".join(safe_sentences), preparation.sources, first_token_seconds, retrieval_emitted
+
+    fallback = _stream_extractive_fallback(preparation.question, preparation.sources)
+    if fallback is not None:
+        if not retrieval_emitted:
+            yield emit_retrieval(preparation.sources)
+            retrieval_emitted = True
+        if first_token_seconds is None:
+            first_token_seconds = perf_counter() - preparation.total_started
+        yield ChatStreamEvent("token", {"text": fallback})
+        return fallback, preparation.sources, first_token_seconds, retrieval_emitted
+
+    sources: list[ChatSource] = []
+    if not retrieval_emitted:
+        yield emit_retrieval(sources)
+        retrieval_emitted = True
+    return (
+        _insufficient_evidence_answer(
+            publication_question=_asks_for_publication_metadata(preparation.question),
+            required_sources=preparation.required_sources,
+        ),
+        sources,
+        None,
+        retrieval_emitted,
+    )
+
+
 def _response_from_preparation(
     preparation: PreparedChat,
     *,
     answer: str,
     generation_seconds: float,
+    sources: list[ChatSource] | None = None,
 ) -> ChatResponse:
     """Build the existing JSON response shape from shared prepared evidence."""
 
@@ -454,7 +578,7 @@ def _response_from_preparation(
         retrieval_limit=preparation.retrieval_limit,
         candidate_count=preparation.candidate_count,
         filters=preparation.filters,
-        sources=preparation.sources,
+        sources=preparation.sources if sources is None else sources,
         answer_capability=preparation.answer_capability,
         retrieval_backend=preparation.retrieval_backend,
         timings=ChatTimings(
@@ -745,6 +869,62 @@ def _format_sources(sources: list[ChatSource]) -> str:
             )
         )
     return "\n\n".join(formatted)
+
+
+def _take_complete_stream_sentences(text: str) -> tuple[list[str], str]:
+    """Split sentences only once a citation suffix or next sentence is known."""
+    sentences: list[str] = []
+    offset = 0
+    while match := _STREAM_COMPLETE_SENTENCE.match(text, offset):
+        sentences.append(match.group("sentence").strip())
+        offset = match.end()
+    return sentences, text[offset:]
+
+
+def _stream_sentence_is_source_supported(
+    sentence: str, sources: list[ChatSource]
+) -> bool:
+    """Accept a stream sentence only when one source covers all claim terms.
+
+    This deliberately does not try to prove an inference assembled across two
+    passages. A quality model can still synthesize in the complete JSON route,
+    but real-time output must meet the stronger no-speculation contract.
+    """
+    candidate_terms = _meaningful_terms(_SOURCE_CITATION.sub("", sentence))
+    if not candidate_terms:
+        return False
+    return any(
+        candidate_terms <= _meaningful_terms(source_sentence)
+        for source in sources
+        for source_sentence in _sentences(source.text)
+    )
+
+
+def _stream_extractive_fallback(
+    question: str, sources: list[ChatSource]
+) -> str | None:
+    """Return one relevant, verbatim sentence when synthesis is unsupported."""
+    lookup = _lightweight_lookup_answer(question, sources)
+    if lookup is not None:
+        return lookup
+
+    question_terms = _meaningful_terms(question)
+    if not question_terms:
+        return None
+    best: tuple[float, int, ChatSource, str] | None = None
+    for source in sources:
+        for sentence in _sentences(source.text):
+            overlap = len(question_terms & _meaningful_terms(sentence))
+            coverage = overlap / len(question_terms)
+            candidate = (coverage, overlap, source, sentence)
+            if best is None or candidate[:2] > best[:2]:
+                best = candidate
+    if best is None:
+        return None
+    coverage, overlap, source, sentence = best
+    if overlap == 0 or coverage < 0.5:
+        return None
+    return f"{sentence} [{source.source_id}]"
 
 
 def _lightweight_lookup_answer(question: str, sources: list[ChatSource]) -> str | None:
