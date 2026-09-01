@@ -1,7 +1,7 @@
 [project]
 name = "librarian-codex-broker"
 version = "0.1.0"
-description = "Host-side wrapper around Codex CLI for Librarian answer synthesis."
+description = "Compose-native, authenticated Codex CLI broker for Librarian."
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0",

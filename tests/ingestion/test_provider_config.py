@@ -64,8 +64,8 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.evaluation.enforcing_judge.provider, "codex")
         self.assertEqual(config.evaluation.advisory_judge.provider, "ollama")
 
-    def test_base_profile_is_complete_without_tracking_its_gateway_token(self) -> None:
-        """The tracked Codex-gateway baseline needs only a local ignored secret file."""
+    def test_base_profile_is_complete_without_tracking_its_broker_token(self) -> None:
+        """The tracked Compose Codex baseline needs only an ignored broker token."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / "librarian.json"
@@ -85,7 +85,8 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.embedding.provider, "ollama")
         self.assertEqual(config.embedding.model, "all-minilm")
         self.assertEqual(config.generation.provider, "openai_compatible")
-        self.assertEqual(config.generation.model, "codex")
+        self.assertEqual(config.generation.mode, "docker_codex_broker")
+        self.assertEqual(config.generation.model, "gpt-5.6")
         self.assertEqual(config.generation.answer_capability, "quality")
         self.assertEqual(config.generation.api_key, "test-bridge-token")
         self.assertEqual(config.semantic_source_selector.model, "gpt-5.6")
@@ -105,7 +106,7 @@ class LibrarianConfigTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 LibrarianConfigError,
-                "semantic_source_selector.provider must be codex",
+                "semantic_source_selector.provider must be codex or docker_codex_broker",
             ):
                 get_librarian_config(path)
 
@@ -203,7 +204,7 @@ class LibrarianConfigTests(unittest.TestCase):
         """Embedding and generation transports are independently selected."""
         modes = ("docker_ollama", "native_ollama", "openai_compatible")
         for embedding_mode in modes:
-            for generation_mode in (*modes, "codex"):
+            for generation_mode in (*modes, "docker_codex_broker", "codex"):
                 with self.subTest(embedding=embedding_mode, generation=generation_mode):
                     with tempfile.TemporaryDirectory() as directory:
                         root = Path(directory)
@@ -221,7 +222,11 @@ class LibrarianConfigTests(unittest.TestCase):
                     )
                     self.assertEqual(
                         config.generation.provider,
-                        "ollama" if generation_mode.endswith("ollama") else generation_mode,
+                        "ollama"
+                        if generation_mode.endswith("ollama")
+                        else "openai_compatible"
+                        if generation_mode == "docker_codex_broker"
+                        else generation_mode,
                     )
                     clear_librarian_config_cache()
 
@@ -317,13 +322,42 @@ class LibrarianConfigTests(unittest.TestCase):
 
         self.assertEqual(
             resolver.render_state(config),
-            {"docker_ollama_enabled": True, "api_port": 8059, "web_port": 3059},
+            {
+                "docker_ollama_enabled": True,
+                "docker_codex_broker_enabled": False,
+                "api_port": 8059,
+                "web_port": 3059,
+            },
         )
         override = resolver.render_compose_override(config)
         services = override["services"]
         self.assertEqual(services["api"]["ports"], ["8059:8000"])
         self.assertEqual(services["web"]["ports"], ["3059:8080"])
         self.assertEqual(services["ollama-init"]["environment"], {"OLLAMA_INIT_MODELS": "all-minilm,qwen2.5:1.5b"})
+
+    def test_compose_codex_broker_is_selected_only_by_its_json_mode(self) -> None:
+        """The internal broker is enabled by config without exposing credentials."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            _write_config(
+                path,
+                generation=_selection("docker_codex_broker", "generation"),
+            )
+            _write_secret_files(root, "docker_ollama", "docker_codex_broker")
+            config = get_librarian_config(path)
+            state = resolver.render_state(config)
+            override = resolver.render_compose_override(config)
+
+        self.assertTrue(state["docker_codex_broker_enabled"])
+        self.assertEqual(
+            override["services"]["api"]["depends_on"],
+            {
+                "opensearch": {"condition": "service_healthy"},
+                "codex-broker": {"condition": "service_healthy"},
+            },
+        )
+        self.assertNotIn("generation-secret", json.dumps(override))
 
 
 def _write_config(
@@ -353,6 +387,13 @@ def _selection(mode: str, role: str) -> dict[str, object]:
         }
     if mode == "codex":
         return {"mode": mode, "model": "codex"}
+    if mode == "docker_codex_broker":
+        return {
+            "mode": mode,
+            "model": "gpt-5.6",
+            "api_key_file": f"secrets/{role}.token",
+            "answer_capability": "quality",
+        }
     return {
         "mode": mode,
         "model": f"{role}-gateway",
@@ -366,7 +407,7 @@ def _write_secret_files(root: Path, embedding_mode: str, generation_mode: str) -
     secrets.mkdir(exist_ok=True)
     if embedding_mode == "openai_compatible":
         (secrets / "embedding.token").write_text("embedding-secret\n", encoding="utf-8")
-    if generation_mode == "openai_compatible":
+    if generation_mode in {"openai_compatible", "docker_codex_broker"}:
         (secrets / "generation.token").write_text("generation-secret\n", encoding="utf-8")
 
 

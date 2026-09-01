@@ -26,12 +26,13 @@ CONFIG_DIRECTORY_NAME = "config"
 CONTAINER_CONFIG_PATH = Path("/config") / CONFIG_FILENAME
 _ALLOWED_PROVIDER_MODES = {
     "docker_ollama",
+    "docker_codex_broker",
     "native_ollama",
     "openai_compatible",
     "codex",
 }
 _ALLOWED_ANSWER_CAPABILITIES = {"quality", "lightweight"}
-_ALLOWED_SEMANTIC_SELECTOR_PROVIDERS = {"codex"}
+_ALLOWED_SEMANTIC_SELECTOR_PROVIDERS = {"codex", "docker_codex_broker"}
 _ALLOWED_EVALUATION_JUDGE_PROVIDERS = {"codex", "ollama"}
 _HTTP_HEADER_NAME = frozenset(
     "!#$%&'*+.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-"
@@ -74,6 +75,8 @@ class ProviderSettings:
     def provider(self) -> str:
         if self.mode in {"docker_ollama", "native_ollama"}:
             return "ollama"
+        if self.mode == "docker_codex_broker":
+            return "openai_compatible"
         return self.mode
 
     @property
@@ -87,6 +90,10 @@ class ProviderSettings:
     @property
     def uses_docker_ollama(self) -> bool:
         return self.mode == "docker_ollama"
+
+    @property
+    def uses_docker_codex_broker(self) -> bool:
+        return self.mode == "docker_codex_broker"
 
 
 @dataclass(frozen=True)
@@ -159,6 +166,11 @@ class LibrarianConfig:
     @property
     def uses_docker_ollama(self) -> bool:
         return self.embedding.uses_docker_ollama or self.generation.uses_docker_ollama
+
+    @property
+    def uses_docker_codex_broker(self) -> bool:
+        """Whether Compose must start the internal Codex CLI broker."""
+        return self.generation.uses_docker_codex_broker
 
 
 def default_config_path(*, cwd: Path | None = None) -> Path:
@@ -426,10 +438,12 @@ def _parse_provider(value: object, *, role: str, config_root: Path) -> ProviderS
         role,
     )
     mode = _require_string(provider.get("mode"), f"{role}.mode").casefold()
-    if mode not in _ALLOWED_PROVIDER_MODES or (mode == "codex" and role != "generation"):
+    if mode not in _ALLOWED_PROVIDER_MODES or (
+        mode in {"codex", "docker_codex_broker"} and role != "generation"
+    ):
         allowed = "docker_ollama, native_ollama, openai_compatible"
         if role == "generation":
-            allowed += ", codex"
+            allowed += ", docker_codex_broker, codex"
         raise LibrarianConfigError(f"{role}.mode must be one of: {allowed}")
     model = _require_string(provider.get("model"), f"{role}.model")
     if role != "generation" and "answer_capability" in provider:
@@ -446,6 +460,21 @@ def _parse_provider(value: object, *, role: str, config_root: Path) -> ProviderS
             role=role,
             mode=mode,
             model=model,
+            answer_capability=answer_capability,
+        )
+    if mode == "docker_codex_broker":
+        _reject_present(provider, {"base_url", "headers", "header_files"}, role)
+        return ProviderSettings(
+            role=role,
+            mode=mode,
+            model=model,
+            base_url="http://codex-broker:3000/v1",
+            api_key=_read_secret_file(
+                _require_string(provider.get("api_key_file"), f"{role}.api_key_file"),
+                config_root=config_root,
+                label=f"{role}.api_key_file",
+            ),
+            headers={},
             answer_capability=answer_capability,
         )
     if mode == "native_ollama":
@@ -529,9 +558,10 @@ def _parse_summaries(value: object) -> SummarySettings:
 def _parse_semantic_source_selector(value: object) -> SemanticSourceSelectorSettings:
     """Parse the trusted, source-ID-only semantic selector policy.
 
-    Codex is intentionally the sole supported selector.  A small local model
-    may be useful for smoke testing JSON transport, but it is not trusted to
-    choose semantic evidence for user-visible answers.
+    Codex is intentionally the sole trusted selector family. A direct Codex
+    CLI or the internal Compose Codex broker may transport it; a small local
+    model may be useful for smoke testing JSON transport, but it is not trusted
+    to choose semantic evidence for user-visible answers.
     """
 
     # Existing user-owned version-1 JSON files predate this optional feature.
@@ -553,7 +583,7 @@ def _parse_semantic_source_selector(value: object) -> SemanticSourceSelectorSett
     ).casefold()
     if provider not in _ALLOWED_SEMANTIC_SELECTOR_PROVIDERS:
         raise LibrarianConfigError(
-            "semantic_source_selector.provider must be codex"
+            "semantic_source_selector.provider must be codex or docker_codex_broker"
         )
     return SemanticSourceSelectorSettings(
         enabled=enabled,

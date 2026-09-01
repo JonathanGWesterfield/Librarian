@@ -292,6 +292,85 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(events[-1].data["sources"][0]["source_id"], "S1")
         self.assertEqual(generator.messages, [])
 
+    def test_docker_ollama_path_spans_retrieved_event_chunks_for_followup_wording(self) -> None:
+        """Natural multi-part event wording returns both exact fixture sentences.
+
+        This is deliberately a deterministic Docker-Ollama-shaped test: no
+        Codex selector is present, so the exact-source fallback must bridge a
+        retrieved chunk boundary without adding unrelated narration.
+        """
+        question = (
+            "What did Mara do to open the garden gate, and what happened "
+            "immediately afterward?"
+        )
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_two_source_chat_search_response(question),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:1.5b",
+                    answer_capability="lightweight",
+                )
+            )
+
+        self.assertEqual(
+            response.answer,
+            "Mara opened the garden gate with a borrowed key. [S1]\n\n"
+            "The clockwork garden answered in careful ticking. [S2]",
+        )
+        self.assertEqual([source.source_id for source in response.sources], ["S1", "S2"])
+        self.assertNotIn("brass robin", response.answer.casefold())
+        self.assertEqual(generator.messages, [])
+
+    def test_cross_chunk_event_context_rejects_unrelated_retrieved_sentence(self) -> None:
+        """A retrieved but unrelated chunk cannot satisfy an event follow-up."""
+        question = (
+            "What did Mara do to open the garden gate, and what happened "
+            "immediately afterward?"
+        )
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_two_source_chat_search_response(
+                    question,
+                    second_text="A brass robin counted three silver seeds.",
+                ),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:1.5b",
+                    answer_capability="lightweight",
+                )
+            )
+
+        self.assertEqual(
+            response.answer,
+            "Mara opened the garden gate with a borrowed key. [S1]",
+        )
+        self.assertNotIn("brass robin", response.answer.casefold())
+
     def test_event_context_rule_skips_an_unrelated_next_sentence(self) -> None:
         """Sentence adjacency alone must not drag unrelated prose into an answer."""
         question = "What happened when Mara opened the garden gate?"
@@ -1447,7 +1526,11 @@ def _chat_search_response(
     )
 
 
-def _two_source_chat_search_response(question: str) -> SearchResponse:
+def _two_source_chat_search_response(
+    question: str,
+    *,
+    second_text: str = "The clockwork garden answered in careful ticking.",
+) -> SearchResponse:
     """Provide two separately citable sentences for stream-boundary coverage."""
     return SearchResponse(
         query=question,
@@ -1480,7 +1563,7 @@ def _two_source_chat_search_response(question: str) -> SearchResponse:
                 authors=["Test Author"],
                 publisher="Fixture Press",
                 chunk_index=1,
-                text="The clockwork garden answered in careful ticking.",
+                text=second_text,
                 embedding_provider="ollama",
                 embedding_model="all-minilm",
                 dimensions=2,

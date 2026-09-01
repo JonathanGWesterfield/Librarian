@@ -322,10 +322,10 @@ def create_configured_generator(
     ollama_base_url: str | None = None,
 ) -> Generator:
     resolved_provider = resolve_generation_provider(provider)
-    if resolved_provider.strip().casefold() == "codex" and model is None:
-        resolved_model = "codex"
-    else:
-        resolved_model = resolve_generation_model(model)
+    # Direct Codex remains a normal JSON-configured generation provider.  Do
+    # not replace a configured model (for example ``gpt-5.6``) with the legacy
+    # ``codex`` placeholder simply because this request did not override it.
+    resolved_model = resolve_generation_model(model)
     normalized = resolved_provider.strip().casefold()
     if normalized == "ollama":
         return create_generator(

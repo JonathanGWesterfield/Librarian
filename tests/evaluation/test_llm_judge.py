@@ -1,4 +1,5 @@
 import json
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -114,6 +115,26 @@ class LLMJudgeTests(unittest.TestCase):
             run.call_args.args[0],
             ["codex", "exec", "--model", "gpt-5.6", "--ephemeral", "judge this answer"],
         )
+
+    def test_codex_judge_surfaces_safe_exit_and_stderr_diagnostics(self) -> None:
+        """An unavailable Codex gate must fail with actionable, redacted detail."""
+        error = subprocess.CalledProcessError(
+            returncode=17,
+            cmd=["codex", "exec"],
+            stderr="not logged in; token=should-not-leak",
+        )
+        with patch(
+            "librarian_evaluation.llm_judge.subprocess.run", side_effect=error
+        ):
+            with self.assertRaisesRegex(
+                LLMJudgeError, "Codex judge exited with code 17"
+            ) as raised:
+                CodexJudge(model="gpt-5.6").judge("judge this answer")
+
+        message = str(raised.exception)
+        self.assertIn("not logged in", message)
+        self.assertIn("credential=[redacted]", message)
+        self.assertNotIn("should-not-leak", message)
 
     def test_enforcing_codex_failure_never_falls_back_to_ollama(self) -> None:
         """A failed quality gate must surface its Codex transport error directly."""

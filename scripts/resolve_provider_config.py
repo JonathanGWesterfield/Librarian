@@ -49,6 +49,16 @@ def render_compose_override(
             ]
         },
     }
+    if config.uses_docker_codex_broker:
+        # State both dependencies in the generated override rather than relying
+        # on Compose's map-merge behavior. The API must never trade its
+        # OpenSearch readiness guarantee for the optional generation broker.
+        runtime_dependencies = {
+            "opensearch": {"condition": "service_healthy"},
+            "codex-broker": {"condition": "service_healthy"},
+        }
+        services["api"]["depends_on"] = runtime_dependencies
+        services["summary-worker"]["depends_on"] = runtime_dependencies
     if publish_host_ports:
         services["opensearch"]["ports"] = [f"{config.services.opensearch_port}:9200"]
         services["api"]["ports"] = [f"{config.services.api_port}:8000"]
@@ -60,6 +70,7 @@ def render_state(config: LibrarianConfig) -> dict[str, bool | int]:
     """Return non-secret launch state derived from the authoritative JSON file."""
     return {
         "docker_ollama_enabled": config.uses_docker_ollama,
+        "docker_codex_broker_enabled": config.uses_docker_codex_broker,
         "api_port": config.services.api_port,
         "web_port": config.services.web_port,
     }

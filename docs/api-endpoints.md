@@ -30,6 +30,38 @@ Common error behavior:
 - `422`: request body or query parameters do not match FastAPI/Pydantic
   validation.
 
+## Internal Codex broker
+
+When `generation.mode` is `docker_codex_broker`, Compose starts an
+internal-only service named `codex-broker`. It has no published host port and
+is not a browser or third-party integration surface. The API and summary worker
+call it with the ignored token configured by `generation.api_key_file`.
+
+### `GET /health` on `codex-broker:3000`
+
+Compose healthcheck used to wait before API/worker generation traffic starts.
+It returns `{"status":"ok"}` when the broker process is running. It does not
+make a Codex request or expose login state.
+
+### `POST /v1/chat/completions` on `codex-broker:3000`
+
+Accepts the non-streaming OpenAI-compatible subset used internally:
+
+```json
+{
+  "model": "gpt-5.6",
+  "messages": [{"role": "user", "content": "Use these passages."}],
+  "stream": false
+}
+```
+
+The broker requires `Authorization: Bearer <token>`, accepts only the model in
+`librarian.json`, and returns a standard `choices[0].message.content` response.
+It invokes `codex exec --model <model> --ephemeral` inside the broker container.
+`401` means the internal token was absent or invalid; `502` means Codex itself
+failed and gives the one-time broker-login recovery command without echoing CLI
+stderr or credentials.
+
 ## Ingestion
 
 ### `GET /ingestion/status`

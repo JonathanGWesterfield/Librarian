@@ -1,7 +1,9 @@
 import json
 import sys
+import tempfile
 import unittest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
@@ -16,6 +18,7 @@ from librarian_chat.generation import (
     create_configured_generator,
     create_generator,
 )
+from librarian_config.config import clear_librarian_config_cache
 
 
 class GenerationProviderTests(unittest.TestCase):
@@ -72,15 +75,30 @@ class GenerationProviderTests(unittest.TestCase):
         self.assertIsInstance(generator, OllamaGenerator)
         self.assertEqual(generator.model, "llama3.2:3b")
 
-    def test_create_configured_generator_defaults_codex_model(self) -> None:
-        """Verify Codex does not inherit the local Ollama default model name.
-        This keeps provider/model metadata honest for summary rebuilds and
-        comparisons when callers only pass `--generation-provider codex`.
-        """
-        generator = create_configured_generator(provider="codex")
+    def test_configured_direct_codex_generator_honors_its_json_model(self) -> None:
+        """An un-overridden direct Codex request keeps the configured model name."""
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "librarian.json"
+            payload = json.loads(
+                (REPO_ROOT / "config" / "librarian.example.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            payload["generation"] = {
+                "mode": "codex",
+                "model": "gpt-5.6",
+                "answer_capability": "quality",
+            }
+            config_path.write_text(json.dumps(payload), encoding="utf-8")
+            with patch(
+                "librarian_config.config.default_config_path", return_value=config_path
+            ):
+                clear_librarian_config_cache()
+                generator = create_configured_generator()
 
         self.assertIsInstance(generator, CodexGenerator)
-        self.assertEqual(generator.model, "codex")
+        self.assertEqual(generator.model, "gpt-5.6")
+        clear_librarian_config_cache()
 
     def test_ollama_generator_posts_messages_to_chat_endpoint(self) -> None:
         """Verify the Ollama adapter speaks the non-streaming chat API shape.

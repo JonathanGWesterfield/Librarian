@@ -2,9 +2,9 @@
 # Start the Docker Compose Librarian stack from a Bash-compatible shell.
 #
 # A Docker-resident resolver reads config/librarian.json, then selects either
-# Docker Ollama, native Ollama, or a remote OpenAI-compatible gateway for
-# embeddings and generation independently. It never reads settings or secrets
-# from shell environment variables.
+# Docker Ollama, native Ollama, a Compose-native Codex broker, or a remote
+# OpenAI-compatible gateway for embeddings and generation independently. It
+# never reads settings or secrets from shell environment variables.
 #
 # Examples:
 #   scripts/start_local.sh
@@ -161,10 +161,15 @@ verify_docker_ollama_models() {
 }
 
 docker_ollama_enabled="$(read_state_value docker_ollama_enabled)"
+docker_codex_broker_enabled="$(read_state_value docker_codex_broker_enabled)"
 api_port="$(read_state_value api_port)"
 web_port="$(read_state_value web_port)"
 if [[ "$docker_ollama_enabled" != "true" && "$docker_ollama_enabled" != "false" ]]; then
   printf '%s\n' '[librarian] Configuration resolver did not produce a valid Docker-Ollama selection.' >&2
+  exit 1
+fi
+if [[ "$docker_codex_broker_enabled" != "true" && "$docker_codex_broker_enabled" != "false" ]]; then
+  printf '%s\n' '[librarian] Configuration resolver did not produce a valid Docker Codex broker selection.' >&2
   exit 1
 fi
 if [[ ! "$api_port" =~ ^[0-9]+$ ]] || ((api_port < 1 || api_port > 65535)); then
@@ -178,6 +183,9 @@ fi
 
 if [[ "$WITH_WORKERS" == "true" ]]; then
   compose_args+=(--profile workers)
+fi
+if [[ "$docker_codex_broker_enabled" == "true" ]]; then
+  compose_args+=(--profile codex-broker)
 fi
 if [[ "$docker_ollama_enabled" == "true" ]]; then
   compose_args+=(--profile docker-ollama)
