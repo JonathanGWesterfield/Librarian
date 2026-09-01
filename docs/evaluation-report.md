@@ -106,8 +106,8 @@ against these expected EPUB filenames.
 
 LLM-as-judge evaluation was not measured for this report.
 
-Run `python3 scripts/evaluate_retrieval.py --llm-judge` to score
-answer quality with Codex by default and Ollama as fallback.
+Run `python3 scripts/evaluate_retrieval.py --llm-judge` to run
+the JSON-configured enforcing Codex quality gate.
 
 ### Weakest Cases
 

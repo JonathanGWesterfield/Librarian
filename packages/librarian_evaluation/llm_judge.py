@@ -7,12 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Literal, Protocol
 from urllib import error, request
 
-from librarian_chat.generation import (
-    ChatMessage,
-    GenerationError,
-    Generator,
-    create_configured_generator,
-)
+from librarian_config.config import resolve_codex_executable
 from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase
 
 
@@ -32,6 +27,7 @@ EvidenceVerdict = Literal["supported", "contradicted", "insufficient"]
 CitationRelevance = Literal[
     "all_relevant", "partially_relevant", "irrelevant", "not_applicable"
 ]
+JudgeMode = Literal["enforcing", "advisory"]
 
 
 @dataclass(frozen=True)
@@ -89,8 +85,7 @@ class LLMJudgeAggregateMetrics:
 class LLMJudgeReport:
     provider: str
     model: str
-    fallback_provider: str | None
-    fallback_used: bool
+    mode: JudgeMode
     metric_type: str
     aggregate: LLMJudgeAggregateMetrics
     cases: list[LLMJudgeCaseMetrics]
@@ -99,8 +94,7 @@ class LLMJudgeReport:
         return {
             "provider": self.provider,
             "model": self.model,
-            "fallback_provider": self.fallback_provider,
-            "fallback_used": self.fallback_used,
+            "mode": self.mode,
             "metric_type": self.metric_type,
             "aggregate": self.aggregate.to_dict(),
             "expectation_case_count": sum(
@@ -126,13 +120,21 @@ class StaticJudge:
 @dataclass(frozen=True)
 class CodexJudge:
     model: str = "codex"
+    executable: str = "codex"
     timeout_seconds: float = 240.0
     provider: str = "codex"
 
     def judge(self, prompt: str) -> str:
         try:
             completed = subprocess.run(
-                ["codex", "exec", "--model", self.model, "--ephemeral", prompt],
+                [
+                    self.executable,
+                    "exec",
+                    "--model",
+                    self.model,
+                    "--ephemeral",
+                    prompt,
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -141,39 +143,6 @@ class CodexJudge:
         except (OSError, subprocess.SubprocessError) as exc:
             raise LLMJudgeError(f"could not run Codex judge: {exc}") from exc
         return completed.stdout.strip()
-
-
-@dataclass(frozen=True)
-class ConfiguredGeneratorJudge:
-    """Opt-in judge that uses the existing JSON-configured generation provider."""
-
-    generator: Generator
-
-    @property
-    def provider(self) -> str:
-        return self.generator.provider
-
-    @property
-    def model(self) -> str:
-        return self.generator.model
-
-    def judge(self, prompt: str) -> str:
-        try:
-            return self.generator.generate(
-                [
-                    ChatMessage(
-                        role="system",
-                        content=(
-                            "You are a strict source-only RAG evaluator. Return only "
-                            "the requested JSON object."
-                        ),
-                    ),
-                    ChatMessage(role="user", content=prompt),
-                ],
-                response_format="json",
-            )
-        except GenerationError as exc:
-            raise LLMJudgeError(f"configured judge failed: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -228,10 +197,11 @@ def create_judge(
     ollama_base_url: str,
 ) -> LLMJudge:
     normalized = provider.strip().casefold()
-    if normalized == "configured":
-        return ConfiguredGeneratorJudge(create_configured_generator())
     if normalized == "codex":
-        return CodexJudge(model=model or "codex")
+        return CodexJudge(
+            model=model or "codex",
+            executable=resolve_codex_executable(),
+        )
     if normalized == "ollama":
         return OllamaJudge(model=model, base_url=ollama_base_url)
     raise ValueError(f"unsupported LLM judge provider: {provider}")
@@ -242,42 +212,50 @@ def evaluate_answers_with_llm_judge(
     candidates_by_case: dict[str, AnswerCandidate],
     *,
     judge: LLMJudge,
-    fallback_judge: LLMJudge | None = None,
+    mode: JudgeMode = "enforcing",
 ) -> LLMJudgeReport:
-    active_judge = judge
-    fallback_used = False
+    """Score semantic quality under an explicit enforcing or advisory policy.
+
+    Only a Codex judge is trusted to enforce answer-quality expectations. A
+    local Ollama judge remains useful for validating transport, schema, and
+    report rendering, but its semantic verdict can never become a quality gate.
+    """
+
+    _validate_judge_mode(mode, judge)
     case_metrics: list[LLMJudgeCaseMetrics] = []
 
     for case in cases:
         candidate = candidates_by_case.get(case.id, AnswerCandidate(answer="", sources=[]))
         prompt = _build_judge_prompt(case, candidate)
-        try:
-            raw_response = active_judge.judge(prompt)
-        except LLMJudgeError:
-            if fallback_judge is None:
-                raise
-            active_judge = fallback_judge
-            fallback_used = True
-            raw_response = active_judge.judge(prompt)
+        raw_response = judge.judge(prompt)
         case_metrics.append(
             _case_metrics_from_response(
                 case,
                 candidate,
                 raw_response,
-                provider=active_judge.provider,
-                model=active_judge.model,
+                provider=judge.provider,
+                model=judge.model,
             )
         )
 
     return LLMJudgeReport(
-        provider=active_judge.provider,
-        model=active_judge.model,
-        fallback_provider=fallback_judge.provider if fallback_judge else None,
-        fallback_used=fallback_used,
+        provider=judge.provider,
+        model=judge.model,
+        mode=mode,
         metric_type="llm_judge",
         aggregate=_aggregate(case_metrics),
         cases=case_metrics,
     )
+
+
+def _validate_judge_mode(mode: JudgeMode, judge: LLMJudge) -> None:
+    if mode not in {"enforcing", "advisory"}:
+        raise ValueError("judge mode must be enforcing or advisory")
+    if mode == "enforcing" and judge.provider != "codex":
+        raise LLMJudgeError(
+            "only a Codex judge may enforce semantic answer-quality expectations; "
+            "use advisory mode for Ollama smoke checks"
+        )
 
 
 def _build_judge_prompt(

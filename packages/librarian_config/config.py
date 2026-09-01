@@ -32,6 +32,7 @@ _ALLOWED_PROVIDER_MODES = {
 }
 _ALLOWED_ANSWER_CAPABILITIES = {"quality", "lightweight"}
 _ALLOWED_SEMANTIC_SELECTOR_PROVIDERS = {"codex"}
+_ALLOWED_EVALUATION_JUDGE_PROVIDERS = {"codex", "ollama"}
 _HTTP_HEADER_NAME = frozenset(
     "!#$%&'*+.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-"
 )
@@ -116,6 +117,22 @@ class SemanticSourceSelectorSettings:
 
 
 @dataclass(frozen=True)
+class EvaluationJudgeSettings:
+    """One JSON-owned model choice for an opt-in evaluation mode."""
+
+    provider: str
+    model: str
+
+
+@dataclass(frozen=True)
+class EvaluationSettings:
+    """Separate semantic-quality gate and non-blocking local smoke judge."""
+
+    enforcing_judge: EvaluationJudgeSettings
+    advisory_judge: EvaluationJudgeSettings
+
+
+@dataclass(frozen=True)
 class ServiceSettings:
     api_port: int
     web_port: int
@@ -135,6 +152,7 @@ class LibrarianConfig:
     search: SearchSettings
     summaries: SummarySettings
     semantic_source_selector: SemanticSourceSelectorSettings
+    evaluation: EvaluationSettings | None
     services: ServiceSettings
     codex_executable: str
 
@@ -192,6 +210,7 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
             "search",
             "summaries",
             "semantic_source_selector",
+            "evaluation",
             "services",
             "codex_executable",
         },
@@ -215,6 +234,7 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
         semantic_source_selector=_parse_semantic_source_selector(
             root.get("semantic_source_selector")
         ),
+        evaluation=_parse_evaluation(root.get("evaluation")),
         services=_parse_services(root.get("services")),
         codex_executable=_require_string(root.get("codex_executable"), "codex_executable"),
     )
@@ -335,6 +355,25 @@ def resolve_chat_retrieval_backend(backend: str | None = None) -> str:
 
 def resolve_codex_executable(codex_executable: str | None = None) -> str:
     return codex_executable or get_librarian_config().codex_executable
+
+
+def resolve_evaluation_judge(mode: str) -> EvaluationJudgeSettings:
+    """Resolve an opt-in judge from JSON, never from shell configuration."""
+
+    normalized = mode.strip().casefold()
+    if normalized not in {"enforcing", "advisory"}:
+        raise ValueError("judge mode must be enforcing or advisory")
+    evaluation = get_librarian_config().evaluation
+    if evaluation is None:
+        raise LibrarianConfigError(
+            "evaluation judge configuration is missing; copy the evaluation section "
+            "from config/librarian.example.json"
+        )
+    return (
+        evaluation.enforcing_judge
+        if normalized == "enforcing"
+        else evaluation.advisory_judge
+    )
 
 
 def resolve_chunk_summary_timeout_seconds(timeout_seconds: float | None = None) -> float:
@@ -520,6 +559,50 @@ def _parse_semantic_source_selector(value: object) -> SemanticSourceSelectorSett
         enabled=enabled,
         provider=provider,
         model=_require_string(selector.get("model"), "semantic_source_selector.model"),
+    )
+
+
+def _parse_evaluation(value: object) -> EvaluationSettings | None:
+    """Parse optional LLM-judge settings without enabling any remote call."""
+
+    if value is None:
+        return None
+    evaluation = _require_mapping(value, "evaluation")
+    _reject_unknown_keys(
+        evaluation,
+        {"enforcing_judge", "advisory_judge"},
+        "evaluation",
+    )
+    enforcing_judge = _parse_evaluation_judge(
+        evaluation.get("enforcing_judge"),
+        label="evaluation.enforcing_judge",
+    )
+    if enforcing_judge.provider != "codex":
+        raise LibrarianConfigError(
+            "evaluation.enforcing_judge.provider must be codex"
+        )
+    return EvaluationSettings(
+        enforcing_judge=enforcing_judge,
+        advisory_judge=_parse_evaluation_judge(
+            evaluation.get("advisory_judge"),
+            label="evaluation.advisory_judge",
+        ),
+    )
+
+
+def _parse_evaluation_judge(
+    value: object,
+    *,
+    label: str,
+) -> EvaluationJudgeSettings:
+    judge = _require_mapping(value, label)
+    _reject_unknown_keys(judge, {"provider", "model"}, label)
+    provider = _require_string(judge.get("provider"), f"{label}.provider").casefold()
+    if provider not in _ALLOWED_EVALUATION_JUDGE_PROVIDERS:
+        raise LibrarianConfigError(f"{label}.provider must be codex or ollama")
+    return EvaluationJudgeSettings(
+        provider=provider,
+        model=_require_string(judge.get("model"), f"{label}.model"),
     )
 
 

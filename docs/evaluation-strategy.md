@@ -136,12 +136,12 @@ judge must return this strict JSON result, rather than a free-form score:
 scope, answer, and passages actually cited by the answer. Invalid or incomplete
 judge JSON fails the optional run instead of silently becoming a passing score.
 
-Codex is the default judge because it is expected to be substantially stronger
-than the tiny local models that fit comfortably on the Mac Mini. Ollama is wired
-as the fallback judge so local-only runs still have a path when Codex is
-unavailable. Use `configured` to reuse the ignored `librarian.json` generation
-provider, model, and credential files, including an OpenAI-compatible
-subscription broker; this still runs only when `--llm-judge` is explicitly set.
+The JSON `evaluation.enforcing_judge` must use Codex because it is expected to
+be substantially stronger than the small local models that fit comfortably on
+the Mac Mini. An enforcing run uses its selected model with
+`codex exec --model <model> --ephemeral`; it fails on Codex transport errors,
+invalid judge JSON, and any mismatch with a curated expected verdict. It never
+falls back to Ollama, a configured gateway, or another provider.
 
 ```bash
 python3 scripts/evaluate_retrieval.py --llm-judge
@@ -158,19 +158,17 @@ python3 scripts/evaluate_retrieval.py --live --live-answers --llm-judge \
   --generation-model qwen2.5:1.5b
 ```
 
-The default judge provider is `codex`. The default fallback provider is
-`ollama`, using the generation model unless `--judge-fallback-model` is passed:
+For a local schema/reporting smoke check, use the separately JSON-configured
+advisory judge. Its result is recorded but never determines a quality pass or
+failure, even when it reports an expected-verdict mismatch:
 
 ```bash
 python3 scripts/evaluate_retrieval.py --llm-judge \
-  --judge-provider codex \
-  --judge-fallback-provider ollama \
-  --judge-fallback-model qwen2.5:1.5b
+  --judge-mode advisory
 ```
 
-Use `--judge-fallback-provider none` to fail fast when Codex is unavailable.
-Use `--judge-provider ollama` when intentionally benchmarking local judge
-quality.
+This is the only supported way to run an Ollama judge. The enforcing judge is
+always Codex; `configured` generation providers cannot act as judges.
 
 To run the curated semantic failure cases (negation, reversed relationships,
 unsupported causality, and broad-answer coverage), pass their fixture as the
@@ -178,14 +176,14 @@ answer benchmark. This invokes a judge only because `--llm-judge` is present:
 
 ```bash
 python3 scripts/evaluate_retrieval.py --llm-judge \
-  --judge-provider configured \
   --answer-benchmark tests/fixtures/evaluation/groundedness_adversarial_cases.json
 ```
 
 Each curated adversarial case declares an `expected_judge_verdict`. When an
-opt-in `--llm-judge` run disagrees with one, its JSON and Markdown reports show
-the expected value and mismatch, then the command exits with status `1` after
-writing those reports for diagnosis. This is intentionally separate from
+enforcing `--llm-judge` run disagrees with one, its JSON and Markdown reports
+show the expected value and mismatch, then the command exits with status `1`
+after writing those reports for diagnosis. Advisory results remain diagnostic
+only. This is intentionally separate from
 `scripts/check.sh`: ordinary deterministic CI never invokes a judge or needs a
 subscription, network access, or local model.
 

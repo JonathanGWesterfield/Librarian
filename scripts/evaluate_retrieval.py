@@ -85,6 +85,7 @@ from librarian_evaluation.retrieval import (
     evaluate_retrieval_cases,
 )
 from librarian_logging import configure_cli_logging
+from librarian_config.config import resolve_evaluation_judge
 from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
 from librarian_search.search import SearchResponse, SearchResult
 
@@ -182,30 +183,19 @@ def main() -> int:
     parser.add_argument(
         "--llm-judge",
         action="store_true",
-        help="Score answer quality with an LLM judge. Defaults to Codex with Ollama fallback.",
-    )
-    parser.add_argument(
-        "--judge-provider",
-        default="codex",
         help=(
-            "LLM judge provider. Supported values: codex, ollama, configured. "
-            "configured reuses generation settings and credentials from librarian.json."
+            "Run the JSON-configured semantic judge. The default enforcing mode "
+            "uses Codex and fails on transport, schema, or expected-verdict mismatches."
         ),
     )
     parser.add_argument(
-        "--judge-model",
-        default="codex",
-        help="LLM judge model name.",
-    )
-    parser.add_argument(
-        "--judge-fallback-provider",
-        default="ollama",
-        help="Fallback LLM judge provider. Use 'none' to disable fallback.",
-    )
-    parser.add_argument(
-        "--judge-fallback-model",
-        default=None,
-        help="Fallback LLM judge model. Defaults to --generation-model or qwen2.5:1.5b.",
+        "--judge-mode",
+        choices=("enforcing", "advisory"),
+        default="enforcing",
+        help=(
+            "Use the JSON-configured enforcing Codex judge (default), or the "
+            "non-blocking advisory judge for local schema/reporting smoke checks."
+        ),
     )
     parser.add_argument(
         "--database-url",
@@ -272,14 +262,7 @@ def main() -> int:
     args = parser.parse_args()
     judge = _create_optional_judge(
         enabled=args.llm_judge,
-        provider=args.judge_provider,
-        model=args.judge_model,
-        ollama_base_url=args.ollama_base_url,
-    )
-    fallback_judge = _create_optional_fallback_judge(
-        enabled=args.llm_judge,
-        provider=args.judge_fallback_provider,
-        model=args.judge_fallback_model or args.generation_model or "qwen2.5:1.5b",
+        mode=args.judge_mode,
         ollama_base_url=args.ollama_base_url,
     )
 
@@ -305,14 +288,14 @@ def main() -> int:
             limit=args.limit,
             retrieval_limit=args.retrieval_limit,
             judge=judge,
-            fallback_judge=fallback_judge,
+            judge_mode=args.judge_mode,
         )
     else:
         document = generate_report_document(
             args.benchmark,
             answer_benchmark_path=args.answer_benchmark,
             judge=judge,
-            fallback_judge=fallback_judge,
+            judge_mode=args.judge_mode,
         )
     should_record_run_metadata = args.live or args.record_run_metadata
     output_document = (
@@ -364,7 +347,7 @@ def main() -> int:
             return 1
         if args.github_summary:
             _append_summary(args.github_summary, summary_markdown)
-        if judge_expectation_mismatch_count:
+        if args.judge_mode == "enforcing" and judge_expectation_mismatch_count:
             logger.error(
                 "LLM judge disagreed with %s adversarial expectation(s)",
                 judge_expectation_mismatch_count,
@@ -380,7 +363,7 @@ def main() -> int:
         _append_summary(args.github_summary, summary_markdown)
     logger.info("Wrote retrieval evaluation report to %s", args.output)
     logger.info("Wrote human-readable evaluation report to %s", args.markdown_output)
-    if judge_expectation_mismatch_count:
+    if args.judge_mode == "enforcing" and judge_expectation_mismatch_count:
         logger.error(
             "LLM judge disagreed with %s adversarial expectation(s); "
             "the report was written for diagnosis",
@@ -395,7 +378,7 @@ def generate_report_document(
     *,
     answer_benchmark_path: Path | None = None,
     judge: LLMJudge | None = None,
-    fallback_judge: LLMJudge | None = None,
+    judge_mode: str = "enforcing",
 ) -> dict[str, Any]:
     benchmark_data = json.loads(benchmark_path.read_text(encoding="utf-8"))
     cases = [_case_from_json(case) for case in benchmark_data["cases"]]
@@ -414,7 +397,7 @@ def generate_report_document(
     llm_judge = _llm_judge_report_from_answer_benchmark(
         answer_benchmark_path,
         judge=judge,
-        fallback_judge=fallback_judge,
+        judge_mode=judge_mode,
     )
     document = build_retrieval_report_document(
         report,
@@ -446,7 +429,7 @@ def generate_live_report_document(
     search_fn=hybrid_search_chunks,
     answer_fn=answer_question,
     judge: LLMJudge | None = None,
-    fallback_judge: LLMJudge | None = None,
+    judge_mode: str = "enforcing",
 ) -> dict[str, Any]:
     corpus_data = json.loads(corpus_path.read_text(encoding="utf-8"))
     cases = [_case_from_json(case) for case in corpus_data["cases"]]
@@ -500,7 +483,7 @@ def generate_live_report_document(
     llm_judge = _llm_judge_report_from_answer_benchmark(
         answer_benchmark_path,
         judge=judge,
-        fallback_judge=fallback_judge,
+        judge_mode=judge_mode,
     )
     if live_answers:
         (
@@ -525,7 +508,7 @@ def generate_live_report_document(
                 answer_cases,
                 answer_candidates,
                 judge=judge,
-                fallback_judge=fallback_judge,
+                mode=judge_mode,
             )
 
     document = build_retrieval_report_document(
@@ -640,7 +623,7 @@ def _llm_judge_report_from_answer_benchmark(
     path: Path | None,
     *,
     judge: LLMJudge | None,
-    fallback_judge: LLMJudge | None,
+    judge_mode: str,
 ):
     if judge is None or path is None or not path.exists():
         return None
@@ -649,7 +632,7 @@ def _llm_judge_report_from_answer_benchmark(
         cases,
         candidates,
         judge=judge,
-        fallback_judge=fallback_judge,
+        mode=judge_mode,
     )
 
 
@@ -767,31 +750,15 @@ def _load_optional_json(path: Path) -> dict[str, Any] | None:
 def _create_optional_judge(
     *,
     enabled: bool,
-    provider: str,
-    model: str,
+    mode: str,
     ollama_base_url: str | None,
 ) -> LLMJudge | None:
     if not enabled:
         return None
+    selection = resolve_evaluation_judge(mode)
     return create_judge(
-        provider,
-        model=model,
-        ollama_base_url=ollama_base_url or "http://localhost:11434",
-    )
-
-
-def _create_optional_fallback_judge(
-    *,
-    enabled: bool,
-    provider: str,
-    model: str,
-    ollama_base_url: str | None,
-) -> LLMJudge | None:
-    if not enabled or provider.strip().casefold() == "none":
-        return None
-    return create_judge(
-        provider,
-        model=model,
+        selection.provider,
+        model=selection.model,
         ollama_base_url=ollama_base_url or "http://localhost:11434",
     )
 

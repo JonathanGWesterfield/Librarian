@@ -47,7 +47,9 @@ class LLMJudgeTests(unittest.TestCase):
                     '"citation_relevance":"all_relevant",'
                     '"missing_coverage":[],"unsupported_claims":[],'
                     '"reason":"Grounded and cited."}'
-                )
+                ),
+                provider="codex",
+                model="gpt-5.6",
             ),
         )
 
@@ -56,6 +58,7 @@ class LLMJudgeTests(unittest.TestCase):
         self.assertEqual(report.aggregate.mean_overall_score, 1.0)
         self.assertEqual(report.cases[0].evidence_verdict, "supported")
         self.assertEqual(report.cases[0].reason, "Grounded and cited.")
+        self.assertEqual(report.mode, "enforcing")
 
     def test_judge_records_a_wrong_adversarial_verdict(self) -> None:
         """An opt-in semantic judge must expose disagreement with curated truth."""
@@ -68,7 +71,11 @@ class LLMJudgeTests(unittest.TestCase):
         report = evaluate_answers_with_llm_judge(
             [case],
             {"negation": AnswerCandidate(answer="Mara opened it. [S1]", sources=[])},
-            judge=StaticJudge(response=_semantic_response("supported")),
+            judge=StaticJudge(
+                response=_semantic_response("supported"),
+                provider="codex",
+                model="gpt-5.6",
+            ),
         )
 
         self.assertEqual(report.to_dict()["expectation_mismatch_count"], 1)
@@ -86,7 +93,11 @@ class LLMJudgeTests(unittest.TestCase):
         report = evaluate_answers_with_llm_judge(
             [case],
             {"negation": AnswerCandidate(answer="Mara opened it. [S1]", sources=[])},
-            judge=StaticJudge(response=_semantic_response("contradicted")),
+            judge=StaticJudge(
+                response=_semantic_response("contradicted"),
+                provider="codex",
+                model="gpt-5.6",
+            ),
         )
 
         self.assertEqual(report.to_dict()["expectation_mismatch_count"], 0)
@@ -104,32 +115,51 @@ class LLMJudgeTests(unittest.TestCase):
             ["codex", "exec", "--model", "gpt-5.6", "--ephemeral", "judge this answer"],
         )
 
-    def test_evaluate_answers_with_llm_judge_uses_fallback_provider(self) -> None:
-        """Verify Ollama can take over when the primary Codex-style judge fails.
-        This keeps the local evaluation workflow useful on machines where
-        Codex is unavailable, while still preferring Codex by default.
-        """
+    def test_enforcing_codex_failure_never_falls_back_to_ollama(self) -> None:
+        """A failed quality gate must surface its Codex transport error directly."""
         case = AnswerEvaluationCase(id="sample", question="question")
 
+        with self.assertRaisesRegex(LLMJudgeError, "primary failed"):
+            evaluate_answers_with_llm_judge(
+                [case],
+                {"sample": AnswerCandidate(answer="answer", sources=[])},
+                judge=_FailingJudge(),
+            )
+
+    def test_ollama_is_explicitly_advisory_and_can_still_validate_schema(self) -> None:
+        """A local smoke judge reports a result without becoming a quality gate."""
+        case = AnswerEvaluationCase(
+            id="sample",
+            question="question",
+            expected_judge_verdict="contradicted",
+        )
         report = evaluate_answers_with_llm_judge(
             [case],
             {"sample": AnswerCandidate(answer="answer", sources=[])},
-            judge=_FailingJudge(),
-            fallback_judge=StaticJudge(
-                response=(
-                    '{"evidence_verdict":"insufficient",'
-                    '"citation_relevance":"not_applicable",'
-                    '"missing_coverage":["source support"],'
-                    '"unsupported_claims":[],"reason":"Fallback score."}'
-                ),
+            judge=StaticJudge(
+                response=_semantic_response("supported"),
                 provider="ollama",
-                model="llama3.2:3b",
+                model="qwen2.5:1.5b",
             ),
+            mode="advisory",
         )
 
-        self.assertTrue(report.fallback_used)
+        self.assertEqual(report.mode, "advisory")
         self.assertEqual(report.provider, "ollama")
-        self.assertEqual(report.model, "llama3.2:3b")
+        self.assertEqual(report.to_dict()["expectation_mismatch_count"], 1)
+
+    def test_ollama_cannot_be_an_enforcing_semantic_judge(self) -> None:
+        """A local model must never determine a semantic quality pass or failure."""
+        with self.assertRaisesRegex(LLMJudgeError, "only a Codex judge"):
+            evaluate_answers_with_llm_judge(
+                [AnswerEvaluationCase(id="sample", question="question")],
+                {"sample": AnswerCandidate(answer="answer", sources=[])},
+                judge=StaticJudge(
+                    response=_semantic_response("supported"),
+                    provider="ollama",
+                    model="qwen2.5:1.5b",
+                ),
+            )
 
     def test_llm_judge_rejects_a_response_that_is_not_the_semantic_schema(self) -> None:
         """A fuzzy evaluator must not silently accept an unstructured model reply."""
@@ -137,7 +167,11 @@ class LLMJudgeTests(unittest.TestCase):
             evaluate_answers_with_llm_judge(
                 [AnswerEvaluationCase(id="sample", question="question")],
                 {"sample": AnswerCandidate(answer="answer", sources=[])},
-                judge=StaticJudge(response='{"correctness": 1.0}'),
+                judge=StaticJudge(
+                    response='{"correctness": 1.0}',
+                    provider="codex",
+                    model="gpt-5.6",
+                ),
             )
 
     def test_judge_prompt_uses_only_question_scope_answer_and_cited_passages(self) -> None:
@@ -165,23 +199,14 @@ class LLMJudgeTests(unittest.TestCase):
         self.assertNotIn("Expected concepts", prompt)
         self.assertNotIn("Should refuse", prompt)
 
-    def test_configured_judge_reuses_json_configured_generation_provider(self) -> None:
-        """The opt-in judge can use any already-configured generation broker."""
-        generator = _ConfiguredGenerator()
-        with patch(
-            "librarian_evaluation.llm_judge.create_configured_generator",
-            return_value=generator,
-        ):
-            judge = create_judge(
+    def test_configured_generation_provider_cannot_become_a_judge(self) -> None:
+        """A gateway or local default cannot quietly replace the Codex gate."""
+        with self.assertRaisesRegex(ValueError, "unsupported LLM judge provider"):
+            create_judge(
                 "configured",
                 model="ignored",
                 ollama_base_url="http://unused",
             )
-            response = judge.judge("return JSON")
-
-        self.assertEqual(judge.provider, "openai_compatible")
-        self.assertEqual(judge.model, "subscription-broker")
-        self.assertEqual(response, '{"evidence_verdict":"supported"}')
 
     def test_adversarial_fixture_covers_the_known_semantic_failure_modes(self) -> None:
         """The judge corpus locks down the reviewer counterexamples as runnable data."""
@@ -207,15 +232,6 @@ class _FailingJudge:
 
     def judge(self, _prompt: str) -> str:
         raise LLMJudgeError("primary failed")
-
-
-class _ConfiguredGenerator:
-    provider = "openai_compatible"
-    model = "subscription-broker"
-
-    def generate(self, _messages, *, response_format=None):
-        assert response_format == "json"
-        return '{"evidence_verdict":"supported"}'
 
 
 def _semantic_response(verdict: str) -> str:

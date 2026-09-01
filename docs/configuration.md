@@ -44,6 +44,7 @@ Every profile has the following top-level sections.
 | `search` | OpenSearch URL/index and retrieval backend selection. |
 | `summaries` | Summary timeout and worker parallelism limits. |
 | `semantic_source_selector` | Optional trusted Codex policy that chooses IDs for existing source sentences. |
+| `evaluation` | Opt-in Codex enforcement and separate advisory local-judge model choices. |
 | `services` | Published ports, OpenSearch heap, Ollama listener, and worker settings. |
 | `codex_executable` | Host executable used only by the direct `codex` generation mode. |
 
@@ -108,6 +109,39 @@ exactly match retrieved, scope-filtered source sentences. Unknown, duplicate,
 empty, malformed, unavailable, or too-narrow selections fall back to the
 deterministic extractor. Docker and native Ollama never perform semantic source
 selection.
+
+## LLM-as-judge policy
+
+The optional `evaluation` section keeps fuzzy semantic evaluation separate from
+the deterministic test suite. It has two deliberately different roles:
+
+```json
+{
+  "evaluation": {
+    "enforcing_judge": {
+      "provider": "codex",
+      "model": "gpt-5.6"
+    },
+    "advisory_judge": {
+      "provider": "ollama",
+      "model": "qwen2.5:1.5b"
+    }
+  }
+}
+```
+
+`enforcing_judge` must be Codex. Running
+`python3 scripts/evaluate_retrieval.py --llm-judge` uses its JSON-configured
+model through `codex exec --model <model> --ephemeral` and returns failure on a
+transport problem, invalid judge schema, or mismatch with a curated
+`expected_judge_verdict`. There is no Ollama or configured-provider fallback.
+
+`advisory_judge` may be Codex or Ollama. Run it only with
+`--judge-mode advisory`; it validates the same schema and records diagnostics,
+but its semantic verdict and expected-verdict mismatches never decide command
+success. This makes local Ollama useful for smoke tests without mistakenly
+treating a small model as a correctness gate. Both model choices live in JSON;
+normal `scripts/check.sh` does not run either judge.
 
 ## Secrets and safe headers
 

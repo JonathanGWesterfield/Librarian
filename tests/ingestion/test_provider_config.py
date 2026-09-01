@@ -25,6 +25,7 @@ from librarian_config.config import (  # noqa: E402
     LibrarianConfigError,
     clear_librarian_config_cache,
     get_librarian_config,
+    resolve_evaluation_judge,
     resolve_generation_answer_capability,
 )
 
@@ -60,6 +61,8 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.search.opensearch_url, "http://opensearch:9200")
         self.assertFalse(config.semantic_source_selector.enabled)
         self.assertEqual(config.semantic_source_selector.provider, "codex")
+        self.assertEqual(config.evaluation.enforcing_judge.provider, "codex")
+        self.assertEqual(config.evaluation.advisory_judge.provider, "ollama")
 
     def test_base_profile_is_complete_without_tracking_its_gateway_token(self) -> None:
         """The tracked Codex-gateway baseline needs only a local ignored secret file."""
@@ -119,6 +122,30 @@ class LibrarianConfigTests(unittest.TestCase):
 
         self.assertFalse(config.semantic_source_selector.enabled)
         self.assertEqual(config.semantic_source_selector.provider, "")
+
+    def test_evaluation_policy_requires_codex_for_enforcing_mode(self) -> None:
+        """JSON cannot accidentally make a local model a semantic quality gate."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "librarian.json"
+            _write_config(path)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["evaluation"]["enforcing_judge"]["provider"] = "ollama"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                LibrarianConfigError,
+                "enforcing_judge.provider must be codex",
+            ):
+                get_librarian_config(path)
+
+    def test_evaluation_judge_selection_is_json_owned(self) -> None:
+        """The CLI obtains both modes from the user-owned JSON policy."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "librarian.json"
+            _write_config(path)
+            with patch("librarian_config.config.default_config_path", return_value=path):
+                self.assertEqual(resolve_evaluation_judge("enforcing").model, "gpt-5.6")
+                self.assertEqual(resolve_evaluation_judge("advisory").provider, "ollama")
 
     def test_generation_capability_is_a_configured_product_default(self) -> None:
         """Capability is not inferred from a generation model name."""
