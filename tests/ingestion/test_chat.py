@@ -98,8 +98,8 @@ class ChatTests(unittest.TestCase):
         self.assertIn("enough relevant body-text evidence", events[-1].data["answer"])
         self.assertEqual(generator.generate_calls, 0)
 
-    def test_quality_stream_ignores_speculation_and_uses_the_grounded_answer(self) -> None:
-        """Never expose the Mara/ticking inference UAT found in a live Ollama answer."""
+    def test_event_question_includes_relevant_source_context_without_speculation(self) -> None:
+        """The UAT garden event gets its adjacent outcome, not a model inference."""
         question = "What happened when Mara opened the garden gate?"
         source_text = (
             "Mara opened the gate with a borrowed key. "
@@ -120,31 +120,74 @@ class ChatTests(unittest.TestCase):
             ),
             patch("librarian_chat.chat.create_configured_generator", return_value=generator),
         ):
+            options = ChatOptions(
+                question=question,
+                database_url="sqlite:///tmp/librarian.db",
+                embedding_provider="ollama",
+                embedding_model="all-minilm",
+                generation_provider="ollama",
+                generation_model="qwen2.5:7b",
+                answer_capability="quality",
+            )
+            response = answer_question(options)
             events = list(
                 stream_answer_question(
-                    prepare_answer_question(
-                        ChatOptions(
-                            question=question,
-                            database_url="sqlite:///tmp/librarian.db",
-                            embedding_provider="ollama",
-                            embedding_model="all-minilm",
-                            generation_provider="ollama",
-                            generation_model="qwen2.5:7b",
-                            answer_capability="quality",
-                        )
-                    )
+                    prepare_answer_question(options)
                 )
             )
 
-        emitted_text = " ".join(
-            event.data["text"] for event in events if event.event == "token"
+        emitted_text = "".join(event.data["text"] for event in events if event.event == "token")
+        expected = (
+            "Mara opened the gate with a borrowed key. [S1]\n\n"
+            "The clockwork garden answered in careful ticking. [S1]"
         )
-        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
-        self.assertEqual(emitted_text, "Mara opened the gate with a borrowed key. [S1]")
+        self.assertEqual(
+            [event.event for event in events],
+            ["retrieval", "token", "token", "complete"],
+        )
+        self.assertEqual(emitted_text, expected)
+        self.assertEqual(response.answer, expected)
         self.assertNotIn("motivated", emitted_text.casefold())
         self.assertNotIn("presence", emitted_text.casefold())
         self.assertEqual(events[-1].data["answer"], emitted_text)
         self.assertEqual(events[-1].data["sources"][0]["source_id"], "S1")
+        self.assertEqual(generator.messages, [])
+
+    def test_event_context_rule_skips_an_unrelated_next_sentence(self) -> None:
+        """Sentence adjacency alone must not drag unrelated prose into an answer."""
+        question = "What happened when Mara opened the garden gate?"
+        source_text = (
+            "Mara opened the garden gate with a borrowed key. "
+            "A brass robin counted three silver seeds."
+        )
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:7b",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(
+            response.answer,
+            "Mara opened the garden gate with a borrowed key. [S1]",
+        )
+        self.assertNotIn("brass robin", response.answer.casefold())
+        self.assertEqual(generator.messages, [])
 
     def test_json_quality_answer_preserves_a_source_negation(self) -> None:
         """A model cannot turn a cited denial into its positive opposite."""

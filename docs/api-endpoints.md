@@ -493,9 +493,12 @@ Events are emitted in this order:
    one exact source sentence followed by its Librarian-assigned source ID. No
    model fragment is sent to the client, so a source statement such as “Mara
    did not open the gate” cannot become “Mara opened the gate,” and temporal
-   wording cannot become an invented cause. Broad answers emit one exact,
-   directly relevant sentence per required source. Providers do not change this
-   contract.
+   wording cannot become an invented cause. For event questions such as “What
+   happened when…?”, Librarian may append the immediately following exact
+   source sentence when it shares meaningful terms with the question or the
+   selected event sentence; adjacency alone is not enough. Broad answers emit
+   one exact, directly relevant sentence per required source. Providers do not
+   change this contract.
 3. Exactly one terminal `complete` event with the authoritative full answer,
    citations, retrieval metadata, and timings. Its `timings` also includes
    `time_to_first_event_seconds` and `time_to_first_token_seconds`.
