@@ -148,6 +148,38 @@ class SQLiteSchemaMigrationTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(history_count, len(SQLITE_SCHEMA_MIGRATIONS))
 
+    def test_existing_content_type_migration_history_is_accepted(self) -> None:
+        """A real library upgraded through v6 must not be rejected as unknown."""
+        expected_history = [
+            (migration.version, migration.name) for migration in SQLITE_SCHEMA_MIGRATIONS
+        ]
+        with sqlite3.connect(self.database_path) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                );
+                CREATE TABLE sentinel (value TEXT NOT NULL);
+                INSERT INTO sentinel VALUES ('preserve-me');
+                """
+            )
+            connection.executemany(
+                "INSERT INTO schema_migrations VALUES (?, ?, '2026-01-01T00:00:00+00:00')",
+                expected_history,
+            )
+
+        with SQLiteIngestionStore(self.database_path) as store:
+            history = [
+                (migration.version, migration.name)
+                for migration in store.list_applied_schema_migrations()
+            ]
+            sentinel = store._connection.execute("SELECT value FROM sentinel").fetchone()[0]
+
+        self.assertEqual(history, expected_history)
+        self.assertEqual(sentinel, "preserve-me")
+
     def test_unknown_future_version_is_rejected_without_mutation(self) -> None:
         self._create_incompatible_history(version=999, name="future_schema")
         before = self._database_snapshot()

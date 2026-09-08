@@ -83,6 +83,10 @@ def chat_completions(
                 "--model",
                 config.generation.model,
                 "--ephemeral",
+                # The broker image deliberately runs from /app, which is not a
+                # Git checkout. This permits that fixed container workdir
+                # without granting access to the caller's filesystem.
+                "--skip-git-repo-check",
                 "--sandbox",
                 "read-only",
                 "-",
