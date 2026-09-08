@@ -2498,6 +2498,67 @@ def _migrate_chunk_content_type(connection: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_chunk_content_type_v2(connection: sqlite3.Connection) -> None:
+    """Replace the conservative legacy classifier with structured content labels."""
+    rows = connection.execute(
+        """
+        SELECT id, chunk_index, chapter_title, text
+        FROM chunks
+        ORDER BY rowid
+        """
+    ).fetchall()
+    connection.executemany(
+        "UPDATE chunks SET content_type = ? WHERE id = ?",
+        [
+            (
+                classify_chunk_content(
+                    text=str(text),
+                    chapter_title=chapter_title
+                    if isinstance(chapter_title, str)
+                    else None,
+                    chunk_index=int(chunk_index),
+                ),
+                str(chunk_id),
+            )
+            for chunk_id, chunk_index, chapter_title, text in rows
+        ],
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunks_content_type ON chunks(content_type)"
+    )
+
+
+def _migrate_appended_work_content_type(connection: sqlite3.Connection) -> None:
+    """Mark appendices and afterwords as back matter from their first chunk on."""
+    rows = connection.execute(
+        """
+        SELECT book_id, chunk_index, text
+        FROM chunks
+        ORDER BY book_id ASC, chunk_index ASC
+        """
+    ).fetchall()
+    boundaries: dict[str, int] = {}
+    for book_id, chunk_index, text in rows:
+        normalized_book_id = str(book_id)
+        if normalized_book_id not in boundaries and is_appended_work_boundary(str(text)):
+            boundaries[normalized_book_id] = int(chunk_index)
+    for book_id, boundary in boundaries.items():
+        connection.execute(
+            """
+            UPDATE chunks
+            SET content_type = 'back_matter'
+            WHERE book_id = ? AND chunk_index >= ?
+            """,
+            (book_id, boundary),
+        )
+
+
+def _repair_appended_work_content_type(connection: sqlite3.Connection) -> None:
+    """Correct version 5 false positives using the refined version 4 classifier."""
+    _migrate_chunk_content_type_v2(connection)
+    _migrate_appended_work_content_type(connection)
+
+
 def _legacy_chunk_content_type(text: str) -> str:
     normalized = " ".join(text.casefold().split())
     if any(marker in normalized for marker in _LEGACY_FRONT_MATTER_MARKERS):
@@ -2523,7 +2584,87 @@ SQLITE_SCHEMA_MIGRATIONS: tuple[SQLiteSchemaMigration, ...] = (
         name="chunks_content_type",
         apply=_migrate_chunk_content_type,
     ),
+    SQLiteSchemaMigration(
+        version=4,
+        name="chunks_content_type_v2",
+        apply=_migrate_chunk_content_type_v2,
+    ),
+    SQLiteSchemaMigration(
+        version=5,
+        name="appended_work_content_type",
+        apply=_migrate_appended_work_content_type,
+    ),
+    SQLiteSchemaMigration(
+        version=6,
+        name="appended_work_content_type_v2",
+        apply=_repair_appended_work_content_type,
+    ),
 )
+
+
+def classify_chunk_content(
+    *, text: str, chapter_title: str | None = None, chunk_index: int = 0
+) -> str:
+    """Classify chunk-level publishing matter without discarding book prose."""
+    normalized = " ".join(text.casefold().split())
+    heading = " ".join((chapter_title or "").casefold().split())
+    opening = normalized[:500]
+    if is_appended_work_boundary(text):
+        return "back_matter"
+    if "about the publisher" in opening or (
+        "harpercollins publishers" in opening
+        and any(
+            marker in opening
+            for marker in ("australia", "canada", "united kingdom")
+        )
+    ):
+        return "publisher"
+    if any(
+        marker in opening
+        for marker in (
+            "discover great authors, exclusive offers",
+            "books by c. s. lewis",
+            "complete works ebook collection",
+            "free c. s. lewis ebook download",
+        )
+    ) or opening.startswith("books by "):
+        return "catalog"
+    if opening.startswith(("credits ", "copyright ", "about the author ")) or (
+        normalized.count("copyright") >= 2
+        and any(
+            marker in normalized
+            for marker in ("isbn", "digital edition", "all rights reserved")
+        )
+    ):
+        return "back_matter"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    first_line = " ".join(lines[0].casefold().split()).strip(" :") if lines else ""
+    if (
+        heading.strip(" :") in {"contents", "table of contents"}
+        or first_line in {"contents", "table of contents"}
+    ) and len(lines) >= 5:
+        return "toc"
+    if chunk_index <= 2 and any(
+        marker in opening for marker in ("dedication", "title page", "copyright", "isbn")
+    ):
+        return "front_matter"
+    return "body"
+
+
+def is_appended_work_boundary(text: str) -> bool:
+    """Identify a chunk that begins material appended after the original work."""
+    opening = " ".join(text.casefold().split())[:500]
+    title = "screwtape proposes a toast"
+    if title in opening:
+        title_page_listing = bool(
+            re.match(
+                r"the screwtape letters(?:\s+c\.?\s+s\.?\s+lewis)?\s+with\s+"
+                r"screwtape proposes a toast\b",
+                opening,
+            )
+        )
+        return not title_page_listing
+    return bool(re.match(r"(?:afterword|appendix)(?:\s|:|$)", opening))
 
 
 def _add_column_if_missing(

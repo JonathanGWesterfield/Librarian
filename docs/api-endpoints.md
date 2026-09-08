@@ -57,7 +57,8 @@ Accepts the non-streaming OpenAI-compatible subset used internally:
 
 The broker requires `Authorization: Bearer <token>`, accepts only the model in
 `librarian.json`, and returns a standard `choices[0].message.content` response.
-It invokes `codex exec --model <model> --ephemeral` inside the broker container.
+It invokes `codex exec --model <model> --ephemeral --skip-git-repo-check` inside
+the fixed, non-repository broker container, with Codex's read-only sandbox.
 `401` means the internal token was absent or invalid; `502` means Codex itself
 failed and gives the one-time broker-login recovery command without echoing CLI
 stderr or credentials.

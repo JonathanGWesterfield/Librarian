@@ -64,6 +64,7 @@ class CodexBrokerTests(unittest.TestCase):
                 "--model",
                 "gpt-5.6",
                 "--ephemeral",
+                "--skip-git-repo-check",
                 "--sandbox",
                 "read-only",
                 "-",
