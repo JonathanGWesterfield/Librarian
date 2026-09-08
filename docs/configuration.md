@@ -226,7 +226,10 @@ containerized resolver, which writes non-secret values to `.runtime/`:
 For Docker Ollama, the launcher waits for the one-shot `ollama-init` service
 to finish successfully, verifies every configured model with `ollama list`,
 and only then starts API and web services. It prints service state and recent
-initializer logs on a failure or timeout.
+initializer logs on a failure or timeout. Every launcher invocation recreates
+the API and web containers so a profile change (for example, switching from
+the Codex broker back to Docker Ollama) cannot leave an existing API process
+using stale provider wiring.
 
 ## Validate a change
 

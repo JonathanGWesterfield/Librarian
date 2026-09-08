@@ -124,6 +124,7 @@ class ContainerPipelineConfigTests(unittest.TestCase):
             self.assertIn("OLLAMA_INIT_MODELS", launcher)
             self.assertIn("ollama list", launcher)
             self.assertIn("Timed out", launcher)
+            self.assertIn("--force-recreate", launcher)
             self.assertNotIn("wait ollama-init", launcher)
 
     def test_powershell_initializer_failure_prints_diagnostics_before_throwing(self) -> None:

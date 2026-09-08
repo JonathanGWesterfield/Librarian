@@ -144,6 +144,10 @@ if ($selection.docker_ollama_enabled) {
 
 $start = @("up")
 if (-not $NoBuild) { $start += "--build" }
+# The generated Compose override can change API dependencies and the
+# bind-mounted configuration. Recreate these processes so a profile switch
+# never leaves an already-running API wired to its prior provider.
+$start += "--force-recreate"
 if (-not $Foreground) { $start += "-d" }
 $start += "api", "web"
 if ($WithWorkers) { $start += "summary-worker" }
