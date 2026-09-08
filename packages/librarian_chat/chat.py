@@ -303,8 +303,13 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         generation_model=options.generation_model,
     )
 
-    retrieval_limit = max(1, options.retrieval_limit)
     effective_author = _effective_author_scope(options, question)
+    required_sources = _required_source_count(question, effective_author)
+    # A client may ask for a small retrieval window to keep a local model
+    # prompt short, but that must not make the evidence policy impossible to
+    # satisfy. Broad questions need one distinct passage per required source,
+    # so the server is the final authority on the minimum retrieval depth.
+    retrieval_limit = max(1, options.retrieval_limit, required_sources)
     include_non_content = options.include_non_content or _asks_for_publication_metadata(
         question
     )
@@ -337,7 +342,6 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
             if _is_publication_evidence(question, result.content_type, result.text)
         ]
     sources = _to_sources(retrieval_results)
-    required_sources = _required_source_count(question, effective_author)
     evidence_sufficient = _has_sufficient_evidence(
         sources,
         required_sources=required_sources,

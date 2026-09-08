@@ -155,10 +155,6 @@ export type SearchIndexResponse = {
   reset: boolean;
 };
 
-// Five retrieved chunks keep the default local Qwen model's grounded prompt
-// within its context window while still providing multiple source passages.
-export const UI_CHAT_RETRIEVAL_LIMIT = 5;
-
 // The browser always uses the public same-origin API contract. During local
 // development Vite routes this path to services.api_port from librarian.json.
 const apiBaseUrl = "/api";
@@ -204,7 +200,6 @@ export async function streamChat(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       question,
-      retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT,
       ...(scope.bookId ? { book_id: scope.bookId } : {}),
       ...(scope.author ? { author: scope.author } : {}),
     }),
