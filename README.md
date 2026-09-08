@@ -338,6 +338,8 @@ It builds the API image for the host architecture, starts OpenSearch, and, when
 configured for Docker Ollama, pulls the configured embedding and generation
 models before starting the API and production web UI. Model files live in the
 named `ollama-models` Docker volume, so they survive container restarts.
+The launcher recreates API and web containers on each invocation so a provider
+profile change cannot leave the running application on prior configuration.
 
 The normal command builds and runs only the lean `runtime` image. It never
 starts evaluation automatically; the test/evaluation harness is a separate

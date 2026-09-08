@@ -203,6 +203,10 @@ fi
 
 start_args=(up)
 [[ "$BUILD" == "true" ]] && start_args+=(--build)
+# The generated Compose override can change API dependencies and the
+# bind-mounted configuration. Recreate these processes so a profile switch
+# never leaves an already-running API wired to its prior provider.
+start_args+=(--force-recreate)
 [[ "$DETACH" == "true" ]] && start_args+=(-d)
 start_args+=(api web)
 [[ "$WITH_WORKERS" == "true" ]] && start_args+=(summary-worker)

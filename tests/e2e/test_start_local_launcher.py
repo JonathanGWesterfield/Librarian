@@ -29,7 +29,7 @@ class StartLocalLauncherTests(unittest.TestCase):
         self.assertIn("Stack started", completed.stdout)
         self.assertGreaterEqual(calls.count("inspect --format"), 2)
         self.assertIn("exec -T ollama ollama list", calls)
-        self.assertIn("up -d api web", calls)
+        self.assertIn("up --force-recreate -d api web", calls)
 
     def test_nonzero_initializer_exit_stops_before_api_startup(self) -> None:
         """A failed pull prints diagnostics and prevents an unusable stack."""
@@ -38,7 +38,7 @@ class StartLocalLauncherTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("ollama-init exited with code 7", completed.stderr)
         self.assertIn("ollama-init logs", completed.stderr)
-        self.assertNotIn("up -d api web", calls)
+        self.assertNotIn("up --force-recreate -d api web", calls)
 
     def _run_launcher(self, initializer_state: str) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory() as directory:
