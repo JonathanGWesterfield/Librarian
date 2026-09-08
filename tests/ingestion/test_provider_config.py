@@ -90,6 +90,9 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.generation.answer_capability, "quality")
         self.assertEqual(config.generation.api_key, "test-bridge-token")
         self.assertEqual(config.semantic_source_selector.model, "gpt-5.6")
+        self.assertEqual(
+            config.evaluation.enforcing_judge.provider, "docker_codex_broker"
+        )
 
     def test_semantic_source_selector_is_json_configured_and_codex_only(self) -> None:
         """Local models cannot be configured to choose semantic answer evidence."""
@@ -136,6 +139,78 @@ class LibrarianConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 LibrarianConfigError,
                 "enforcing_judge.provider must be codex",
+            ):
+                get_librarian_config(path)
+
+    def test_broker_enforcing_judge_reuses_the_generation_broker(self) -> None:
+        """A broker quality gate has one token and one subscription session."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            payload = json.loads(
+                (REPO_ROOT / "config" / "librarian.base.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            secrets = root / "secrets"
+            secrets.mkdir()
+            (secrets / "codex-bridge-token.txt").write_text(
+                "test-bridge-token\n", encoding="utf-8"
+            )
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            config = get_librarian_config(path)
+
+        self.assertEqual(
+            config.evaluation.enforcing_judge.provider, "docker_codex_broker"
+        )
+        self.assertEqual(
+            config.evaluation.enforcing_judge.model, config.generation.model
+        )
+        self.assertEqual(config.generation.api_key, "test-bridge-token")
+
+    def test_broker_enforcing_judge_rejects_an_independent_or_mismatched_path(self) -> None:
+        """The evaluator cannot create another broker/model credential path."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            _write_config(path)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["evaluation"]["enforcing_judge"] = {
+                "provider": "docker_codex_broker",
+                "model": "gpt-5.6",
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                LibrarianConfigError,
+                "requires generation.mode to be docker_codex_broker",
+            ):
+                get_librarian_config(path)
+
+            payload["generation"] = _selection("docker_codex_broker", "generation")
+            _write_secret_files(root, "docker_ollama", "docker_codex_broker")
+            payload["evaluation"]["enforcing_judge"]["model"] = "different-model"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            clear_librarian_config_cache()
+            with self.assertRaisesRegex(
+                LibrarianConfigError,
+                "enforcing_judge.model must match generation.model",
+            ):
+                get_librarian_config(path)
+
+    def test_broker_is_not_an_advisory_judge(self) -> None:
+        """Small local Ollama remains the only broker-free smoke option."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "librarian.json"
+            _write_config(path)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["evaluation"]["advisory_judge"]["provider"] = "docker_codex_broker"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                LibrarianConfigError,
+                "advisory_judge.provider must be codex or ollama",
             ):
                 get_librarian_config(path)
 

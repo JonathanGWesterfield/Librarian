@@ -10,6 +10,7 @@ from librarian_evaluation.answer import (
     AnswerSource,
 )
 from librarian_evaluation.llm_judge import (
+    DockerCodexBrokerJudge,
     LLMJudgeError,
     CodexJudge,
     StaticJudge,
@@ -136,6 +137,64 @@ class LLMJudgeTests(unittest.TestCase):
         self.assertIn("credential=[redacted]", message)
         self.assertNotIn("should-not-leak", message)
 
+    def test_docker_broker_judge_uses_internal_bearer_auth_without_host_cli(self) -> None:
+        """The one-shot evaluator reaches the broker over its private API."""
+        response = _FakeHTTPResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"evidence_verdict":"supported",'
+                            '"citation_relevance":"all_relevant",'
+                            '"missing_coverage":[],"unsupported_claims":[],'
+                            '"reason":"Exact source evidence."}'
+                        }
+                    }
+                ]
+            }
+        )
+        judge = DockerCodexBrokerJudge(
+            model="gpt-5.6",
+            base_url="http://codex-broker:3000/v1",
+            api_key="internal-test-token",
+        )
+
+        with patch("librarian_evaluation.llm_judge.request.urlopen", return_value=response) as urlopen:
+            result = judge.judge("Judge only cited sources.")
+
+        self.assertIn('"evidence_verdict":"supported"', result)
+        sent = urlopen.call_args.args[0]
+        self.assertEqual(sent.full_url, "http://codex-broker:3000/v1/chat/completions")
+        self.assertEqual(sent.get_header("Authorization"), "Bearer internal-test-token")
+        payload = json.loads(sent.data)
+        self.assertEqual(payload["model"], "gpt-5.6")
+        self.assertFalse(payload["stream"])
+        self.assertEqual(payload["messages"][1]["content"], "Judge only cited sources.")
+
+    def test_broker_judge_is_allowed_to_enforce_but_ollama_is_not(self) -> None:
+        """A broker is a Codex transport, not a local-model fallback."""
+        case = AnswerEvaluationCase(id="sample", question="question")
+        report = evaluate_answers_with_llm_judge(
+            [case],
+            {"sample": AnswerCandidate(answer="answer", sources=[])},
+            judge=StaticJudge(
+                response=_semantic_response("supported"),
+                provider="docker_codex_broker",
+                model="gpt-5.6",
+            ),
+        )
+
+        self.assertEqual(report.provider, "docker_codex_broker")
+
+    def test_broker_judge_refuses_to_start_without_the_internal_token(self) -> None:
+        """No default or host credential may substitute for broker auth."""
+        with self.assertRaisesRegex(ValueError, "broker URL and token"):
+            create_judge(
+                "docker_codex_broker",
+                model="gpt-5.6",
+                ollama_base_url="http://unused",
+            )
+
     def test_enforcing_codex_failure_never_falls_back_to_ollama(self) -> None:
         """A failed quality gate must surface its Codex transport error directly."""
         case = AnswerEvaluationCase(id="sample", question="question")
@@ -253,6 +312,20 @@ class _FailingJudge:
 
     def judge(self, _prompt: str) -> str:
         raise LLMJudgeError("primary failed")
+
+
+class _FakeHTTPResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload).encode("utf-8")
 
 
 def _semantic_response(verdict: str) -> str:

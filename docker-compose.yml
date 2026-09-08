@@ -101,6 +101,39 @@ services:
       timeout: 3s
       retries: 30
 
+  # An opt-in, one-shot semantic evaluator. It shares the Compose network and
+  # ignored API-to-broker token with the application, but never mounts the
+  # broker's Codex session volume or publishes a host port.
+  evaluator:
+    profiles:
+      - evaluation
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    # Keep report artifacts on tmpfs even when `docker compose run` appends
+    # --llm-judge and replaces the service command.
+    entrypoint:
+      - python
+      - scripts/evaluate_retrieval.py
+      - --output
+      - /tmp/librarian-evaluation-report.json
+      - --markdown-output
+      - /tmp/librarian-evaluation-report.md
+    command: []
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      codex-broker:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
   api:
     build:
       context: .

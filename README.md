@@ -409,9 +409,11 @@ rewrite, or display answer prose. It runs only with `answer_capability:
 Docker and native Ollama always retain the deterministic extractive selector.
 
 The JSON `evaluation` section also separates fuzzy answer-quality evaluation
-from normal tests: only its Codex `enforcing_judge` can fail a semantic quality
-run. Its optional Ollama `advisory_judge` is explicitly non-blocking and useful
-only for local schema/reporting smoke checks. See
+from normal tests: its enforcing judge may use direct Codex or the same
+internal `docker_codex_broker` session selected for chat. The broker path needs
+only its one-time Docker-volume login; it does not require a host Codex login.
+Its optional Ollama `advisory_judge` is explicitly non-blocking and useful only
+for local schema/reporting smoke checks. See
 [`docs/configuration.md`](docs/configuration.md) for the model policy and
 commands.
 

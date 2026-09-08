@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 from urllib import error, request
 
 from librarian_config.config import resolve_codex_executable
+from librarian_config.openai_compatible import build_openai_compatible_endpoint
 from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase
 
 
@@ -224,11 +225,81 @@ class OllamaJudge:
         return content.strip()
 
 
+@dataclass(frozen=True)
+class DockerCodexBrokerJudge:
+    """Call the internal Compose Codex broker without host credentials.
+
+    The evaluator container reads the same ignored API-to-broker token that the
+    API uses. It never mounts the broker's Codex session volume, so the single
+    subscription login remains isolated to the broker service.
+    """
+
+    model: str
+    base_url: str
+    api_key: str
+    timeout_seconds: float = 240.0
+    provider: str = "docker_codex_broker"
+
+    def judge(self, prompt: str) -> str:
+        payload = json.dumps(
+            {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a strict RAG answer-quality judge.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "temperature": 0.1,
+            }
+        ).encode("utf-8")
+        endpoint = build_openai_compatible_endpoint(self.base_url, "chat/completions")
+        http_request = request.Request(
+            endpoint,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            # The broker already redacts its Codex CLI diagnostics. Do not copy
+            # any response body here because callers may run a third-party
+            # compatible broker during tests.
+            raise LLMJudgeError(
+                f"Docker Codex broker rejected the judge request (HTTP {exc.code}). "
+                "Verify the broker profile, token, and one-time broker login."
+            ) from exc
+        except error.URLError as exc:
+            raise LLMJudgeError(
+                f"could not reach Docker Codex broker at {endpoint}: {exc}"
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise LLMJudgeError("Docker Codex broker returned invalid JSON") from exc
+
+        choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise LLMJudgeError("Docker Codex broker did not include choices")
+        message = choices[0].get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
+            raise LLMJudgeError("Docker Codex broker did not include message content")
+        return content.strip()
+
+
 def create_judge(
     provider: str,
     *,
     model: str,
     ollama_base_url: str,
+    broker_base_url: str | None = None,
+    broker_api_key: str | None = None,
 ) -> LLMJudge:
     normalized = provider.strip().casefold()
     if normalized == "codex":
@@ -238,6 +309,16 @@ def create_judge(
         )
     if normalized == "ollama":
         return OllamaJudge(model=model, base_url=ollama_base_url)
+    if normalized == "docker_codex_broker":
+        if not broker_base_url or not broker_api_key:
+            raise ValueError(
+                "Docker Codex broker judge requires the configured broker URL and token"
+            )
+        return DockerCodexBrokerJudge(
+            model=model,
+            base_url=broker_base_url,
+            api_key=broker_api_key,
+        )
     raise ValueError(f"unsupported LLM judge provider: {provider}")
 
 
@@ -285,10 +366,10 @@ def evaluate_answers_with_llm_judge(
 def _validate_judge_mode(mode: JudgeMode, judge: LLMJudge) -> None:
     if mode not in {"enforcing", "advisory"}:
         raise ValueError("judge mode must be enforcing or advisory")
-    if mode == "enforcing" and judge.provider != "codex":
+    if mode == "enforcing" and judge.provider not in {"codex", "docker_codex_broker"}:
         raise LLMJudgeError(
-            "only a Codex judge may enforce semantic answer-quality expectations; "
-            "use advisory mode for Ollama smoke checks"
+            "only a Codex judge or Docker Codex broker may enforce semantic "
+            "answer-quality expectations; use advisory mode for Ollama smoke checks"
         )
 
 
