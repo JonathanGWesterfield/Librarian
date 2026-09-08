@@ -1162,6 +1162,48 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(generator.messages, [])
         self.assertEqual(response.sources, [])
 
+    def test_broad_book_question_expands_an_undersized_client_retrieval_limit(self) -> None:
+        """A browser cap cannot make the broad-answer evidence policy impossible."""
+        question = "What does C.S. Lewis say about Christianity?"
+        generator = _FakeGenerator()
+        with (
+            patch(
+                "librarian_chat.chat.embed_query",
+                return_value=_query_embedding_for(question),
+            ),
+            patch(
+                "librarian_chat.chat.resolve_chat_retrieval_backend",
+                return_value="sqlite",
+            ),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_author_search_response(question, count=10),
+            ) as search_chunks,
+            patch(
+                "librarian_chat.chat.create_configured_generator",
+                return_value=generator,
+            ),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    embedding_provider="ollama",
+                    embedding_model="all-minilm",
+                    generation_provider="ollama",
+                    generation_model="qwen2.5:1.5b",
+                    answer_capability="lightweight",
+                    retrieval_limit=5,
+                    book_id="lewis",
+                )
+            )
+
+        self.assertEqual(search_chunks.call_args.args[0].limit, 10)
+        self.assertEqual(response.retrieval_limit, 10)
+        self.assertEqual(len(response.sources), 10)
+        self.assertEqual(response.answer.count("[S"), 10)
+        self.assertEqual(generator.messages, [])
+
     def test_lightweight_lookup_is_extractive_for_scoped_and_unscoped_gate_questions(self) -> None:
         """A lightweight lookup must preserve Mara as the source sentence subject."""
         question = "Who opens the garden gate?"

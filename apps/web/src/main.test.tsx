@@ -1,7 +1,6 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UI_CHAT_RETRIEVAL_LIMIT } from "./api";
 import { App } from "./main";
 
 vi.mock("./activity", () => ({
@@ -130,7 +129,7 @@ describe("Librarian live API interactions", () => {
       "/api/chat/stream",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT }),
+        body: JSON.stringify({ question: chatResponse.question }),
       }),
     ]);
 
@@ -187,7 +186,7 @@ describe("Librarian live API interactions", () => {
     expect(fetchMock.mock.calls[1]).toEqual([
       "/api/chat/stream",
       expect.objectContaining({
-        body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, book_id: "book-1" }),
+        body: JSON.stringify({ question: chatResponse.question, book_id: "book-1" }),
       }),
     ]);
   });
@@ -220,7 +219,7 @@ describe("Librarian live API interactions", () => {
     expect(fetchMock.mock.calls[1]).toEqual([
       "/api/chat/stream",
       expect.objectContaining({
-        body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, author: "Isaac Asimov" }),
+        body: JSON.stringify({ question: chatResponse.question, author: "Isaac Asimov" }),
       }),
     ]);
   });
@@ -332,7 +331,7 @@ describe("Librarian live API interactions", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
     expect(await screen.findByText(authorChatResponse.answer)).toBeTruthy();
     expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({
-      body: JSON.stringify({ question: chatResponse.question, retrieval_limit: UI_CHAT_RETRIEVAL_LIMIT, author: "Isaac Asimov" }),
+      body: JSON.stringify({ question: chatResponse.question, author: "Isaac Asimov" }),
     }));
   });
 

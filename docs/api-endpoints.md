@@ -466,7 +466,10 @@ Request fields:
   not infer capability from a model name, so a larger native Ollama model cannot
   silently inherit the configured lightweight behavior.
 - `book_id`, `book_title`, `author`: optional library scope filters.
-- `retrieval_limit`: number of source chunks to retrieve; defaults to `30`.
+- `retrieval_limit`: requested source retrieval depth; defaults to
+  `30`. For broad questions, the API raises an undersized request to its
+  evidence minimum so a client cannot request fewer passages than the answer
+  policy requires.
 - `include_non_content`: opt into publisher, catalog, and other non-body EPUB
   matter. Questions explicitly about publication metadata do this automatically.
 
@@ -475,7 +478,9 @@ pages cannot become the apparent evidence for a book-level answer. For an
 unscoped question that explicitly names a stored author and asks for that
 author's view, Librarian applies that author only when the metadata match is
 unique. Broad author-view and overview questions require ten distinct source
-chunks and ten directly relevant source sentences; otherwise the API returns an
+chunks and ten directly relevant source sentences. The API also retrieves at
+least ten chunks for those questions, even when a browser or other client asked
+for fewer, so the evidence policy is achievable. Otherwise the API returns an
 insufficiency response instead of asking a model to fill a gap from its prior
 knowledge.
 Publication questions retain only matching non-body EPUB evidence; if that
