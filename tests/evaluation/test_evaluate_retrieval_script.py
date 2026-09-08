@@ -51,6 +51,54 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
         self.assertEqual(create.call_args.args[0], "codex")
         self.assertEqual(create.call_args.kwargs["model"], "gpt-5.6")
 
+    def test_optional_broker_judge_reuses_configured_generation_token(self) -> None:
+        """Compose evaluation has no separate host Codex credential path."""
+        module = _load_script_module()
+        broker_judge = StaticJudge(
+            response=(
+                '{"evidence_verdict":"supported",'
+                '"citation_relevance":"all_relevant",'
+                '"missing_coverage":[],"unsupported_claims":[],'
+                '"reason":"Broker fixture."}'
+            ),
+            provider="docker_codex_broker",
+            model="gpt-5.6",
+        )
+        generation = SimpleNamespace(
+            base_url="http://codex-broker:3000/v1",
+            api_key="internal-bridge-token",
+        )
+        with (
+            patch.object(
+                module,
+                "resolve_evaluation_judge",
+                return_value=SimpleNamespace(
+                    provider="docker_codex_broker", model="gpt-5.6"
+                ),
+            ),
+            patch.object(
+                module,
+                "get_librarian_config",
+                return_value=SimpleNamespace(generation=generation),
+            ),
+            patch.object(module, "create_judge", return_value=broker_judge) as create,
+        ):
+            judge = module._create_optional_judge(
+                enabled=True,
+                mode="enforcing",
+                ollama_base_url="http://unused",
+            )
+
+        self.assertIs(judge, broker_judge)
+        self.assertEqual(create.call_args.args[0], "docker_codex_broker")
+        self.assertEqual(
+            create.call_args.kwargs["broker_base_url"],
+            "http://codex-broker:3000/v1",
+        )
+        self.assertEqual(
+            create.call_args.kwargs["broker_api_key"], "internal-bridge-token"
+        )
+
     def test_codex_judge_transport_failure_is_a_safe_cli_failure(self) -> None:
         """A nonzero Codex exit reaches operators without a traceback or fallback."""
         module = _load_script_module()

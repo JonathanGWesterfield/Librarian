@@ -107,12 +107,21 @@ class CodexBrokerTests(unittest.TestCase):
         self.assertNotIn("should-not-leak", response.text)
 
     def test_compose_keeps_codex_session_in_a_named_volume_only(self) -> None:
-        """The Compose definition must never bind-mount host Codex credentials."""
+        """Only the broker may retain a Codex session or publish no host port."""
         compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn("codex-broker-session:/root/.codex", compose)
         self.assertIn("codex-broker-session:", compose)
         self.assertNotIn("- ~/.codex:", compose)
+        evaluator = compose.split("  evaluator:\n", maxsplit=1)[1].split(
+            "\n  api:\n", maxsplit=1
+        )[0]
+        self.assertIn("- evaluation", evaluator)
+        self.assertIn("codex-broker:", evaluator)
+        self.assertNotIn("codex-broker-session", evaluator)
+        self.assertNotIn("ports:", evaluator)
+        self.assertIn("/tmp/librarian-evaluation-report.json", evaluator)
+        self.assertIn("command: []", evaluator)
 
     def _configured_client(self):
         temporary_directory = tempfile.TemporaryDirectory()

@@ -86,7 +86,7 @@ from librarian_evaluation.retrieval import (
     evaluate_retrieval_cases,
 )
 from librarian_logging import configure_cli_logging
-from librarian_config.config import resolve_evaluation_judge
+from librarian_config.config import get_librarian_config, resolve_evaluation_judge
 from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
 from librarian_search.search import SearchResponse, SearchResult
 
@@ -761,10 +761,22 @@ def _create_optional_judge(
     if not enabled:
         return None
     selection = resolve_evaluation_judge(mode)
+    broker_base_url = None
+    broker_api_key = None
+    if selection.provider == "docker_codex_broker":
+        # Config validation guarantees this is the same Docker broker selected
+        # for generation, including its model and ignored internal token. The
+        # evaluator must run as a Compose service: `codex-broker` deliberately
+        # has no host port.
+        generation = get_librarian_config().generation
+        broker_base_url = generation.base_url
+        broker_api_key = generation.api_key
     return create_judge(
         selection.provider,
         model=selection.model,
         ollama_base_url=ollama_base_url or "http://localhost:11434",
+        broker_base_url=broker_base_url,
+        broker_api_key=broker_api_key,
     )
 
 

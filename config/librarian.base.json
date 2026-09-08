@@ -32,7 +32,7 @@
   },
   "evaluation": {
     "enforcing_judge": {
-      "provider": "codex",
+      "provider": "docker_codex_broker",
       "model": "gpt-5.6"
     },
     "advisory_judge": {

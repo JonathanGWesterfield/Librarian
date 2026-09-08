@@ -33,7 +33,11 @@ _ALLOWED_PROVIDER_MODES = {
 }
 _ALLOWED_ANSWER_CAPABILITIES = {"quality", "lightweight"}
 _ALLOWED_SEMANTIC_SELECTOR_PROVIDERS = {"codex", "docker_codex_broker"}
-_ALLOWED_EVALUATION_JUDGE_PROVIDERS = {"codex", "ollama"}
+_ALLOWED_EVALUATION_JUDGE_PROVIDERS = {
+    "codex",
+    "docker_codex_broker",
+    "ollama",
+}
 _HTTP_HEADER_NAME = frozenset(
     "!#$%&'*+.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-"
 )
@@ -232,21 +236,22 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
         raise LibrarianConfigError("Librarian configuration version must be the number 1.")
 
     config_root = path.parent.resolve()
+    generation = _parse_provider(
+        root.get("generation"), role="generation", config_root=config_root
+    )
     return LibrarianConfig(
         path=path,
         paths=_parse_paths(root.get("paths")),
         embedding=_parse_provider(
             root.get("embedding"), role="embedding", config_root=config_root
         ),
-        generation=_parse_provider(
-            root.get("generation"), role="generation", config_root=config_root
-        ),
+        generation=generation,
         search=_parse_search(root.get("search")),
         summaries=_parse_summaries(root.get("summaries")),
         semantic_source_selector=_parse_semantic_source_selector(
             root.get("semantic_source_selector")
         ),
-        evaluation=_parse_evaluation(root.get("evaluation")),
+        evaluation=_parse_evaluation(root.get("evaluation"), generation=generation),
         services=_parse_services(root.get("services")),
         codex_executable=_require_string(root.get("codex_executable"), "codex_executable"),
     )
@@ -592,7 +597,11 @@ def _parse_semantic_source_selector(value: object) -> SemanticSourceSelectorSett
     )
 
 
-def _parse_evaluation(value: object) -> EvaluationSettings | None:
+def _parse_evaluation(
+    value: object,
+    *,
+    generation: ProviderSettings,
+) -> EvaluationSettings | None:
     """Parse optional LLM-judge settings without enabling any remote call."""
 
     if value is None:
@@ -607,16 +616,32 @@ def _parse_evaluation(value: object) -> EvaluationSettings | None:
         evaluation.get("enforcing_judge"),
         label="evaluation.enforcing_judge",
     )
-    if enforcing_judge.provider != "codex":
+    if enforcing_judge.provider not in {"codex", "docker_codex_broker"}:
         raise LibrarianConfigError(
-            "evaluation.enforcing_judge.provider must be codex"
+            "evaluation.enforcing_judge.provider must be codex or docker_codex_broker"
+        )
+    if enforcing_judge.provider == "docker_codex_broker":
+        if not generation.uses_docker_codex_broker:
+            raise LibrarianConfigError(
+                "evaluation.enforcing_judge.provider docker_codex_broker requires "
+                "generation.mode to be docker_codex_broker"
+            )
+        if enforcing_judge.model != generation.model:
+            raise LibrarianConfigError(
+                "evaluation.enforcing_judge.model must match generation.model "
+                "when using docker_codex_broker"
+            )
+    advisory_judge = _parse_evaluation_judge(
+        evaluation.get("advisory_judge"),
+        label="evaluation.advisory_judge",
+    )
+    if advisory_judge.provider == "docker_codex_broker":
+        raise LibrarianConfigError(
+            "evaluation.advisory_judge.provider must be codex or ollama"
         )
     return EvaluationSettings(
         enforcing_judge=enforcing_judge,
-        advisory_judge=_parse_evaluation_judge(
-            evaluation.get("advisory_judge"),
-            label="evaluation.advisory_judge",
-        ),
+        advisory_judge=advisory_judge,
     )
 
 
@@ -629,7 +654,9 @@ def _parse_evaluation_judge(
     _reject_unknown_keys(judge, {"provider", "model"}, label)
     provider = _require_string(judge.get("provider"), f"{label}.provider").casefold()
     if provider not in _ALLOWED_EVALUATION_JUDGE_PROVIDERS:
-        raise LibrarianConfigError(f"{label}.provider must be codex or ollama")
+        raise LibrarianConfigError(
+            f"{label}.provider must be codex, docker_codex_broker, or ollama"
+        )
     return EvaluationJudgeSettings(
         provider=provider,
         model=_require_string(judge.get("model"), f"{label}.model"),

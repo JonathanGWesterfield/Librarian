@@ -36,6 +36,12 @@ the named `codex-broker-session` volume. It exposes no host port and never
 mounts host Codex credentials. Docker Compose starts only the Docker Ollama
 models and Codex broker selected by JSON.
 
+Choosing this remote profile is an explicit privacy decision: the user's
+question and only the retrieved candidate passages needed for source selection
+or evaluation leave the machine for Codex. EPUB files, SQLite, OpenSearch, and
+embedding generation remain local. The automatically created example profile
+does not make any remote call and continues to use Docker Ollama by default.
+
 Both `scripts/start_local.sh` and `scripts/start_local.ps1` run the JSON
 resolver first and automatically enable the `codex-broker` Compose profile when
 `generation.mode` is `docker_codex_broker`. They do not start Docker Ollama for
@@ -78,7 +84,7 @@ the required companion fields.
 | `native_ollama` | Embedding and generation | `model`, `base_url` | Calls an Ollama service already running on the host or network. |
 | `openai_compatible` | Embedding and generation | `model`, `base_url`, `api_key_file` | Calls a gateway and does not start Ollama for that section. |
 | `docker_codex_broker` | Generation only | `model`, `api_key_file` | Starts the internal-only Compose Codex broker. Its session stays in a named Docker volume; the token authenticates only API/worker-to-broker traffic. |
-| `codex` | Generation only | `model` | Runs the configured host Codex CLI; this is for host-side tooling, not the Docker API container. |
+| `codex` | Generation only | `model` | Runs the configured host Codex CLI; this is an advanced host-side option, not the Docker API container. |
 
 For `native_ollama`, Docker Desktop users normally use
 `http://host.docker.internal:11434`. For `openai_compatible`, the base URL must
@@ -136,7 +142,7 @@ the deterministic test suite. It has two deliberately different roles:
 {
   "evaluation": {
     "enforcing_judge": {
-      "provider": "codex",
+      "provider": "docker_codex_broker",
       "model": "gpt-5.6"
     },
     "advisory_judge": {
@@ -147,16 +153,28 @@ the deterministic test suite. It has two deliberately different roles:
 }
 ```
 
-`enforcing_judge` must be Codex. Running
-`python3 scripts/evaluate_retrieval.py --llm-judge` uses its JSON-configured
-model through `codex exec --model <model> --ephemeral` and returns failure on a
+`enforcing_judge` must use Codex, either directly (`codex`) or through the
+internal `docker_codex_broker`. The broker is the supported Docker path and is
+what the base profile selects. It uses the same named-volume Codex login and
+the same ignored API-to-broker token as chat's semantic source selector; it
+does not require a second host `codex login`.
+
+After `scripts/start_local.sh` has started the base profile, run its enforcing
+judge inside the Compose network:
+
+```bash
+docker compose -f docker-compose.yml -f .runtime/librarian.compose.json \
+  --profile codex-broker --profile evaluation run --rm evaluator --llm-judge
+```
+
+The evaluator has no host port and does not mount `codex-broker-session`; only
+the broker can read the subscription session. The command returns failure on a
 transport problem, invalid judge schema, or mismatch with a curated
 `expected_judge_verdict`. There is no Ollama or configured-provider fallback.
-If Codex exits nonzero, the command reports the exit code and a concise,
-credential-redacted stderr diagnostic rather than a bare Python
-`CalledProcessError`. Complete the host Codex login, verify the configured
-model is available, and rerun the same command; an enforcing run never passes
-or downgrades to Ollama after that failure.
+For the advanced direct-host option, run
+`python3 scripts/evaluate_retrieval.py --llm-judge` after completing a host
+Codex login.
+Both modes send only the question, scoped answer, and cited passages to Codex.
 
 `advisory_judge` may be Codex or Ollama. Run it only with
 `--judge-mode advisory`; it validates the same schema and records diagnostics,
