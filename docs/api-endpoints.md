@@ -49,7 +49,7 @@ Accepts the non-streaming OpenAI-compatible subset used internally:
 
 ```json
 {
-  "model": "gpt-5.6",
+  "model": "gpt-5.6-sol",
   "messages": [{"role": "user", "content": "Use these passages."}],
   "stream": false
 }
@@ -432,12 +432,12 @@ Response:
 
 ### `POST /chat`
 
-Retrieves local source chunks and returns a deterministic, source-faithful
-answer. Each displayed factual sentence is copied from a selected local source
-sentence and carries that source ID. The normal provider, model, and answer
-capability are still reported from the ignored, user-owned
-`config/librarian.json` file for API/configuration compatibility, but they do
-not rewrite chat claims.
+Retrieves local source chunks and returns a grounded answer. The default local
+path copies selected source sentences. The explicitly configured Codex quality
+path returns a validated synthesis in the model's own words followed by
+Librarian-assigned source IDs; citations remain separate, verbatim source
+cards. The normal provider, model, and answer capability are reported from the
+ignored, user-owned `config/librarian.json` file.
 
 Chat retrieval follows `search.retrieval_backend` in that JSON configuration:
 
@@ -503,19 +503,22 @@ the stage `timings`.
 selection or invalid configured generation input. Malformed request fields
 remain FastAPI validation errors (`422`).
 
-This policy is the same for `lightweight`, `quality`, Ollama, Codex, and
-OpenAI-compatible provider settings: no provider can rewrite the cited source
-text. An insufficiency response has no citations, because retrieved chunks that
-fail the direct-relevance guard are diagnostics rather than support for the
-answer.
+`lightweight` and local Ollama paths return exact evidence text. The explicitly
+configured Codex quality path returns a concise answer in the model's own words
+plus Librarian-assigned source markers; its citation cards still contain the
+verbatim EPUB evidence. A malformed, unsafe, or unavailable quality response is
+withheld with no citations rather than replaced by a quotation dump. An
+insufficiency response also has no citations, because retrieved chunks that fail
+the direct-relevance guard are diagnostics rather than support for the answer.
 
 When the user-owned JSON configuration explicitly enables the trusted Codex
-semantic selector, `quality` chat may use it to choose among the already
-retrieved, scope-filtered source-sentence IDs. The returned answer remains the
-exact selected book text with its existing citations. Invalid selector JSON,
-unknown or duplicate IDs, a failed selector call, or a selection that misses
-the evidence floor automatically uses the normal deterministic extractor.
-Ollama configurations never enable this selector.
+quality selector, `quality` chat sends already retrieved, scope-filtered source
+sentences and requires a closed JSON object containing an answer and selected
+sentence IDs. Librarian validates the IDs and assigns existing citations; it
+does not trust model-provided citation markers. Invalid JSON, unknown or
+duplicate IDs, an unsafe answer, a failed selector call, or a selection that
+misses the evidence floor withholds the quality response instead of returning
+raw source quotations. Ollama configurations never enable this selector.
 
 ### `POST /chat/stream`
 
@@ -530,17 +533,17 @@ Events are emitted in this order:
    retrieval and all evidence guards have completed. It is always the first
    event, so the UI can show useful grounded progress and source provenance.
    An insufficient-evidence response has `sources: []` here.
-2. Zero or more `token` events, each with `{"text":"..."}`. Every token is
-   one exact source sentence followed by its Librarian-assigned source ID. No
-   model fragment is sent to the client, so a source statement such as “Mara
-   did not open the gate” cannot become “Mara opened the gate,” and temporal
-   wording cannot become an invented cause. For event questions such as “What
-   happened when…?”, Librarian may append the immediately following exact
-   source sentence when it shares an event, object, or setting term with the
-   question or selected event sentence. A shared actor alone is not enough,
-   and adjacency alone is not enough. Broad answers emit
-   one exact, directly relevant sentence per required source. Providers do not
-   change this contract.
+2. Zero or more `token` events, each with `{"text":"..."}`. Lightweight and
+   local-Ollama paths emit exact source sentences followed by Librarian-assigned
+   source IDs. The explicitly configured Codex quality path emits one complete,
+   validated synthesis plus Librarian-assigned source IDs; it never forwards raw
+   model fragments. Its selected IDs must map to scoped, retrieved source
+   sentences, and unsupported causal wording is rejected. For event questions
+   such as “What happened when…?”, the extractive path may append the
+   immediately following exact source sentence when it shares an event, object,
+   or setting term with the question or selected event sentence. A shared actor
+   alone is not enough, and adjacency alone is not enough. Broad extractive
+   answers emit one exact, directly relevant sentence per required source.
 3. Exactly one terminal `complete` event with the authoritative full answer,
    citations, retrieval metadata, and timings. Its `timings` also includes
    `time_to_first_event_seconds` and `time_to_first_token_seconds`.

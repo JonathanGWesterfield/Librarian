@@ -115,11 +115,11 @@ class SummarySettings:
 
 @dataclass(frozen=True)
 class SemanticSourceSelectorSettings:
-    """Explicit, opt-in model policy for choosing existing source sentences.
+    """Explicit quality policy for grounded answers and source sentences.
 
-    The selector is deliberately not a general generation provider.  Its only
-    job is to choose IDs from the exact retrieved sentences that chat already
-    considers eligible evidence.
+    It is deliberately restricted to the configured generation model. That
+    model may write answer prose only when it also selects IDs from the exact
+    retrieved sentences that chat already considers eligible evidence.
     """
 
     enabled: bool

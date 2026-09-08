@@ -25,17 +25,20 @@ from librarian_storage.storage import BookRecord, SQLiteIngestionStore, utc_now
 
 
 class ChatTests(unittest.TestCase):
-    def test_trusted_codex_selector_handles_equivalent_event_wording_exactly(self) -> None:
-        """Codex may select both book sentences without writing a paraphrase."""
+    def test_trusted_codex_quality_model_returns_grounded_synthesis(self) -> None:
+        """Codex writes human-readable prose while Librarian owns citations."""
         question = "What did Mara do, and how did the garden react?"
         source_text = (
             "Mara opened the garden gate with a borrowed key. "
             "The clockwork garden answered in careful ticking."
         )
-        generation = _FakeCodexGenerator(model="gpt-5.6")
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
         selector = _FakeCodexGenerator(
-            model="gpt-5.6",
-            response='{"sentence_ids":["S1:1","S1:2"]}',
+            model="gpt-5.6-sol",
+            response=(
+                '{"answer":"Mara opens the gate, and the garden responds with '
+                'careful ticking.","sentence_ids":["S1:1","S1:2"]}'
+            ),
         )
         with (
             patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
@@ -55,22 +58,68 @@ class ChatTests(unittest.TestCase):
                     embedding_provider="ollama",
                     embedding_model="all-minilm",
                     generation_provider="codex",
-                    generation_model="gpt-5.6",
+                    generation_model="gpt-5.6-sol",
                     answer_capability="quality",
                 )
             )
 
         self.assertEqual(
             response.answer,
-            "Mara opened the garden gate with a borrowed key. [S1]\n\n"
-            "The clockwork garden answered in careful ticking. [S1]",
+            "Mara opens the gate, and the garden responds with careful ticking. [S1]",
         )
         self.assertEqual(response.sources[0].source_id, "S1")
+        self.assertNotIn("borrowed key", response.answer)
+        self.assertIn('"answer"', selector.messages[-1].content)
         self.assertIn("sentence_ids", selector.messages[-1].content)
+        self.assertEqual(selector.generate_calls, 1)
         self.assertEqual(generation.messages, [])
 
-    def test_trusted_selector_rejects_malicious_ids_and_falls_back_to_extraction(self) -> None:
-        """Malformed, duplicate, and out-of-scope IDs cannot alter source text."""
+    def test_trusted_codex_synthesis_uses_the_same_streaming_contract(self) -> None:
+        """The non-streaming broker response becomes one safe visible SSE token."""
+        question = "Who opens the garden gate?"
+        source_text = "Mara opened the garden gate with a borrowed key."
+        generator = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            response=(
+                '{"answer":"Mara is the one who opens the garden gate.",'
+                '"sentence_ids":["S1:1"]}'
+            ),
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=generator),
+        ):
+            events = list(
+                stream_answer_question(
+                    prepare_answer_question(
+                        ChatOptions(
+                            question=question,
+                            database_url="sqlite:///tmp/librarian.db",
+                            generation_provider="codex",
+                            generation_model="gpt-5.6-sol",
+                            answer_capability="quality",
+                        )
+                    )
+                )
+            )
+
+        self.assertEqual([event.event for event in events], ["retrieval", "token", "complete"])
+        self.assertEqual(
+            events[1].data["text"],
+            "Mara is the one who opens the garden gate. [S1]",
+        )
+        self.assertEqual(events[-1].data["answer"], events[1].data["text"])
+        self.assertEqual(events[-1].data["sources"][0]["source_id"], "S1")
+
+    def test_trusted_synthesis_rejects_invalid_evidence_or_unsupported_claims(self) -> None:
+        """Invalid source IDs and unsupported causal claims never become answers."""
         question = "What happened when Mara opened the garden gate?"
         source_text = (
             "Mara opened the garden gate with a borrowed key. "
@@ -83,8 +132,8 @@ class ChatTests(unittest.TestCase):
             '{"sentence_ids":["S1:1"],"answer":"Mara caused ticking."}',
         ):
             with self.subTest(selector_response=response):
-                generation = _FakeCodexGenerator(model="gpt-5.6")
-                selector = _FakeCodexGenerator(model="gpt-5.6", response=response)
+                generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+                selector = _FakeCodexGenerator(model="gpt-5.6-sol", response=response)
                 with (
                     patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
                     patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
@@ -101,29 +150,32 @@ class ChatTests(unittest.TestCase):
                             question=question,
                             database_url="sqlite:///tmp/librarian.db",
                             generation_provider="codex",
-                            generation_model="gpt-5.6",
+                            generation_model="gpt-5.6-sol",
                             answer_capability="quality",
                         )
                     ).answer
 
                 self.assertEqual(
                     answer,
-                    "Mara opened the garden gate with a borrowed key. [S1]\n\n"
-                    "The clockwork garden answered in careful ticking. [S1]",
+                    "I found relevant passages, but could not produce a grounded summary "
+                    "from them. Please try again.",
                 )
                 self.assertNotIn("caused", answer)
 
-    def test_trusted_selector_preserves_negation_and_never_invents_causality(self) -> None:
-        """A trusted selector still returns exact book sentences, not model claims."""
+    def test_trusted_synthesis_preserves_negation_and_never_invents_causality(self) -> None:
+        """A quality answer remains guarded against unsupported causal language."""
         question = "Why did the garden tick?"
         source_text = (
             "Mara did not open the garden gate. "
             "The garden ticked after Mara left."
         )
-        generation = _FakeCodexGenerator(model="gpt-5.6")
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
         selector = _FakeCodexGenerator(
-            model="gpt-5.6",
-            response='{"sentence_ids":["S1:1","S1:2"]}',
+            model="gpt-5.6-sol",
+            response=(
+                '{"answer":"The passages say Mara did not open the gate and that '
+                'the ticking followed her departure.","sentence_ids":["S1:1","S1:2"]}'
+            ),
         )
         with (
             patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
@@ -141,15 +193,15 @@ class ChatTests(unittest.TestCase):
                     question=question,
                     database_url="sqlite:///tmp/librarian.db",
                     generation_provider="codex",
-                    generation_model="gpt-5.6",
+                    generation_model="gpt-5.6-sol",
                     answer_capability="quality",
                 )
             ).answer
 
         self.assertEqual(
             answer,
-            "Mara did not open the garden gate. [S1]\n\n"
-            "The garden ticked after Mara left. [S1]",
+            "The passages say Mara did not open the gate and that the ticking followed "
+            "her departure. [S1]",
         )
         self.assertNotIn("because", answer.casefold())
 
@@ -1618,8 +1670,10 @@ class _FakeCodexGenerator(_FakeGenerator):
         super().__init__()
         self.model = model
         self.response = response
+        self.generate_calls = 0
 
     def generate(self, messages, *, response_format=None):
+        self.generate_calls += 1
         self.messages = messages
         self.response_format = response_format
         return self.response
@@ -1631,13 +1685,13 @@ def _trusted_codex_config():
     return SimpleNamespace(
         generation=SimpleNamespace(
             provider="codex",
-            model="gpt-5.6",
+            model="gpt-5.6-sol",
             answer_capability="quality",
         ),
         semantic_source_selector=SimpleNamespace(
             enabled=True,
             provider="codex",
-            model="gpt-5.6",
+            model="gpt-5.6-sol",
         ),
     )
 

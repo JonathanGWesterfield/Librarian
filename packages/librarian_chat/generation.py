@@ -323,7 +323,7 @@ def create_configured_generator(
 ) -> Generator:
     resolved_provider = resolve_generation_provider(provider)
     # Direct Codex remains a normal JSON-configured generation provider.  Do
-    # not replace a configured model (for example ``gpt-5.6``) with the legacy
+    # not replace a configured model (for example ``gpt-5.6-sol``) with the legacy
     # ``codex`` placeholder simply because this request did not override it.
     resolved_model = resolve_generation_model(model)
     normalized = resolved_provider.strip().casefold()

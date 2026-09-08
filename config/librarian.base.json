@@ -12,7 +12,7 @@
   },
   "generation": {
     "mode": "docker_codex_broker",
-    "model": "gpt-5.6",
+    "model": "gpt-5.6-sol",
     "api_key_file": "secrets/codex-bridge-token.txt",
     "answer_capability": "quality"
   },
@@ -28,12 +28,12 @@
   "semantic_source_selector": {
     "enabled": true,
     "provider": "docker_codex_broker",
-    "model": "gpt-5.6"
+    "model": "gpt-5.6-sol"
   },
   "evaluation": {
     "enforcing_judge": {
       "provider": "docker_codex_broker",
-      "model": "gpt-5.6"
+      "model": "gpt-5.6-sol"
     },
     "advisory_judge": {
       "provider": "ollama",
