@@ -67,11 +67,13 @@ small set of relevant passages are sent to Codex CLI. The broker keeps its own
 Codex login in a named Docker volume, rather than mounting host credentials or
 requiring an OpenAI API key.
 
-Chat answers take a stricter path: after retrieval, Librarian selects directly
-relevant source sentences and returns those exact sentences with citations. It
-does not let an answer model rewrite, reverse, negate, or add causal claims to
-the evidence. This is intentionally conservative while the project builds a
-separate, semantically verified synthesis layer.
+Chat answers take a strict grounded path. The local default selects directly
+relevant source sentences and returns exact text with citations. The optional
+Codex quality profile instead returns a concise synthesis in the model's own
+words, but only alongside model-selected IDs for retrieved, scope-filtered
+sentences. Librarian validates those IDs, owns the citation markers, rejects
+verbatim quotation dumps and unsupported causal wording, and withholds an
+invalid synthesis rather than presenting it as an answer.
 
 Codex is not used as the embedding system. Embeddings require stable numeric
 vectors, so they should come from a local embedding model such as
@@ -129,11 +131,11 @@ work well alongside semantic queries.
 
 ### Generation
 
-Chat response construction happens after retrieval. Librarian selects exact,
-directly relevant source sentences, cites each one, and clearly says when the
-retrieved evidence is insufficient. Generation providers remain available for
-summaries, tagging, genres, and recommendations; they cannot rewrite chat
-claims until an entailment-verification layer is available.
+Chat response construction happens after retrieval. Librarian always cites
+directly relevant source sentences and clearly says when evidence is
+insufficient. The local default remains extractive; an explicit Codex quality
+profile can produce a human-readable synthesis only through its closed,
+validated answer-and-source-ID contract.
 
 ### Codex Broker
 
@@ -401,12 +403,14 @@ generated Compose override.
 there and must instead be referenced through `header_files` below
 `config/secrets/`. This keeps every credential out of `librarian.json`.
 
-For difficult natural-language event questions, an administrator may opt into
-the JSON `semantic_source_selector` using a trusted Codex model. The selector
-can choose only IDs for already-retrieved book sentences; it cannot draft,
-rewrite, or display answer prose. It runs only with `answer_capability:
-"quality"` through direct Codex or the explicit `docker_codex_broker` mode.
-Docker and native Ollama always retain the deterministic extractive selector.
+For difficult natural-language questions, an administrator may opt into the
+JSON `semantic_source_selector` using a trusted Codex model. It returns a
+closed answer-and-source-ID JSON object for already-retrieved book sentences.
+Librarian validates the IDs and attaches the citations; it rejects invalid
+schemas, model citation markers, verbatim quotation dumps, and unsupported
+causal wording. It runs only with `answer_capability: "quality"` through direct
+Codex or the explicit `docker_codex_broker` mode. Docker and native Ollama
+always retain the deterministic extractive selector.
 
 The JSON `evaluation` section also separates fuzzy answer-quality evaluation
 from normal tests: its enforcing judge may use direct Codex or the same

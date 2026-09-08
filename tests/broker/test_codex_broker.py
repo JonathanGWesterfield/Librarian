@@ -42,7 +42,7 @@ class CodexBrokerTests(unittest.TestCase):
                     "/v1/chat/completions",
                     headers={"Authorization": "Bearer test-bridge-token"},
                     json={
-                        "model": "gpt-5.6",
+                        "model": "gpt-5.6-sol",
                         "messages": [
                             {"role": "system", "content": "Use only sources."},
                             {"role": "user", "content": "Question?"},
@@ -62,7 +62,7 @@ class CodexBrokerTests(unittest.TestCase):
                 "codex",
                 "exec",
                 "--model",
-                "gpt-5.6",
+                "gpt-5.6-sol",
                 "--ephemeral",
                 "--skip-git-repo-check",
                 "--sandbox",
@@ -77,7 +77,7 @@ class CodexBrokerTests(unittest.TestCase):
         with self._configured_client() as client:
             missing_token = client.post(
                 "/v1/chat/completions",
-                json={"model": "gpt-5.6", "messages": [{"role": "user", "content": "Q"}]},
+                json={"model": "gpt-5.6-sol", "messages": [{"role": "user", "content": "Q"}]},
             )
             wrong_model = client.post(
                 "/v1/chat/completions",
@@ -100,7 +100,7 @@ class CodexBrokerTests(unittest.TestCase):
                 response = client.post(
                     "/v1/chat/completions",
                     headers={"Authorization": "Bearer test-bridge-token"},
-                    json={"model": "gpt-5.6", "messages": [{"role": "user", "content": "Q"}]},
+                    json={"model": "gpt-5.6-sol", "messages": [{"role": "user", "content": "Q"}]},
                 )
 
         self.assertEqual(response.status_code, 502)

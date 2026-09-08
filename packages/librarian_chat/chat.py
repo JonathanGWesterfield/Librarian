@@ -78,6 +78,9 @@ _EVENT_QUESTION_PREFIXES = (
 _EVENT_FOLLOWUP_MARKER = re.compile(
     r"\b(?:after|afterward|immediately|next|then|following)\b"
 )
+_CAUSAL_CLAIM = re.compile(
+    r"\b(?:because|caused|causes|causing|therefore|thus|as a result|resulted in|led to)\b"
+)
 _PUBLICATION_METADATA_TERMS = (
     "copyright",
     "edition",
@@ -345,9 +348,9 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         # citations alongside an insufficiency response.
         sources = []
 
-    # Preserve the timing field for existing API clients. The chat path does
-    # not build a generation prompt because it never asks a model to rewrite
-    # the source evidence.
+    # Preserve the timing field for existing API clients. Deterministic and
+    # lightweight paths remain extractive; the explicitly configured Codex
+    # quality path builds one structured synthesis prompt below.
     prompt_construction_seconds = 0.0
 
     generator = create_configured_generator(
@@ -363,32 +366,43 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
             required_sources=required_sources,
         )
     else:
-        grounded_answer = _semantic_source_selection_answer(
+        synthesis = _semantic_grounded_synthesis_answer(
             question,
             sources,
             required_sources=required_sources,
             answer_capability=answer_capability,
             generator=generator,
         )
-        if grounded_answer is None:
+        if synthesis.answer is not None:
+            sources, immediate_answer = synthesis.answer
+            grounded_tokens = [immediate_answer]
+        elif synthesis.attempted:
+            # A trusted quality generator is allowed to write prose only when
+            # it also returns a valid, scoped evidence selection.  Do not turn
+            # an invalid model response into a successful-looking quotation
+            # dump: that would obscure the generation failure and contradict
+            # the user-facing synthesis contract.
+            sources = []
+            immediate_answer = _grounded_generation_unavailable_answer()
+        else:
             grounded_answer = _grounded_extractive_answer(
                 question,
                 sources,
                 required_sources=required_sources,
             )
-        if grounded_answer is None:
-            # Retrieval candidates without a directly relevant source
-            # sentence are diagnostics, not answer evidence. This applies to
-            # every configured provider and capability: no model may alter or
-            # invent a claim from those chunks.
-            sources = []
-            immediate_answer = _insufficient_evidence_answer(
-                publication_question=publication_question,
-                required_sources=required_sources,
-            )
-        else:
-            sources, grounded_tokens = grounded_answer
-            immediate_answer = "\n\n".join(grounded_tokens)
+            if grounded_answer is None:
+                # Retrieval candidates without a directly relevant source
+                # sentence are diagnostics, not answer evidence. This applies
+                # to every configured provider and capability: no model may
+                # alter or invent a claim from those chunks.
+                sources = []
+                immediate_answer = _insufficient_evidence_answer(
+                    publication_question=publication_question,
+                    required_sources=required_sources,
+                )
+            else:
+                sources, grounded_tokens = grounded_answer
+                immediate_answer = "\n\n".join(grounded_tokens)
     preparation = PreparedChat(
         total_started=total_started,
         question=question,
@@ -431,7 +445,7 @@ def answer_question(options: ChatOptions) -> ChatResponse:
 
 
 def stream_answer_question(preparation: PreparedChat) -> Iterator[ChatStreamEvent]:
-    """Stream the same exact source sentences returned by the JSON contract."""
+    """Stream the same validated answer and citations returned by the JSON contract."""
     generation_started = perf_counter()
     first_event_seconds: float | None = None
     first_token_seconds: float | None = None
@@ -709,6 +723,15 @@ def _insufficient_evidence_answer(
     return "I could not find enough relevant body-text evidence to answer that reliably."
 
 
+def _grounded_generation_unavailable_answer() -> str:
+    """Explain a rejected quality response without presenting it as an answer."""
+
+    return (
+        "I found relevant passages, but could not produce a grounded summary from "
+        "them. Please try again."
+    )
+
+
 def _is_publication_evidence(
     question: str,
     content_type: str,
@@ -854,48 +877,65 @@ def _grounded_extractive_answer(
     return selected_sources, tokens
 
 
-def _semantic_source_selection_answer(
+@dataclass(frozen=True)
+class _SemanticSynthesisAttempt:
+    """A trusted synthesis result, including whether a model was actually used."""
+
+    attempted: bool
+    answer: tuple[list[ChatSource], str] | None
+
+
+def _semantic_grounded_synthesis_answer(
     question: str,
     sources: list[ChatSource],
     *,
     required_sources: int,
     answer_capability: str,
     generator: Generator,
-) -> tuple[list[ChatSource], list[str]] | None:
-    """Use a trusted Codex selector to choose exact, already-retrieved text.
+) -> _SemanticSynthesisAttempt:
+    """Ask the trusted quality model for prose plus its exact source sentence IDs.
 
-    A selector gets no authority to draft an answer. It returns only IDs from
-    the candidate source sentences below; strict validation then maps those IDs
-    back to byte-for-byte book text. Every unavailable, malformed, or unsafe
-    result returns ``None`` so the deterministic selector remains the fallback.
+    The model receives only already retrieved, scope-filtered source sentences.
+    It must return a closed JSON object containing its human-readable answer and
+    the source sentence IDs that support it. Librarian validates the IDs and
+    assigns the visible citations itself; the model cannot cite an unknown
+    passage or smuggle citation markup into prose. An invalid or unavailable
+    trusted response is not downgraded to an extractive success.
     """
 
     if _asks_for_publication_metadata(question):
-        return None
+        return _SemanticSynthesisAttempt(attempted=False, answer=None)
     selector = _trusted_semantic_selector(
         answer_capability=answer_capability,
         generator=generator,
     )
     if selector is None:
-        return None
+        return _SemanticSynthesisAttempt(attempted=False, answer=None)
 
-    candidates = _source_sentence_candidates(sources)
-    if not candidates:
-        return None
+    candidates = _source_sentence_candidates(
+        question,
+        sources,
+        required_sources=required_sources,
+    )
+    if len({candidate.source.chunk_id for candidate in candidates}) < required_sources:
+        return _SemanticSynthesisAttempt(attempted=False, answer=None)
     try:
         raw_selection = selector.generate(
             [
                 ChatMessage(
                     role="system",
                     content=(
-                        "You select existing source sentence IDs for a book assistant. "
-                        "Never write an answer, summary, explanation, citation, or new "
-                        "sentence. Return only the requested JSON object."
+                        "You are a book assistant. Write a concise, direct answer in your "
+                        "own words using only the supplied source sentences. Every factual "
+                        "claim must be supported by the sentence IDs you select. Do not quote "
+                        "a source sentence verbatim, do not add source IDs or citation markers "
+                        "to the answer, and do not use outside knowledge. Return only the "
+                        "requested JSON object."
                     ),
                 ),
                 ChatMessage(
                     role="user",
-                    content=_semantic_selector_prompt(
+                    content=_semantic_synthesis_prompt(
                         question,
                         candidates,
                         required_sources=required_sources,
@@ -904,17 +944,20 @@ def _semantic_source_selection_answer(
             ],
             response_format="json",
         )
-        return _validated_semantic_selection(
-            raw_selection,
-            candidates,
-            required_sources=required_sources,
+        return _SemanticSynthesisAttempt(
+            attempted=True,
+            answer=_validated_semantic_synthesis(
+                raw_selection,
+                candidates,
+                required_sources=required_sources,
+            ),
         )
     except (GenerationError, ValueError, TypeError, json.JSONDecodeError) as error:
         logger.info(
-            "Semantic source selector unavailable; using deterministic fallback: %s",
+            "Grounded synthesis unavailable; withholding quality response: %s",
             error,
         )
-        return None
+        return _SemanticSynthesisAttempt(attempted=True, answer=None)
 
 
 def _trusted_semantic_selector(
@@ -965,28 +1008,42 @@ def _trusted_semantic_selector(
 
 
 def _source_sentence_candidates(
+    question: str,
     sources: list[ChatSource],
+    *,
+    required_sources: int,
 ) -> list[_SourceSentenceCandidate]:
-    """Give the selector stable IDs for exact sentences in scoped evidence."""
+    """Give the model stable IDs only for directly relevant scoped sentences."""
 
-    return [
-        _SourceSentenceCandidate(
-            sentence_id=f"{source.source_id}:{sentence_index}",
-            source=source,
-            sentence=sentence,
-        )
-        for source in sources
-        for sentence_index, sentence in enumerate(_sentences(source.text), start=1)
-    ]
+    # These phrases help classify an author-view question but are too generic
+    # to make a source sentence eligible as answer evidence on their own.
+    question_terms = _meaningful_terms(question) - {"author", "say", "says"}
+    if not question_terms:
+        return []
+    candidates: list[_SourceSentenceCandidate] = []
+    for source in sources:
+        for sentence_index, sentence in enumerate(_sentences(source.text), start=1):
+            sentence_terms = _meaningful_terms(sentence)
+            overlap = len(question_terms & sentence_terms)
+            if overlap == 0:
+                continue
+            candidates.append(
+                _SourceSentenceCandidate(
+                    sentence_id=f"{source.source_id}:{sentence_index}",
+                    source=source,
+                    sentence=sentence,
+                )
+            )
+    return candidates
 
 
-def _semantic_selector_prompt(
+def _semantic_synthesis_prompt(
     question: str,
     candidates: list[_SourceSentenceCandidate],
     *,
     required_sources: int,
 ) -> str:
-    """Build the source-ID-only contract sent to the trusted selector."""
+    """Build the closed answer-and-evidence contract sent to the quality model."""
 
     candidate_payload = [
         {
@@ -1000,33 +1057,41 @@ def _semantic_selector_prompt(
         for candidate in candidates
     ]
     return (
-        "Select the exact source sentences needed to answer the question. "
-        "A differently worded question may refer to the same event, but do not "
-        "infer a cause, reverse a relationship, or turn a negation into a positive "
-        "claim. Select enough sentences to answer every part directly.\n\n"
+        "Answer the question directly in your own words. A differently worded "
+        "question may refer to the same event, but do not infer a cause, reverse "
+        "a relationship, or turn a negation into a positive claim. Select enough "
+        "sentences to support every factual part of the answer.\n\n"
         "Return exactly this JSON schema and no other keys:\n"
-        '{"sentence_ids":["S1:1"]}\n\n'
+        '{"answer":"A concise grounded answer in your own words.",'
+        '"sentence_ids":["S1:1"]}\n\n'
         f"At least {required_sources} distinct source IDs must be represented. "
-        "Every sentence_id must come from the candidate list and may appear once.\n\n"
+        "Every sentence_id must come from the candidate list and may appear once. "
+        "The answer must not contain square-bracket citations, source IDs, or copied "
+        "source sentences.\n\n"
         f"Question:\n{question}\n\n"
         f"Candidate source sentences:\n{json.dumps(candidate_payload, ensure_ascii=False)}"
     )
 
 
-def _validated_semantic_selection(
+def _validated_semantic_synthesis(
     raw_selection: str,
     candidates: list[_SourceSentenceCandidate],
     *,
     required_sources: int,
-) -> tuple[list[ChatSource], list[str]] | None:
-    """Validate source IDs before mapping them back to exact cited text."""
+) -> tuple[list[ChatSource], str] | None:
+    """Validate a model-written answer and map its IDs to service-owned citations."""
 
     payload = json.loads(raw_selection)
-    if not isinstance(payload, dict) or set(payload) != {"sentence_ids"}:
+    if not isinstance(payload, dict) or set(payload) != {"answer", "sentence_ids"}:
         return None
+    answer = payload["answer"]
     sentence_ids = payload["sentence_ids"]
     if (
-        not isinstance(sentence_ids, list)
+        not isinstance(answer, str)
+        or not (answer := answer.strip())
+        or len(answer) > 6000
+        or _contains_source_marker(answer)
+        or not isinstance(sentence_ids, list)
         or not sentence_ids
         or any(
             not isinstance(sentence_id, str) or not sentence_id
@@ -1054,8 +1119,48 @@ def _validated_semantic_selection(
         if item.source.chunk_id not in seen_chunks:
             selected_sources.append(item.source)
             seen_chunks.add(item.source.chunk_id)
-    tokens = [f"{item.sentence} [{item.source.source_id}]" for item in selected]
-    return selected_sources, tokens
+    if _is_verbatim_source_dump(answer, selected):
+        return None
+    if _introduces_unsupported_causality(answer, selected):
+        return None
+    citations = " ".join(f"[{source.source_id}]" for source in selected_sources)
+    return selected_sources, f"{answer} {citations}"
+
+
+def _contains_source_marker(answer: str) -> bool:
+    """Reject model-owned citations; only Librarian may attach source markers."""
+
+    return bool(re.search(r"\[\s*S\d+(?::\d+)?\s*\]|\bS\d+:\d+\b", answer))
+
+
+def _is_verbatim_source_dump(
+    answer: str, selected: list[_SourceSentenceCandidate]
+) -> bool:
+    """Keep the quality contract from silently becoming the old quote-only UI."""
+
+    normalized_answer = " ".join(answer.casefold().split())
+    normalized_sentences = [" ".join(item.sentence.casefold().split()) for item in selected]
+    return normalized_answer in {
+        *normalized_sentences,
+        " ".join(normalized_sentences),
+    }
+
+
+def _introduces_unsupported_causality(
+    answer: str, selected: list[_SourceSentenceCandidate]
+) -> bool:
+    """Reject a causal conclusion unless the selected evidence uses that language.
+
+    Structured source IDs prove provenance, not semantic entailment. This small
+    deterministic guard preserves the existing high-risk negation/causality
+    protection while still allowing normal paraphrase for non-causal answers.
+    """
+
+    answer_claims = set(_CAUSAL_CLAIM.findall(answer.casefold()))
+    if not answer_claims:
+        return False
+    source_text = " ".join(item.sentence.casefold() for item in selected)
+    return any(claim not in source_text for claim in answer_claims)
 
 
 def _event_context_sentence(

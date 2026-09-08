@@ -27,12 +27,12 @@
   "semantic_source_selector": {
     "enabled": false,
     "provider": "codex",
-    "model": "gpt-5.6"
+    "model": "gpt-5.6-sol"
   },
   "evaluation": {
     "enforcing_judge": {
       "provider": "codex",
-      "model": "gpt-5.6"
+      "model": "gpt-5.6-sol"
     },
     "advisory_judge": {
       "provider": "ollama",

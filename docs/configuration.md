@@ -14,7 +14,7 @@ the tracked, credential-free profiles:
 | Profile | Use it when | Answer generation |
 | --- | --- | --- |
 | [`config/librarian.example.json`](../config/librarian.example.json) | You want the fully local default. The launchers copy this profile automatically on first run. | Docker Ollama, `qwen2.5:1.5b` |
-| [`config/librarian.base.json`](../config/librarian.base.json) | You want answer generation and optional exact-sentence selection through your Codex subscription in Docker Compose. | Internal Codex broker, `gpt-5.6` |
+| [`config/librarian.base.json`](../config/librarian.base.json) | You want grounded answer generation and source selection through your Codex subscription in Docker Compose. | Internal Codex broker, `gpt-5.6-sol` |
 
 To select the base profile explicitly:
 
@@ -99,23 +99,24 @@ model, it must supply `answer_capability` too; otherwise `/chat` returns HTTP
 
 ## Semantic source selection
 
-Chat always displays exact sentences from the retrieved EPUB evidence. The
-optional `semantic_source_selector` improves which exact sentences are chosen
-when a reader uses natural wording that has little keyword overlap with the
-book text. It does not generate or rewrite answer prose.
+Chat always displays verified citations from retrieved EPUB evidence. The local
+default displays exact source sentences. The optional `semantic_source_selector`
+uses a trusted Codex quality model to write a concise answer in its own words
+and select the exact sentences that support it when natural wording has little
+keyword overlap with book text.
 
 ```json
 {
   "generation": {
     "mode": "docker_codex_broker",
-    "model": "gpt-5.6",
+    "model": "gpt-5.6-sol",
     "api_key_file": "secrets/codex-bridge-token.txt",
     "answer_capability": "quality"
   },
   "semantic_source_selector": {
     "enabled": true,
     "provider": "docker_codex_broker",
-    "model": "gpt-5.6"
+    "model": "gpt-5.6-sol"
   }
 }
 ```
@@ -128,10 +129,13 @@ provider/model overrides cannot turn it on. The Compose broker is the supported
 container path: authenticate once with `docker compose --profile codex-broker
 run --rm codex-broker codex login`, then the persisted named volume provides
 the session without a host credential mount. Its only valid output is a JSON
-`sentence_ids` list whose entries exactly match retrieved, scope-filtered source
-sentences. Unknown, duplicate, empty, malformed, unavailable, or too-narrow
-selections fall back to the deterministic extractor. Docker and native Ollama
-never perform semantic source selection.
+object containing a concise answer and a `sentence_ids` list whose entries
+exactly match retrieved, scope-filtered source sentences. Librarian validates
+the closed schema, maps IDs to its own citations, and rejects model citation
+markers, verbatim source dumps, and unsupported causal wording. Unknown,
+duplicate, empty, malformed, unavailable, or too-narrow selections produce a
+citation-free generation failure rather than a successful-looking quotation
+dump. Docker and native Ollama never perform this quality synthesis.
 
 ## LLM-as-judge policy
 
@@ -143,7 +147,7 @@ the deterministic test suite. It has two deliberately different roles:
   "evaluation": {
     "enforcing_judge": {
       "provider": "docker_codex_broker",
-      "model": "gpt-5.6"
+      "model": "gpt-5.6-sol"
     },
     "advisory_judge": {
       "provider": "ollama",

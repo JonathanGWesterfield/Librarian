@@ -86,10 +86,10 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.embedding.model, "all-minilm")
         self.assertEqual(config.generation.provider, "openai_compatible")
         self.assertEqual(config.generation.mode, "docker_codex_broker")
-        self.assertEqual(config.generation.model, "gpt-5.6")
+        self.assertEqual(config.generation.model, "gpt-5.6-sol")
         self.assertEqual(config.generation.answer_capability, "quality")
         self.assertEqual(config.generation.api_key, "test-bridge-token")
-        self.assertEqual(config.semantic_source_selector.model, "gpt-5.6")
+        self.assertEqual(config.semantic_source_selector.model, "gpt-5.6-sol")
         self.assertEqual(
             config.evaluation.enforcing_judge.provider, "docker_codex_broker"
         )
@@ -220,7 +220,7 @@ class LibrarianConfigTests(unittest.TestCase):
             path = Path(directory) / "librarian.json"
             _write_config(path)
             with patch("librarian_config.config.default_config_path", return_value=path):
-                self.assertEqual(resolve_evaluation_judge("enforcing").model, "gpt-5.6")
+                self.assertEqual(resolve_evaluation_judge("enforcing").model, "gpt-5.6-sol")
                 self.assertEqual(resolve_evaluation_judge("advisory").provider, "ollama")
 
     def test_generation_capability_is_a_configured_product_default(self) -> None:
@@ -465,7 +465,7 @@ def _selection(mode: str, role: str) -> dict[str, object]:
     if mode == "docker_codex_broker":
         return {
             "mode": mode,
-            "model": "gpt-5.6",
+            "model": "gpt-5.6-sol",
             "api_key_file": f"secrets/{role}.token",
             "answer_capability": "quality",
         }
