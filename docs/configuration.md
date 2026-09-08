@@ -105,6 +105,11 @@ uses a trusted Codex quality model to write a concise answer in its own words
 and select the exact sentences that support it when natural wording has little
 keyword overlap with book text.
 
+The Docker broker accepts exactly the `generation.model` configured in JSON.
+When the selector uses `docker_codex_broker`, its `model` must therefore match
+`generation.model`; the base profile uses `gpt-5.6-sol` consistently for
+generation, source selection, and the enforcing evaluation judge.
+
 ```json
 {
   "generation": {

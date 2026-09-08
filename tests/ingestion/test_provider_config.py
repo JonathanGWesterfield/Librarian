@@ -89,9 +89,20 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.generation.model, "gpt-5.6-sol")
         self.assertEqual(config.generation.answer_capability, "quality")
         self.assertEqual(config.generation.api_key, "test-bridge-token")
-        self.assertEqual(config.semantic_source_selector.model, "gpt-5.6-sol")
+        self.assertEqual(config.semantic_source_selector.model, config.generation.model)
         self.assertEqual(
             config.evaluation.enforcing_judge.provider, "docker_codex_broker"
+        )
+        self.assertEqual(
+            config.evaluation.enforcing_judge.model, config.generation.model
+        )
+        self.assertTrue(resolver.render_state(config)["docker_codex_broker_enabled"])
+        self.assertEqual(
+            resolver.render_compose_override(config)["services"]["api"]["depends_on"],
+            {
+                "opensearch": {"condition": "service_healthy"},
+                "codex-broker": {"condition": "service_healthy"},
+            },
         )
 
     def test_semantic_source_selector_is_json_configured_and_codex_only(self) -> None:
@@ -168,6 +179,30 @@ class LibrarianConfigTests(unittest.TestCase):
             config.evaluation.enforcing_judge.model, config.generation.model
         )
         self.assertEqual(config.generation.api_key, "test-bridge-token")
+
+    def test_broker_selector_reuses_the_generation_model(self) -> None:
+        """The single-model broker rejects a selector model that cannot execute."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            payload = json.loads(
+                (REPO_ROOT / "config" / "librarian.base.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            payload["semantic_source_selector"]["model"] = "different-model"
+            secrets = root / "secrets"
+            secrets.mkdir()
+            (secrets / "codex-bridge-token.txt").write_text(
+                "test-bridge-token\n", encoding="utf-8"
+            )
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                LibrarianConfigError,
+                "semantic_source_selector.model must match generation.model",
+            ):
+                get_librarian_config(path)
 
     def test_broker_enforcing_judge_rejects_an_independent_or_mismatched_path(self) -> None:
         """The evaluator cannot create another broker/model credential path."""

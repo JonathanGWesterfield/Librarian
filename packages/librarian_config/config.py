@@ -249,7 +249,7 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
         search=_parse_search(root.get("search")),
         summaries=_parse_summaries(root.get("summaries")),
         semantic_source_selector=_parse_semantic_source_selector(
-            root.get("semantic_source_selector")
+            root.get("semantic_source_selector"), generation=generation
         ),
         evaluation=_parse_evaluation(root.get("evaluation"), generation=generation),
         services=_parse_services(root.get("services")),
@@ -560,7 +560,11 @@ def _parse_summaries(value: object) -> SummarySettings:
     return SummarySettings(chunk_timeout_seconds=timeout, max_parallel_chunks=parallel)
 
 
-def _parse_semantic_source_selector(value: object) -> SemanticSourceSelectorSettings:
+def _parse_semantic_source_selector(
+    value: object,
+    *,
+    generation: ProviderSettings,
+) -> SemanticSourceSelectorSettings:
     """Parse the trusted, source-ID-only semantic selector policy.
 
     Codex is intentionally the sole trusted selector family. A direct Codex
@@ -590,10 +594,22 @@ def _parse_semantic_source_selector(value: object) -> SemanticSourceSelectorSett
         raise LibrarianConfigError(
             "semantic_source_selector.provider must be codex or docker_codex_broker"
         )
+    model = _require_string(selector.get("model"), "semantic_source_selector.model")
+    if provider == "docker_codex_broker":
+        if not generation.uses_docker_codex_broker:
+            raise LibrarianConfigError(
+                "semantic_source_selector.provider docker_codex_broker requires "
+                "generation.mode to be docker_codex_broker"
+            )
+        if model != generation.model:
+            raise LibrarianConfigError(
+                "semantic_source_selector.model must match generation.model "
+                "when using docker_codex_broker"
+            )
     return SemanticSourceSelectorSettings(
         enabled=enabled,
         provider=provider,
-        model=_require_string(selector.get("model"), "semantic_source_selector.model"),
+        model=model,
     )
 
 
