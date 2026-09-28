@@ -35,6 +35,9 @@ const authorBooks = [
 ];
 
 const chatResponse = {
+  outcome: "answered",
+  minimum_citation_count: 1,
+  citation_count: 1,
   question: "What is psychohistory?",
   answer: "Psychohistory predicts the broad movements of large populations [S1].",
   embedding_provider: "ollama",
@@ -244,6 +247,45 @@ describe("Librarian live API interactions", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("Generator unavailable");
     expect(screen.getByText(chatResponse.answer)).toBeTruthy();
+  });
+
+  it("retries a scoped evidence refusal across the library only when requested", async () => {
+    const question = "Who is Eto Demerzel?";
+    const refusal = { ...chatResponse, question, answer: "No supporting passage in the selected book.", outcome: "insufficient_evidence", sources: [], citation_count: 0, filters: { book_id: "book-1" } };
+    fetchMock.mockResolvedValueOnce(jsonResponse(books))
+      .mockResolvedValueOnce(sseResponse(refusal))
+      .mockResolvedValueOnce(sseResponse({ ...chatResponse, question }));
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Foundation" });
+    await chooseScope(user, "Foundation", /Foundation.*Isaac Asimov/);
+    await user.type(screen.getByLabelText("Ask a question about your library"), question);
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await screen.findByText(refusal.answer);
+    expect(screen.getByText("No passages could be cited for this answer in Foundation.")).toBeTruthy();
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ question, book_id: "book-1" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await user.clear(screen.getByLabelText("Ask a question about your library"));
+    await user.type(screen.getByLabelText("Ask a question about your library"), "Different unsent draft");
+    await user.click(screen.getByRole("button", { name: "Search whole library for this question" }));
+    await screen.findByText(chatResponse.answer);
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ question });
+    expect(screen.queryByRole("button", { name: "Search whole library for this question" })).toBeNull();
+  });
+
+  it("does not offer scope widening for a generation failure", async () => {
+    const failure = { ...chatResponse, answer: "The grounded answer could not be generated.", outcome: "generation_unavailable", sources: [], citation_count: 0 };
+    fetchMock.mockResolvedValueOnce(jsonResponse(books)).mockResolvedValueOnce(sseResponse(failure));
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { name: "Foundation" });
+    await chooseScope(user, "Foundation", /Foundation.*Isaac Asimov/);
+    await user.type(screen.getByLabelText("Ask a question about your library"), chatResponse.question);
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await screen.findByText(failure.answer);
+    expect(screen.getByText("The answer could not be verified against the retrieved passages.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Search whole library for this question" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("clears an existing answer and citations when the search scope changes", async () => {

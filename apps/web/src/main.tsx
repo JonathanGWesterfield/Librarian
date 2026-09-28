@@ -106,8 +106,13 @@ export function App() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const submittedQuestion = question.trim();
+    await askQuestion(question.trim(), scopeRef.current);
+  };
+
+  const askQuestion = async (submittedQuestion: string, requestScope: SearchScope) => {
     if (!submittedQuestion || chatLoading) return;
+    const requestBook = requestScope.kind === "book" ? books.find((book) => book.id === requestScope.bookId) : null;
+    const requestAuthor = requestScope.kind === "author" ? authorOptions.find((author) => author.identity === requestScope.authorIdentity) : null;
 
     const requestGeneration = ++chatRequestGeneration.current;
     chatAbortController.current?.abort();
@@ -119,7 +124,7 @@ export function App() {
     try {
       const response = await streamChat(
         submittedQuestion,
-        selectedBook ? { bookId: selectedBook.id } : selectedAuthor ? { author: selectedAuthor.name } : {},
+        requestBook ? { bookId: requestBook.id } : requestAuthor ? { author: requestAuthor.name } : {},
         {
           onRetrieval: (retrieval) => {
             if (requestGeneration !== chatRequestGeneration.current) return;
@@ -180,7 +185,13 @@ export function App() {
         {chat ? <>
           <article className="answer-card" aria-live="polite"><div className="answer-number">01</div><div><p className="asked-question">{chat.question}</p><p className="answer-text">{chat.answer}</p><div className="tag-row"><span>{chat.candidate_count} retrieved chunks</span>{selectedBook && <span>{bookTitle(selectedBook)}</span>}{selectedAuthor && <span>{selectedAuthor.name}</span>}</div></div></article>
           <div className="citations-header"><div><p className="eyebrow">Traceable sources</p><h2>Read the passages</h2></div><span>{chat.sources.length} citations</span></div>
-          {chat.sources.length ? <div className="citations">{chat.sources.map((source, index) => <button key={source.chunk_id} className={`citation${openCitation === index ? " open" : ""}`} type="button" onClick={() => setOpenCitation((current) => current === index ? null : index)}><span className="citation-summary"><span className="citation-number">{source.source_id}</span><span><span className="citation-title">{source.title || source.relative_path}</span><span className="citation-subtitle">{source.authors.join(", ") || "Unknown author"} · Chunk {source.chunk_index + 1}</span></span><span className="citation-toggle">+</span></span><span className="citation-quote">{source.text}</span></button>)}</div> : <p className="empty-answer">The library did not return supporting passages for this answer.</p>}
+          {!chatLoading && chat.outcome === "insufficient_evidence" && scope.kind !== "library" && <button type="button" onClick={() => {
+            const retryQuestion = chat.question;
+            changeScope(WHOLE_LIBRARY_SCOPE);
+            setQuestion(retryQuestion);
+            void askQuestion(retryQuestion, WHOLE_LIBRARY_SCOPE);
+          }}>Search whole library for this question</button>}
+          {chat.sources.length ? <div className="citations">{chat.sources.map((source, index) => <button key={source.chunk_id} className={`citation${openCitation === index ? " open" : ""}`} type="button" onClick={() => setOpenCitation((current) => current === index ? null : index)}><span className="citation-summary"><span className="citation-number">{source.source_id}</span><span><span className="citation-title">{source.title || source.relative_path}</span><span className="citation-subtitle">{source.authors.join(", ") || "Unknown author"} · Chunk {source.chunk_index + 1}</span></span><span className="citation-toggle">+</span></span><span className="citation-quote">{source.text}</span></button>)}</div> : <p className="empty-answer">{chat.outcome === "generation_unavailable" ? "The answer could not be verified against the retrieved passages." : `No passages could be cited for this answer in ${selectedBook ? bookTitle(selectedBook) : selectedAuthor ? `books by ${selectedAuthor.name}` : "the whole library"}.`}</p>}
         </> : <article className="answer-card answer-empty"><div className="answer-number">01</div><div><p className="asked-question">Ready when you are</p><p className="answer-text">Ask a question to receive an answer grounded in passages from your own library.</p></div></article>}
       </div>
     </section>

@@ -537,7 +537,10 @@ the stage `timings`. Both JSON and streaming responses report
 `generation_unavailable`). These counts are separate from `retrieval_limit`: a
 retrieved candidate is not necessarily a supporting citation. Broad synthesis requires
 at least ten distinct body passages; bounded explanations require two, and
-point facts require one. Whole-library thematic searches use the requested topic
+point facts, including character-identification questions, require one. Scoped
+evidence refusals identify the searched book/author scope; they never silently
+widen the search. The UI offers an explicit whole-library retry for these
+refusals. Whole-library thematic searches use the requested topic
 for retrieval while preserving the original question for synthesis.
 
 `400` is also the intentional response for an unsupported provider/model
