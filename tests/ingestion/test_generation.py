@@ -13,7 +13,10 @@ sys.path.insert(0, str(PACKAGES_DIR))
 from librarian_chat.generation import (
     ChatMessage,
     CodexGenerator,
+    GROUNDED_CHAT_SYNTHESIS_HEADER,
+    GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
     NoopGenerator,
+    OpenAICompatibleGenerator,
     OllamaGenerator,
     create_configured_generator,
     create_generator,
@@ -158,6 +161,53 @@ class GenerationProviderTests(unittest.TestCase):
 
         self.assertEqual(payload["format"], "json")
         self.assertEqual(answer, '{"tags":[]}')
+
+    def test_openai_compatible_generator_scopes_the_chat_output_contract(self) -> None:
+        """Generic metadata JSON never inherits the grounded-chat schema header."""
+        response = _FakeResponse(
+            {
+                "choices": [
+                    {"message": {"role": "assistant", "content": '{"tags":[]}'}}
+                ]
+            }
+        )
+        generator = OpenAICompatibleGenerator(
+            model="gpt-5.6-sol",
+            base_url="http://codex-broker:3000/v1",
+            api_key="test-token",
+            extra_headers={
+                GROUNDED_CHAT_SYNTHESIS_HEADER: "misconfigured",
+                GROUNDED_CHAT_SYNTHESIS_HEADER.lower(): "also-misconfigured",
+            },
+        )
+
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            generator.generate(
+                [ChatMessage(role="user", content="Return tags.")],
+                response_format="json",
+            )
+            generic_request = urlopen.call_args.args[0]
+            generator.generate(
+                [ChatMessage(role="user", content="Select source IDs.")],
+                response_format=GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+            )
+            chat_request = urlopen.call_args.args[0]
+
+        generic_payload = json.loads(generic_request.data.decode("utf-8"))
+        chat_payload = json.loads(chat_request.data.decode("utf-8"))
+        generic_headers = {
+            name.casefold(): value for name, value in generic_request.header_items()
+        }
+        chat_headers = {
+            name.casefold(): value for name, value in chat_request.header_items()
+        }
+        self.assertEqual(generic_payload["response_format"], {"type": "json_object"})
+        self.assertEqual(chat_payload["response_format"], {"type": "json_object"})
+        self.assertNotIn(GROUNDED_CHAT_SYNTHESIS_HEADER.casefold(), generic_headers)
+        self.assertEqual(
+            chat_headers[GROUNDED_CHAT_SYNTHESIS_HEADER.casefold()],
+            GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+        )
 
     def test_ollama_generator_streams_native_chat_fragments_without_buffering(self) -> None:
         """Ollama's newline-delimited stream reaches chat orchestration token by token."""

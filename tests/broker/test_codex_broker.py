@@ -22,6 +22,10 @@ sys.path.insert(0, str(REPO_ROOT / "packages"))
 sys.path.insert(0, str(REPO_ROOT / "apps" / "codex_broker"))
 
 from librarian_broker.main import app  # noqa: E402
+from librarian_chat.generation import (  # noqa: E402
+    GROUNDED_CHAT_SYNTHESIS_HEADER,
+    GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+)
 from librarian_config.config import clear_librarian_config_cache  # noqa: E402
 
 
@@ -71,6 +75,58 @@ class CodexBrokerTests(unittest.TestCase):
             ],
         )
         self.assertIn("SYSTEM:\nUse only sources.", run.call_args.kwargs["input"])
+
+    def test_grounded_chat_contract_uses_a_codex_compatible_synthesis_schema(self) -> None:
+        """Only explicit grounded chat uses the broker's fixed Codex schema."""
+        with self._configured_client() as client:
+            completed = Mock(stdout='{"answer":"Grounded prose.","sentence_ids":["S1:1"]}')
+            with patch("librarian_broker.main.subprocess.run", return_value=completed) as run:
+                response = client.post(
+                    "/v1/chat/completions",
+                    headers={
+                        "Authorization": "Bearer test-bridge-token",
+                        GROUNDED_CHAT_SYNTHESIS_HEADER: (
+                            GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT
+                        ),
+                    },
+                    json={
+                        "model": "gpt-5.6-sol",
+                        "messages": [{"role": "user", "content": "Question?"}],
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        command = run.call_args.args[0]
+        schema_index = command.index("--output-schema")
+        schema_path = REPO_ROOT / "apps/codex_broker/librarian_broker/chat_response.schema.json"
+        self.assertEqual(command[schema_index + 1], str(schema_path))
+        self.assertEqual(command[-1], "-")
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(schema["required"], ["answer", "sentence_ids"])
+        sentence_ids = schema["properties"]["sentence_ids"]
+        self.assertEqual(sentence_ids["type"], "array")
+        self.assertEqual(sentence_ids["minItems"], 1)
+        self.assertNotIn("uniqueItems", sentence_ids)
+
+    def test_generic_json_completion_does_not_receive_the_chat_schema(self) -> None:
+        """Tags and genres retain generic JSON mode without chat-source fields."""
+        with self._configured_client() as client:
+            completed = Mock(stdout='{"tags":["psychohistory"]}')
+            with patch("librarian_broker.main.subprocess.run", return_value=completed) as run:
+                response = client.post(
+                    "/v1/chat/completions",
+                    headers={"Authorization": "Bearer test-bridge-token"},
+                    json={
+                        "model": "gpt-5.6-sol",
+                        "messages": [{"role": "user", "content": "Return tags."}],
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("--output-schema", run.call_args.args[0])
 
     def test_broker_rejects_missing_token_or_model_substitution(self) -> None:
         """Only the API/worker bearer token may call the configured model."""
