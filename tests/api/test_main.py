@@ -397,6 +397,9 @@ class IngestionApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["answer"], fake_response.answer)
+        self.assertEqual(payload["minimum_citation_count"], 1)
+        self.assertEqual(payload["citation_count"], 1)
+        self.assertEqual(payload["outcome"], "answered")
         self.assertEqual(payload["generation_model"], "llama3.2:3b")
         self.assertEqual(payload["answer_capability"], "quality")
         self.assertEqual(payload["filters"], {"book_title": "All Quiet"})

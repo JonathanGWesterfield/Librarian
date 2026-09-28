@@ -187,9 +187,11 @@ only. This is intentionally separate from
 `scripts/check.sh`: ordinary deterministic CI never invokes a judge or needs a
 subscription, network access, or local model.
 
-The judge is a fuzzy offline evaluation layer, not a production authorization
-mechanism. Deterministic tests still enforce transport contracts, citation
-counts, and known adversarial source-text behavior.
+The standalone judge is a fuzzy offline evaluation layer. Grounded Codex chat
+also reuses its source-only rubric for a separate runtime review through the
+already configured quality generator. Failed or malformed reviews withhold the
+answer. This model assessment is fallible and does not replace human acceptance
+or the deterministic transport, citation-count, and provenance checks.
 
 ## Pairwise Evaluation
 
