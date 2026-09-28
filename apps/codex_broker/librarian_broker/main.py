@@ -11,9 +11,14 @@ import hmac
 import subprocess
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 from fastapi import FastAPI, Header, HTTPException, status
+from librarian_chat.generation import (
+    GROUNDED_CHAT_SYNTHESIS_HEADER,
+    GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+)
 from librarian_config.config import LibrarianConfigError, get_librarian_config
 from librarian_logging import configure_logging
 from pydantic import BaseModel, Field
@@ -21,6 +26,7 @@ from pydantic import BaseModel, Field
 configure_logging()
 
 app = FastAPI(title="Librarian Codex Broker", version="0.2.0")
+_JSON_RESPONSE_SCHEMA = Path(__file__).with_name("chat_response.schema.json")
 
 
 class OpenAIMessage(BaseModel):
@@ -60,6 +66,10 @@ def health() -> dict[str, str]:
 def chat_completions(
     request: ChatCompletionRequest,
     authorization: Optional[str] = Header(default=None),
+    output_contract: Optional[str] = Header(
+        default=None,
+        alias=GROUNDED_CHAT_SYNTHESIS_HEADER,
+    ),
 ) -> ChatCompletionResponse:
     """Run the configured Codex model after authenticating the internal caller."""
     config = _configured_broker()
@@ -75,22 +85,29 @@ def chat_completions(
             detail="The Docker Codex broker only accepts the model configured in librarian.json.",
         )
 
+    command = [
+        "codex",
+        "exec",
+        "--model",
+        config.generation.model,
+        "--ephemeral",
+        # The broker image deliberately runs from /app, which is not a
+        # Git checkout. This permits that fixed container workdir
+        # without granting access to the caller's filesystem.
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+    ]
+    if _requires_grounded_chat_synthesis(request.response_format, output_contract):
+        # ``codex exec`` can enforce its final response against this fixed
+        # private schema. Prompt instructions alone still permit Markdown
+        # fences or prose, which then fail Librarian's evidence validator.
+        command.extend(["--output-schema", str(_JSON_RESPONSE_SCHEMA)])
+    command.append("-")
+
     try:
         completed = subprocess.run(
-            [
-                "codex",
-                "exec",
-                "--model",
-                config.generation.model,
-                "--ephemeral",
-                # The broker image deliberately runs from /app, which is not a
-                # Git checkout. This permits that fixed container workdir
-                # without granting access to the caller's filesystem.
-                "--skip-git-repo-check",
-                "--sandbox",
-                "read-only",
-                "-",
-            ],
+            command,
             input=_build_prompt(request.messages),
             check=True,
             capture_output=True,
@@ -172,4 +189,16 @@ def _build_prompt(messages: list[OpenAIMessage]) -> str:
     """Preserve structured roles without giving request data shell authority."""
     return "\n\n".join(
         f"{message.role.upper()}:\n{message.content}" for message in messages
+    )
+
+
+def _requires_grounded_chat_synthesis(
+    response_format: dict[str, str] | None,
+    output_contract: str | None,
+) -> bool:
+    """Apply the chat schema only to the explicit trusted synthesis contract."""
+
+    return (
+        response_format == {"type": "json_object"}
+        and output_contract == GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT
     )

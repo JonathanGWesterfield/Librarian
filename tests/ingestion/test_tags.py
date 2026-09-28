@@ -11,7 +11,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_chat.generation import ChatMessage
+from librarian_chat.generation import (
+    GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+    ChatMessage,
+)
 from librarian_metadata.tags import (
     DeleteBookTagsOptions,
     GenerateBookTagsOptions,
@@ -105,6 +108,10 @@ class BookTagGenerationTests(unittest.TestCase):
         self.assertIn("Fill in this JSON object template", generator.messages[1].content)
         self.assertIn("Return only the completed JSON object", generator.messages[1].content)
         self.assertEqual(generator.response_format, "json")
+        self.assertNotEqual(
+            generator.response_format,
+            GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+        )
 
     def test_generate_book_tags_reuses_cached_tags(self) -> None:
         """Verify repeated tag generation can avoid another LLM call.

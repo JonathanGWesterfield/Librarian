@@ -23,6 +23,9 @@ from librarian_config.openai_compatible import build_openai_compatible_endpoint
 
 logger = logging.getLogger(__name__)
 
+GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT = "grounded_chat_synthesis"
+GROUNDED_CHAT_SYNTHESIS_HEADER = "X-Librarian-Output-Contract"
+
 
 class GenerationError(RuntimeError):
     pass
@@ -81,7 +84,7 @@ class OllamaGenerator:
             ],
             "stream": False,
         }
-        if response_format == "json":
+        if _requests_json_object(response_format):
             payload_dict["format"] = "json"
         payload = json.dumps(
             payload_dict
@@ -181,6 +184,13 @@ class OpenAICompatibleGenerator:
     ) -> str:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         headers.update(self.extra_headers)
+        # A configuration-level header must not accidentally apply the chat
+        # contract to unrelated structured tasks such as tags or genres.
+        headers = {
+            name: value
+            for name, value in headers.items()
+            if name.casefold() != GROUNDED_CHAT_SYNTHESIS_HEADER.casefold()
+        }
         payload: dict[str, object] = {
             "model": self.model,
             "messages": [
@@ -190,8 +200,12 @@ class OpenAICompatibleGenerator:
             "stream": False,
             "temperature": 0.1,
         }
-        if response_format == "json":
+        if _requests_json_object(response_format):
             payload["response_format"] = {"type": "json_object"}
+        if response_format == GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT:
+            headers[GROUNDED_CHAT_SYNTHESIS_HEADER] = (
+                GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT
+            )
         endpoint = build_openai_compatible_endpoint(self.base_url, "chat/completions")
         http_request = request.Request(
             endpoint,
@@ -216,6 +230,12 @@ class OpenAICompatibleGenerator:
         if not isinstance(content, str) or not content.strip():
             raise GenerationError("OpenAI-compatible gateway did not include message content")
         return content.strip()
+
+
+def _requests_json_object(response_format: str | None) -> bool:
+    """Return whether a generator call needs transport-level JSON output."""
+
+    return response_format in {"json", GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT}
 
 
 @dataclass(frozen=True)

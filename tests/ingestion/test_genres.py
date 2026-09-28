@@ -11,7 +11,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_chat.generation import ChatMessage
+from librarian_chat.generation import (
+    GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+    ChatMessage,
+)
 from librarian_metadata.genres import (
     DeleteBookGenresOptions,
     GenerateBookGenresOptions,
@@ -113,6 +116,10 @@ class BookGenreGenerationTests(unittest.TestCase):
         self.assertIn("primary_genre", generator.messages[1].content)
         self.assertIn("Return only the completed JSON object", generator.messages[1].content)
         self.assertEqual(generator.response_format, "json")
+        self.assertNotEqual(
+            generator.response_format,
+            GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+        )
 
     def test_generate_book_genres_reuses_cached_genres(self) -> None:
         """Verify repeated genre generation can avoid another LLM call.
