@@ -23,6 +23,9 @@ export type ChatSource = {
 };
 
 export type ChatResponse = {
+  outcome: "answered" | "insufficient_evidence" | "generation_unavailable";
+  minimum_citation_count: number;
+  citation_count: number;
   question: string;
   answer: string;
   embedding_provider: string;

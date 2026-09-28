@@ -416,6 +416,7 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         immediate_answer = _insufficient_evidence_answer(
             publication_question=publication_question,
             required_sources=required_sources,
+            scope=search_response.filters,
         )
     else:
         synthesis_started = perf_counter()
@@ -456,6 +457,7 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
                 immediate_answer = _insufficient_evidence_answer(
                     publication_question=publication_question,
                     required_sources=required_sources,
+                    scope=search_response.filters,
                 )
             else:
                 sources, grounded_tokens = grounded_answer
@@ -816,8 +818,24 @@ def _has_sufficient_evidence(
 
 
 def _insufficient_evidence_answer(
-    *, publication_question: bool, required_sources: int
+    *, publication_question: bool, required_sources: int,
+    scope: dict[str, str] | None = None,
 ) -> str:
+    scope = scope or {}
+    if scope.get("book_id") or scope.get("book_title") or scope.get("author"):
+        location = (
+            f'“{scope["book_title"]}”' if scope.get("book_title") else
+            "the selected book" if scope.get("book_id") else
+            f'books by {scope["author"]}'
+        )
+        evidence = "publication or edition evidence" if publication_question else (
+            "enough distinct supporting passages" if required_sources > 1 else
+            "a supporting passage"
+        )
+        return (
+            f"I could not find {evidence} in {location} to answer that reliably. "
+            "You can try searching the whole library."
+        )
     if publication_question:
         return (
             "I could not find publication or edition evidence in the local EPUB "

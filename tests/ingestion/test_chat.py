@@ -152,6 +152,48 @@ class ChatTests(unittest.TestCase):
         for question in ("Who opens the garden gate?", "When was this edition published?"):
             self.assertEqual(chat_module._required_source_count(question, None), 1)
 
+    def test_character_identity_can_succeed_with_one_supporting_chunk(self) -> None:
+        for question in ("Who is Eto Demerzel?", "Who is Mara?", "Who was Mara?"):
+            name = "Eto Demerzel" if "Demerzel" in question else "Mara"
+            selector = _FakeCodexGenerator(model="gpt-5.6-sol", response=json.dumps({
+                "answer": f"{name} serves as the garden keeper.", "sentence_ids": ["S1:1"],
+            }))
+            with (
+                patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+                patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+                patch("librarian_chat.chat.search_chunks", return_value=_chat_search_response(question, text=f"{name} is the keeper of the garden.")),
+                patch("librarian_chat.chat.create_configured_generator", return_value=selector),
+                patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+                patch("librarian_chat.chat.create_generator", return_value=selector),
+            ):
+                response = answer_question(ChatOptions(question=question, generation_provider="codex", generation_model="gpt-5.6-sol", answer_capability="quality"))
+            self.assertEqual(response.minimum_citation_count, 1)
+            self.assertEqual(response.outcome, "answered")
+            self.assertEqual(len(response.sources), 1)
+            self.assertEqual(selector.audit_calls, 1)
+
+    def test_character_absent_from_selected_book_refuses_without_widening_scope(self) -> None:
+        from dataclasses import replace
+        question = "Who is Eto Demerzel?"
+        selector = _FakeCodexGenerator(model="gpt-5.6-sol")
+        search_response = replace(_chat_search_response(question, text="The garden gate is green."), filters={"book_title": "The Clockwork Garden"})
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=search_response) as search,
+            patch("librarian_chat.chat.create_configured_generator", return_value=selector),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            response = answer_question(ChatOptions(question=question, book_title="The Clockwork Garden", generation_provider="codex", generation_model="gpt-5.6-sol", answer_capability="quality"))
+        self.assertEqual(response.minimum_citation_count, 1)
+        self.assertEqual(response.outcome, "insufficient_evidence")
+        self.assertIn("The Clockwork Garden", response.answer)
+        self.assertEqual(response.sources, [])
+        self.assertEqual(selector.generate_calls, 0)
+        self.assertEqual(search.call_count, 1)
+        self.assertEqual(search.call_args.args[0].book_title, "The Clockwork Garden")
+
     def test_bounded_explanations_require_two_distinct_sources(self) -> None:
         for question in (
             "How does Screwtape distinguish humility from false modesty?",
@@ -1692,7 +1734,7 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(response.to_dict()["minimum_citation_count"], 10)
         self.assertEqual(response.to_dict()["citation_count"], 0)
         self.assertEqual(response.to_dict()["outcome"], "insufficient_evidence")
-        self.assertIn("enough distinct body-text passages", response.answer)
+        self.assertIn("enough distinct", response.answer)
         self.assertEqual(generator.messages, [])
         self.assertEqual(response.sources, [])
 

@@ -27,6 +27,13 @@
       "notes": "A good answer should discuss psychohistory as a predictive discipline in the context of empire-level change."
     },
     {
+      "id": "foundation-character-identity",
+      "question": "Who is Eto Demerzel?",
+      "expected_terms": ["Demerzel", "First Minister"],
+      "required_citations": true,
+      "notes": "A concise identity answer should use relevant Forward the Foundation passages. One supporting chunk is sufficient; do not demand broad thematic coverage or add biographical facts from model memory."
+    },
+    {
       "id": "insufficient-evidence-local-only",
       "question": "What does my library say about the private vacation plans of a modern celebrity?",
       "expected_terms": [],
