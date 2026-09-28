@@ -244,6 +244,9 @@ class ChatResponse(BaseModel):
     timings: ChatTimingsResponse = Field(
         description="Wall-clock seconds spent in each synchronous chat stage."
     )
+    minimum_citation_count: int = Field(ge=1)
+    citation_count: int = Field(ge=0)
+    outcome: Literal["answered", "insufficient_evidence", "generation_unavailable"]
     sources: list[ChatSourceResponse]
 
 

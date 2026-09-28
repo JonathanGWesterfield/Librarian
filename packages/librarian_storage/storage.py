@@ -424,7 +424,9 @@ class IngestionStore(Protocol):
     ) -> int:
         ...
 
-    def list_chunks(self, *, limit: int = 500, offset: int = 0) -> list[StoredChunkRecord]:
+    def list_chunks(
+        self, *, limit: int = 500, offset: int = 0, chunk_ids: list[str] | None = None
+    ) -> list[StoredChunkRecord]:
         ...
 
     def list_embeddings(
@@ -940,19 +942,25 @@ class SQLiteIngestionStore:
         return cursor.rowcount
 
     def list_chunks(
-        self, *, limit: int = 500, offset: int = 0
+        self, *, limit: int = 500, offset: int = 0, chunk_ids: list[str] | None = None
     ) -> list[StoredChunkRecord]:
+        if chunk_ids == []:
+            return []
+        where = "" if chunk_ids is None else (
+            "WHERE id IN (" + ",".join("?" for _ in chunk_ids) + ")"
+        )
         limit = max(1, min(limit, 1000))
         offset = max(0, offset)
         rows = self._connection.execute(
-            """
+            f"""
             SELECT id, book_id, chunk_index, text, character_count,
                    token_estimate, chapter_title, content_type
             FROM chunks
+            {where}
             ORDER BY book_id ASC, chunk_index ASC
             LIMIT ? OFFSET ?
             """,
-            (limit, offset),
+            [*(chunk_ids or []), limit, offset],
         ).fetchall()
         return [
             StoredChunkRecord(
@@ -2609,6 +2617,17 @@ def classify_chunk_content(
     normalized = " ".join(text.casefold().split())
     heading = " ".join((chapter_title or "").casefold().split())
     opening = normalized[:500]
+    # Legacy chunking can join title/contents/preface material to chapter one.
+    # Such a mixed chunk is not clean body evidence even if prose follows it.
+    if chunk_index <= 2:
+        structural_heading = re.search(
+            r"(?im)^\s*(?:contents|table of contents|preface|foreword)\s*$", text
+        )
+        first_chapter = re.search(
+            r"(?im)^\s*(?:chapter\s+(?:1|one|i)|1)\s*$", text
+        )
+        if structural_heading or (first_chapter and text[:first_chapter.start()].strip()):
+            return "front_matter"
     if is_appended_work_boundary(text):
         return "back_matter"
     if "about the publisher" in opening or (

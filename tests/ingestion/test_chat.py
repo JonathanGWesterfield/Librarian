@@ -1,9 +1,11 @@
+import json
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import sleep
 from types import SimpleNamespace
+from typing import Optional
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
@@ -21,10 +23,244 @@ from librarian_chat.generation import GenerationError
 from librarian_ingestion.embedding_ops import EmbedQueryResult
 from librarian_search.opensearch import OpenSearchError
 from librarian_search.search import SearchResponse, SearchResult
-from librarian_storage.storage import BookRecord, SQLiteIngestionStore, utc_now
+from librarian_storage.storage import BookRecord, ChunkRecord, SQLiteIngestionStore, utc_now
 
 
 class ChatTests(unittest.TestCase):
+    def test_semantic_repair_requires_a_fresh_successful_review(self) -> None:
+        sources = chat_module._to_sources(_chat_search_response(
+            "Who opens the garden gate?", text="Mara opened the garden gate with a borrowed key."
+        ).results)
+        selector = _FakeCodexGenerator(model="gpt-5.6-sol", responses=[
+            json.dumps({"answer": "Mara opens the gate and rules the universe.", "sentence_ids": ["S1:1"]}),
+            json.dumps({"answer": "Mara is the one who opens the gate.", "sentence_ids": ["S1:1"]}),
+        ])
+        selector.audit_responses = [json.dumps({
+            "evidence_verdict": "insufficient", "citation_relevance": "all_relevant",
+            "missing_coverage": [], "unsupported_claims": ["Rules the universe."],
+            "reason": "This claim is not supported.",
+        }), selector.audit_response]
+        with (
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            result = chat_module._semantic_grounded_synthesis_answer(
+                "Who opens the garden gate?", sources, required_sources=1,
+                answer_capability="quality", generator=selector,
+            )
+        self.assertIsNotNone(result.answer)
+        self.assertEqual(result.answer[1], "Mara is the one who opens the gate. [S1]")
+        self.assertEqual(selector.generate_calls, 2)
+        self.assertEqual(selector.audit_calls, 2)
+        self.assertIn("Rules the universe", selector.messages[-1].content)
+
+    def test_legacy_mixed_front_matter_is_not_answer_evidence(self) -> None:
+        question = "What does the book say about Christianity?"
+        source_text = "The Book\nContents\nPreface\nChapter 1\nChristianity is discussed here."
+        generator = _FakeGenerator()
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=_chat_search_response(question, text=source_text)),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(ChatOptions(question=question, book_id="clockwork"))
+        self.assertEqual(response.sources, [])
+        self.assertEqual(response.outcome, "insufficient_evidence")
+        self.assertEqual(generator.messages, [])
+        self.assertEqual(chat_module.classify_chunk_content(
+            text="The editor explains the publication.\n1\nThe story begins.", chunk_index=1
+        ), "front_matter")
+        self.assertEqual(chat_module.classify_chunk_content(
+            text="Chapter 1\nThe story begins.", chunk_index=0
+        ), "body")
+
+    def test_semantic_audit_withholds_unsupported_claims_irrelevant_citations_and_bad_json(self) -> None:
+        sources = chat_module._to_sources(_chat_search_response(
+            "Who opens the garden gate?", text="Mara opened the garden gate with a borrowed key."
+        ).results)
+        for audit in (
+            {"evidence_verdict": "insufficient", "citation_relevance": "all_relevant",
+             "missing_coverage": [], "unsupported_claims": ["Mara rules the universe."],
+             "reason": "This is absent from the cited text."},
+            {"evidence_verdict": "supported", "citation_relevance": "partially_relevant",
+             "missing_coverage": [], "unsupported_claims": [], "reason": "A citation is padding."},
+            {"evidence_verdict": "supported", "citation_relevance": "all_relevant",
+             "missing_coverage": ["The question asks about an undocumented event."],
+             "unsupported_claims": [], "reason": "The question is not answered."},
+            {"evidence_verdict": "supported"},
+        ):
+            with self.subTest(audit=audit):
+                selector = _FakeCodexGenerator(model="gpt-5.6-sol", response=json.dumps({
+                    "answer": "Mara opens the gate and rules the universe.", "sentence_ids": ["S1:1"],
+                }))
+                selector.audit_response = json.dumps(audit)
+                with (
+                    patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+                    patch("librarian_chat.chat.create_generator", return_value=selector),
+                ):
+                    result = chat_module._semantic_grounded_synthesis_answer(
+                        "Who opens the garden gate?", sources, required_sources=1,
+                        answer_capability="quality", generator=selector,
+                    )
+                self.assertTrue(result.attempted)
+                self.assertIsNone(result.answer)
+                self.assertEqual(selector.generate_calls, 2 if len(audit) == 5 else 1)
+                self.assertEqual(selector.audit_calls, 2 if len(audit) == 5 else 1)
+
+    def test_undocumented_requested_year_refuses_before_synthesis(self) -> None:
+        question = "What does Lewis say about Christianity in the 2026 election?"
+        generator = _FakeCodexGenerator(model="gpt-5.6-sol")
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=_author_search_response(question, count=10)),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generator),
+        ):
+            response = answer_question(ChatOptions(
+                question=question, book_id="lewis", generation_provider="codex",
+                generation_model="gpt-5.6-sol", answer_capability="quality",
+            ))
+        self.assertEqual(response.outcome, "insufficient_evidence")
+        self.assertEqual(response.sources, [])
+        self.assertEqual(generator.generate_calls, 0)
+        self.assertEqual(generator.audit_calls, 0)
+
+    def test_answer_length_is_not_mistaken_for_an_undocumented_year(self) -> None:
+        for length in ("1000 words", "1000-word", "2000 characters"):
+            question = f"What does Lewis say about Christianity? Use {length}."
+            with (
+                patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+                patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+                patch("librarian_chat.chat.search_chunks", return_value=_author_search_response(question, count=10)),
+                patch("librarian_chat.chat.create_configured_generator", return_value=_FakeGenerator()),
+            ):
+                prepared = chat_module.prepare_answer_question(ChatOptions(question=question, book_id="lewis"))
+            self.assertEqual(len(prepared.sources), 10)
+
+    def test_broad_question_planner_covers_thematic_and_library_paraphrases(self) -> None:
+        for question in (
+            "How do books in my library portray pride?",
+            "How does The Screwtape Letters portray Christianity?",
+            "What do these novels depict?",
+            "Summarize The Screwtape Letters.",
+            "What are the central ideas in this work?",
+            "What does Lewis teach regarding Christianity?",
+        ):
+            with self.subTest(question=question):
+                self.assertEqual(chat_module._required_source_count(question, None), 10)
+        for question in ("Who opens the garden gate?", "When was this edition published?"):
+            self.assertEqual(chat_module._required_source_count(question, None), 1)
+
+    def test_bounded_explanations_require_two_distinct_sources(self) -> None:
+        for question in (
+            "How does Screwtape distinguish humility from false modesty?",
+            "Why did the garden tick?", "Explain the distinction.",
+        ):
+            self.assertEqual(chat_module._required_source_count(question, None), 2)
+        self.assertEqual(chat_module._required_source_count("How many gates are there?", None), 1)
+
+    def test_library_question_retrieval_focuses_on_topic(self) -> None:
+        from dataclasses import replace
+        question = "How do books in my library portray pride?"
+        self.assertEqual(chat_module._retrieval_question(question), "pride")
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for("pride")) as embed,
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=_author_search_response("pride", count=1)) as search,
+        ):
+            prepared = chat_module.prepare_answer_question(ChatOptions(question=question))
+        self.assertEqual(embed.call_args.args[0].query, "pride")
+        self.assertEqual(search.call_args.args[0].query, "pride")
+        self.assertEqual(prepared.question, question)
+        source = chat_module._to_sources(_search_response().results)[0]
+        source = replace(source, text="My library has many books. Pride keeps him from admitting mistakes.")
+        candidates = chat_module._source_sentence_candidates(question, [source], required_sources=10)
+        self.assertEqual([item.sentence for item in candidates], ["Pride keeps him from admitting mistakes."])
+
+    def test_synthesis_candidates_deduplicate_overlapping_chunks_before_generation(self) -> None:
+        from dataclasses import replace
+        source = chat_module._to_sources(_search_response().results)[0]
+        sources = [
+            source,
+            replace(source, source_id="S2", chunk_id="book:1", chunk_index=1,
+                text=source.text + " War also leaves lasting grief."),
+            replace(source, source_id="S3", chunk_id="book:2", chunk_index=2,
+                text="  WAR IS BRUTAL AND TERRIFYING AT THE FRONT.  "),
+        ]
+        candidates = chat_module._source_sentence_candidates(
+            "What does the book say about war?", sources, required_sources=10,
+        )
+        self.assertEqual([item.sentence_id for item in candidates], ["S1:1", "S2:2"])
+        self.assertEqual(candidates[1].sentence, "War also leaves lasting grief.")
+
+    def test_stale_index_evidence_falls_back_to_sqlite(self) -> None:
+        """Current EPUB labels and text override a stale body-labelled index hit."""
+        indexed = _search_response()
+        source = indexed.results[0]
+        with TemporaryDirectory() as temp_dir:
+            database_path = Path(temp_dir) / "sources.db"
+            database_url = f"sqlite:///{database_path}"
+            for content_type, text, chunk_id in (
+                ("body", source.text, source.chunk_id),
+                ("back_matter", source.text, source.chunk_id),
+                ("body", "The revised EPUB says something different.", source.chunk_id),
+                ("body", source.text, "replacement:0"),
+            ):
+                with self.subTest(content_type=content_type, text=text, chunk_id=chunk_id):
+                    with SQLiteIngestionStore(database_path) as store:
+                        store.save_book_with_chunks(
+                            BookRecord(id="book", source_path="/books/test.epub",
+                                relative_path="test.epub", file_hash="hash", size_bytes=100,
+                                title="Test", authors=["Test Author"], status="ingested"),
+                            [ChunkRecord(id=chunk_id, book_id="book", chunk_index=0,
+                                text=text, character_count=len(text), token_estimate=10,
+                                content_type=content_type)],
+                        )
+                        self.assertEqual(store.list_chunks(chunk_ids=[]), [])
+                    stale = content_type != "body" or text != source.text or chunk_id != source.chunk_id
+                    with (
+                        patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="auto"),
+                        patch("librarian_chat.chat.hybrid_search_chunks", return_value=indexed),
+                        patch("librarian_chat.chat.search_chunks", return_value=indexed) as fallback,
+                    ):
+                        _, backend = chat_module._retrieve_sources(
+                            ChatOptions(question=indexed.query, database_url=database_url),
+                            query_embedding=_query_embedding(), retrieval_limit=10,
+                            author=None, include_non_content=False,
+                        )
+                    self.assertEqual(backend, "sqlite" if stale else "opensearch")
+                    self.assertEqual(fallback.call_count, int(stale))
+                    if stale:
+                        with (
+                            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="opensearch"),
+                            patch("librarian_chat.chat.hybrid_search_chunks", return_value=indexed),
+                            self.assertRaisesRegex(OpenSearchError, "stale"),
+                        ):
+                            chat_module._retrieve_sources(
+                                ChatOptions(question=indexed.query, database_url=database_url),
+                                query_embedding=_query_embedding(), retrieval_limit=10,
+                                author=None, include_non_content=False,
+                            )
+
+    def test_synthesis_rejects_disguised_quote_dump_and_bare_source_ids(self) -> None:
+        source = chat_module._to_sources(_chat_search_response(
+            "Who opens the garden gate?",
+            text="Mara opened the garden gate with a borrowed silver key.",
+        ).results)[0]
+        candidate = chat_module._SourceSentenceCandidate("S1:1", source, source.text)
+        for answer, reason in (
+            (f'Here is the answer: \"{source.text}\"', "verbatim_source_dump"),
+            ("According to S1, Mara opens the gate.", "model_owned_citation"),
+        ):
+            with self.subTest(answer=answer):
+                result = chat_module._validated_semantic_synthesis(
+                    json.dumps({"answer": answer, "sentence_ids": ["S1:1"]}),
+                    [candidate], required_sources=1,
+                )
+                self.assertIsNone(result.answer)
+                self.assertEqual(result.rejection_reason, reason)
+
     def test_trusted_codex_quality_model_returns_grounded_synthesis(self) -> None:
         """Codex writes human-readable prose while Librarian owns citations."""
         question = "What did Mara do, and how did the garden react?"
@@ -71,8 +307,291 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn("borrowed key", response.answer)
         self.assertIn('"answer"', selector.messages[-1].content)
         self.assertIn("sentence_ids", selector.messages[-1].content)
+        self.assertIn("Do not use causal language", selector.messages[0].content)
         self.assertEqual(selector.generate_calls, 1)
         self.assertEqual(generation.messages, [])
+        self.assertEqual(selector.audit_calls, 1)
+
+    def test_trusted_codex_quality_model_accepts_an_isolated_json_fence(self) -> None:
+        """A Codex CLI Markdown fence does not discard an otherwise valid selection."""
+        question = "Who opens the garden gate?"
+        source_text = "Mara opened the garden gate with a borrowed key."
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            response=(
+                "```json\n"
+                '{"answer":"Mara opens the garden gate.","sentence_ids":["S1:1"]}'
+                "\n```"
+            ),
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6-sol",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(response.answer, "Mara opens the garden gate. [S1]")
+        self.assertEqual([source.source_id for source in response.sources], ["S1"])
+
+    def test_quality_answer_timing_includes_structured_synthesis(self) -> None:
+        """Reported generation time includes the broker-like selection call."""
+        question = "Who opens the garden gate?"
+        source_text = "Mara opened the garden gate with a borrowed key."
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            response=(
+                '{"answer":"Mara opens the garden gate.","sentence_ids":["S1:1"]}'
+            ),
+            delay_seconds=0.01,
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6-sol",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertGreaterEqual(response.timings.generation_seconds, 0.01)
+
+    def test_broad_scoped_codex_answer_keeps_ten_distinct_citations(self) -> None:
+        """The Screwtape UAT shape needs ten selected chunks, even inside one book."""
+        question = "What does C.S. Lewis say about Christianity?"
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            response=(
+                '{"answer":"Lewis presents Christianity as demanding moral choice and '
+                'resistance to self-deception.","sentence_ids":['
+                '"S1:1","S2:1","S3:1","S4:1","S5:1","S6:1","S7:1",'
+                '"S8:1","S9:1","S10:1"]}'
+            ),
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_author_search_response(question, count=10),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6-sol",
+                    answer_capability="quality",
+                    book_id="lewis",
+                )
+            )
+
+        self.assertEqual(len(response.sources), 10)
+        self.assertEqual(response.answer.count("[S"), 10)
+        self.assertNotIn("Lewis examines modern Christianity", response.answer)
+        self.assertEqual(response.to_dict()["minimum_citation_count"], 10)
+        self.assertEqual(response.to_dict()["citation_count"], 10)
+        self.assertEqual(response.to_dict()["outcome"], "answered")
+
+    def test_broad_scoped_codex_answer_repairs_an_under_cited_selection(self) -> None:
+        """One bounded retry asks Codex to meet the ten-chunk evidence floor."""
+        question = "What does C.S. Lewis say about Christianity?"
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            responses=[
+                '{"answer":"Lewis criticizes self-deception.","sentence_ids":["S1:1"]}',
+                (
+                    '{"answer":"Lewis presents Christianity as demanding moral choice and '
+                    'resistance to self-deception.","sentence_ids":['
+                    '"S1:1","S2:1","S3:1","S4:1","S5:1","S6:1","S7:1",'
+                    '"S8:1","S9:1","S10:1"]}'
+                ),
+            ],
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_author_search_response(question, count=10),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6-sol",
+                    answer_capability="quality",
+                    book_id="lewis",
+                )
+            )
+
+        self.assertEqual(selector.generate_calls, 2)
+        self.assertEqual(len(response.sources), 10)
+        self.assertIn("insufficient_distinct_sources", selector.messages[-1].content)
+
+    def test_trusted_codex_rejects_whole_answer_when_causal_repair_fails(self) -> None:
+        """Deleting claims must not leave their citations attached to a partial answer."""
+        question = "What happened when Mara opened the garden gate?"
+        source_text = (
+            "Mara opened the garden gate with a borrowed key. "
+            "The clockwork garden answered in careful ticking."
+        )
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            response=(
+                '{"answer":"Mara opens the garden gate. Therefore, the garden ticks.",'
+                '"sentence_ids":["S1:1","S1:2"]}'
+            ),
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+            self.assertLogs(chat_module.logger, level="INFO") as logs,
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6-sol",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(selector.generate_calls, 2)
+        self.assertEqual(response.sources, [])
+        self.assertEqual(response.outcome, "generation_unavailable")
+        self.assertNotIn("Mara opens", response.answer)
+        self.assertIn("grounded_synthesis_rejected", "\n".join(logs.output))
+
+    def test_broad_scoped_codex_answer_does_not_keep_citations_after_causal_rejection(self) -> None:
+        """A failed repair cannot publish a partial answer with ten padded citations."""
+        question = "What does C.S. Lewis say about Christianity?"
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            response=(
+                '{"answer":"Lewis presents Christianity as demanding moral choice and '
+                'resistance to self-deception. Therefore, its demands automatically solve '
+                'every modern problem. Across these passages, he returns to those themes.",'
+                '"sentence_ids":['
+                '"S1:1","S2:1","S3:1","S4:1","S5:1","S6:1","S7:1",'
+                '"S8:1","S9:1","S10:1"]}'
+            ),
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_author_search_response(question, count=10),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6-sol",
+                    answer_capability="quality",
+                    book_id="lewis",
+                )
+            )
+
+        self.assertEqual(selector.generate_calls, 2)
+        self.assertEqual(len(response.sources), 0)
+        self.assertEqual(response.answer.count("[S"), 0)
+        self.assertNotIn("therefore", response.answer.casefold())
+
+    def test_rejected_synthesis_logs_a_redacted_reason(self) -> None:
+        """Validator diagnostics expose the reason without retaining model prose."""
+        question = "Who opens the garden gate?"
+        source_text = "Mara opened the garden gate with a borrowed key."
+        generation = _FakeCodexGenerator(model="gpt-5.6-sol")
+        selector = _FakeCodexGenerator(
+            model="gpt-5.6-sol",
+            response="Explanation that must never reach logs: PRIVATE-SOURCE-TEXT.",
+        )
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch(
+                "librarian_chat.chat.search_chunks",
+                return_value=_chat_search_response(question, text=source_text),
+            ),
+            patch("librarian_chat.chat.create_configured_generator", return_value=generation),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+            self.assertLogs(chat_module.logger, level="INFO") as logs,
+        ):
+            response = answer_question(
+                ChatOptions(
+                    question=question,
+                    database_url="sqlite:///tmp/librarian.db",
+                    generation_provider="codex",
+                    generation_model="gpt-5.6-sol",
+                    answer_capability="quality",
+                )
+            )
+
+        self.assertEqual(
+            response.answer,
+            "I found relevant passages, but could not produce a grounded summary "
+            "from them. Please try again.",
+        )
+        log_text = "\n".join(logs.output)
+        self.assertIn("grounded_synthesis_rejected reason=invalid_json", log_text)
+        self.assertNotIn("PRIVATE-SOURCE-TEXT", log_text)
 
     def test_trusted_codex_synthesis_uses_the_same_streaming_contract(self) -> None:
         """The non-streaming broker response becomes one safe visible SSE token."""
@@ -117,6 +636,10 @@ class ChatTests(unittest.TestCase):
         )
         self.assertEqual(events[-1].data["answer"], events[1].data["text"])
         self.assertEqual(events[-1].data["sources"][0]["source_id"], "S1")
+        for event in (events[0], events[-1]):
+            self.assertEqual(event.data["minimum_citation_count"], 1)
+            self.assertEqual(event.data["citation_count"], 1)
+            self.assertEqual(event.data["outcome"], "answered")
 
     def test_trusted_synthesis_rejects_invalid_evidence_or_unsupported_claims(self) -> None:
         """Invalid source IDs and unsupported causal claims never become answers."""
@@ -127,7 +650,10 @@ class ChatTests(unittest.TestCase):
         )
         for response in (
             '{"sentence_ids":[]}',
-            '{"sentence_ids":["S1:1","S1:1"]}',
+            (
+                '{"answer":"Mara opens the gate.",'
+                '"sentence_ids":["S1:1","S1:1"]}'
+            ),
             '{"sentence_ids":["S2:1"]}',
             '{"sentence_ids":["S1:1"],"answer":"Mara caused ticking."}',
         ):
@@ -160,11 +686,12 @@ class ChatTests(unittest.TestCase):
                     "I found relevant passages, but could not produce a grounded summary "
                     "from them. Please try again.",
                 )
+                self.assertEqual(selector.generate_calls, 2 if "caused" in response else 1)
                 self.assertNotIn("caused", answer)
 
     def test_trusted_synthesis_preserves_negation_and_never_invents_causality(self) -> None:
         """A quality answer remains guarded against unsupported causal language."""
-        question = "Why did the garden tick?"
+        question = "What happened in the garden?"
         source_text = (
             "Mara did not open the garden gate. "
             "The garden ticked after Mara left."
@@ -216,7 +743,7 @@ class ChatTests(unittest.TestCase):
 
     def test_streamed_chat_reuses_prepared_evidence_and_emits_extractive_tokens(self) -> None:
         """Streaming reuses retrieval and never lets native fragments alter a claim."""
-        question = "How brutal is war?"
+        question = "Is war described as brutal?"
         generator = _FakeStreamingGenerator(
             ["The front is a cage ", "in which we must await fearfully."]
         )
@@ -597,7 +1124,9 @@ class ChatTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(response.answer, "The garden ticked after Mara left. [S1]")
+        self.assertEqual(response.outcome, "insufficient_evidence")
+        self.assertEqual(response.sources, [])
+        self.assertEqual(response.minimum_citation_count, 2)
         self.assertNotIn("because", response.answer.casefold())
         self.assertEqual(generator.messages, [])
 
@@ -865,7 +1394,7 @@ class ChatTests(unittest.TestCase):
                 stream_answer_question(
                     prepare_answer_question(
                         ChatOptions(
-                            question="How brutal is war?",
+                            question="Is war described as brutal?",
                             database_url="sqlite:///tmp/librarian.db",
                             embedding_provider="ollama",
                             embedding_model="all-minilm",
@@ -894,7 +1423,7 @@ class ChatTests(unittest.TestCase):
                 stream_answer_question(
                     prepare_answer_question(
                         ChatOptions(
-                            question="How brutal is war?",
+                            question="Is war described as brutal?",
                             database_url="sqlite:///tmp/librarian.db",
                             embedding_provider="ollama",
                             embedding_model="all-minilm",
@@ -913,7 +1442,7 @@ class ChatTests(unittest.TestCase):
     def test_answer_question_retrieves_sources_and_assembles_an_extractive_answer(self) -> None:
         """The JSON route returns exact source text and never invokes generation."""
         fake_search = SearchResponse(
-            query="How brutal is war?",
+            query="Is war described as brutal?",
             embedding_provider="ollama",
             embedding_model="all-minilm",
             dimensions=2,
@@ -949,7 +1478,7 @@ class ChatTests(unittest.TestCase):
         ):
             response = answer_question(
                 ChatOptions(
-                    question=" How brutal is war? ",
+                    question=" Is war described as brutal? ",
                     database_url="sqlite:///tmp/librarian.db",
                     embedding_provider="ollama",
                     embedding_model="all-minilm",
@@ -961,7 +1490,7 @@ class ChatTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(response.question, "How brutal is war?")
+        self.assertEqual(response.question, "Is war described as brutal?")
         self.assertEqual(response.answer, "War is brutal and terrifying at the front. [S1]")
         self.assertEqual(response.answer_capability, "quality")
         self.assertEqual(response.filters, {"author": "Erich Maria Remarque"})
@@ -982,6 +1511,7 @@ class ChatTests(unittest.TestCase):
         fake_search = _search_response()
 
         with (
+            patch("librarian_chat.chat._validate_indexed_sources"),
             patch("librarian_chat.chat.embed_query", return_value=_query_embedding()),
             patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="auto"),
             patch(
@@ -995,7 +1525,7 @@ class ChatTests(unittest.TestCase):
         ):
             response = answer_question(
                 ChatOptions(
-                    question="How brutal is war?",
+                    question="Is war described as brutal?",
                     database_url="sqlite:///tmp/librarian.db",
                     embedding_provider="ollama",
                     embedding_model="all-minilm",
@@ -1057,7 +1587,7 @@ class ChatTests(unittest.TestCase):
         ):
             response = answer_question(
                 ChatOptions(
-                    question="How brutal is war?",
+                    question="Is war described as brutal?",
                     database_url="sqlite:///tmp/librarian.db",
                     embedding_provider="ollama",
                     embedding_model="all-minilm",
@@ -1086,6 +1616,7 @@ class ChatTests(unittest.TestCase):
                 generator = _FakeGenerator()
                 fake_search = _author_search_response(question, count=10)
                 with (
+                    patch("librarian_chat.chat._validate_indexed_sources"),
                     patch(
                         "librarian_chat.chat.embed_query",
                         return_value=_query_embedding_for(question),
@@ -1158,6 +1689,9 @@ class ChatTests(unittest.TestCase):
                     )
                 )
 
+        self.assertEqual(response.to_dict()["minimum_citation_count"], 10)
+        self.assertEqual(response.to_dict()["citation_count"], 0)
+        self.assertEqual(response.to_dict()["outcome"], "insufficient_evidence")
         self.assertIn("enough distinct body-text passages", response.answer)
         self.assertEqual(generator.messages, [])
         self.assertEqual(response.sources, [])
@@ -1518,7 +2052,7 @@ class ChatTests(unittest.TestCase):
 
 def _query_embedding() -> EmbedQueryResult:
     return EmbedQueryResult(
-        query="How brutal is war?",
+        query="Is war described as brutal?",
         embedding_provider="ollama",
         embedding_model="all-minilm",
         dimensions=2,
@@ -1668,7 +2202,7 @@ def _two_source_chat_search_response(
 
 def _search_response() -> SearchResponse:
     return SearchResponse(
-        query="How brutal is war?",
+        query="Is war described as brutal?",
         embedding_provider="ollama",
         embedding_model="all-minilm",
         dimensions=2,
@@ -1708,16 +2242,38 @@ class _FakeGenerator:
 class _FakeCodexGenerator(_FakeGenerator):
     provider = "codex"
 
-    def __init__(self, *, model: str, response: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        model: str,
+        response: str = "",
+        responses: Optional[list[str]] = None,
+        delay_seconds: float = 0.0,
+    ) -> None:
         super().__init__()
         self.model = model
         self.response = response
+        self.responses = list(responses or [])
+        self.delay_seconds = delay_seconds
         self.generate_calls = 0
+        self.audit_calls = 0
+        self.audit_responses: list[str] = []
+        self.audit_response = json.dumps({
+            "evidence_verdict": "supported", "citation_relevance": "all_relevant",
+            "missing_coverage": [], "unsupported_claims": [], "reason": "Fixture evidence supports it.",
+        })
 
     def generate(self, messages, *, response_format=None):
+        if response_format == "json":
+            self.audit_calls += 1
+            return self.audit_responses.pop(0) if self.audit_responses else self.audit_response
         self.generate_calls += 1
         self.messages = messages
         self.response_format = response_format
+        if self.delay_seconds:
+            sleep(self.delay_seconds)
+        if self.responses:
+            return self.responses.pop(0)
         return self.response
 
 

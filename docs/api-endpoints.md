@@ -439,6 +439,35 @@ Librarian-assigned source IDs; citations remain separate, verbatim source
 cards. The normal provider, model, and answer capability are reported from the
 ignored, user-owned `config/librarian.json` file.
 
+The Docker Codex broker applies a structured `{answer, sentence_ids}` output
+schema only to grounded chat synthesis; tag and genre generation retain their
+own JSON contracts. The server maps selected sentence IDs to visible citations
+and checks distinct source coverage. It may make one repair attempt for unknown
+IDs, model-written citation markers, too few distinct sources, or unsupported
+causal wording. A repair replaces the entire answer and evidence selection; the
+server never deletes prose while retaining its citations. Other invalid
+responses are withheld. The `generation_seconds` timing includes synthesis and
+any repair attempt.
+
+After structural validation, a separate source-only review through the same
+configured quality provider must find every material claim supported and every
+citation relevant. A failed support review may use the same single repair budget to request a
+complete replacement, which must pass a fresh review. There are at most two
+synthesis attempts total, shared with structural repairs. Malformed or unavailable
+reviews, and still-unsupported replacements, withhold the entire answer without
+citations.
+Specifically requested years absent from retrieved evidence cause an
+`insufficient_evidence` response before synthesis. Broad candidate sentences are
+deduplicated before generation so overlapping chunks cannot inflate coverage.
+
+These checks improve grounding but do not constitute semantic proof. The model
+review is fallible, so answer relevance and support still require acceptance
+testing; issue #74 tracks remaining correctness work.
+
+Indexed chunk IDs, text, and content roles are checked against SQLite before
+chat synthesis. A stale projection falls back to SQLite in `auto` mode; explicit
+`opensearch` mode reports a rebuild-required error instead of citing stale text.
+
 Chat retrieval follows `search.retrieval_backend` in that JSON configuration:
 
 - `auto` (the default) uses the configured OpenSearch hybrid index when it can
@@ -502,7 +531,14 @@ If the request omits generation overrides, the response reports the configured
 JSON default in `answer_capability`. An override without `answer_capability`
 returns `400`. The response also includes the resolved provider/model, answer,
 the source chunks used as local evidence, the actual `retrieval_backend`, and
-the stage `timings`.
+the stage `timings`. Both JSON and streaming responses report
+`minimum_citation_count` (the server-planned evidence floor), `citation_count`
+(distinct cited chunks), and `outcome` (`answered`, `insufficient_evidence`, or
+`generation_unavailable`). These counts are separate from `retrieval_limit`: a
+retrieved candidate is not necessarily a supporting citation. Broad synthesis requires
+at least ten distinct body passages; bounded explanations require two, and
+point facts require one. Whole-library thematic searches use the requested topic
+for retrieval while preserving the original question for synthesis.
 
 `400` is also the intentional response for an unsupported provider/model
 selection or invalid configured generation input. Malformed request fields
@@ -523,7 +559,18 @@ sentence IDs. Librarian validates the IDs and assigns existing citations; it
 does not trust model-provided citation markers. Invalid JSON, unknown or
 duplicate IDs, an unsafe answer, a failed selector call, or a selection that
 misses the evidence floor withholds the quality response instead of returning
-raw source quotations. Ollama configurations never enable this selector.
+raw source quotations. A separate source-only review must also accept every
+material claim and the relevance of every citation before the answer is shown.
+Selected structural failures or rejected support reviews share one repair
+attempt; a replacement answer must pass validation and a fresh support review.
+An unavailable or malformed review withholds the answer. This review uses the
+configured trusted quality selector and adds to `synthesis_generation_seconds`.
+Ollama configurations never enable this selector.
+
+Search-index passages are checked against the current SQLite chunk records.
+With automatic retrieval, a stale index falls back to SQLite; explicit
+OpenSearch retrieval reports an error requiring an index rebuild. Mixed
+front-matter/body chunks are excluded from ordinary body-evidence answers.
 
 ### `POST /chat/stream`
 
