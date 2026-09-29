@@ -297,12 +297,12 @@ See the evaluation north star:
 ### Immediate Next: Search Performance and Correctness Hardening
 
 Answer delivery and internal RPC work is planned in the
-[implementation roadmap](docs/modular-answer-streaming-roadmap.md), tracked in
+[answer-delivery roadmap](docs/answer-delivery/), tracked in
 [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87). The roadmap
-is backed by [ADR 001](docs/adr/001-internal-rpc-transport.md), a detailed
-[technical design](docs/design/answer-delivery.md), a
-[compatibility plan](docs/design/answer-delivery-compatibility.md), and an
-[acceptance charter](docs/acceptance/answer-delivery.md). These documents require
+is backed by [ADR 001](docs/answer-delivery/adr-internal-rpc-transport.md), a detailed
+[technical design](docs/answer-delivery/technical-design.md), a
+[compatibility plan](docs/answer-delivery/compatibility-and-migration.md), and an
+[acceptance charter](docs/answer-delivery/acceptance.md). These documents require
 gRPC at Librarian-owned service boundaries while preserving HTTPS JSON/SSE for
 the browser and vendor-native adapters for OpenSearch and Ollama.
 

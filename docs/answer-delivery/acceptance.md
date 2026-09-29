@@ -2,9 +2,9 @@
 
 **Status:** Required for M01 fixtures and M04–M10 acceptance.
 
-**Related:** [technical design](../design/answer-delivery.md),
-[compatibility plan](../design/answer-delivery-compatibility.md), and
-[roadmap](../modular-answer-streaming-roadmap.md).
+**Related:** [technical design](technical-design.md),
+[compatibility plan](compatibility-and-migration.md), and
+[roadmap](README.md).
 
 ## Two required suites
 

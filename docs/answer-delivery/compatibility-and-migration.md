@@ -3,9 +3,9 @@
 **Status:** Proposed. This plan is a prerequisite to M03, not permission to run
 HTTP and gRPC indefinitely.
 
-**Related:** [ADR 001](../adr/001-internal-rpc-transport.md),
-[technical design](answer-delivery.md), [acceptance charter](../acceptance/answer-delivery.md),
-and [roadmap](../modular-answer-streaming-roadmap.md).
+**Related:** [ADR 001](adr-internal-rpc-transport.md),
+[technical design](technical-design.md), [acceptance charter](acceptance.md),
+and [roadmap](README.md).
 
 ## Compatibility promise
 
