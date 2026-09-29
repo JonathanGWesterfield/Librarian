@@ -296,6 +296,28 @@ See the evaluation north star:
 
 ### Immediate Next: Search Performance and Correctness Hardening
 
+Answer delivery and internal RPC work is planned in the
+[implementation roadmap](docs/modular-answer-streaming-roadmap.md), tracked in
+[#87](https://github.com/JonathanGWesterfield/Librarian/issues/87). The roadmap
+is backed by [ADR 001](docs/adr/001-internal-rpc-transport.md), a detailed
+[technical design](docs/design/answer-delivery.md), a
+[compatibility plan](docs/design/answer-delivery-compatibility.md), and an
+[acceptance charter](docs/acceptance/answer-delivery.md). These documents require
+gRPC at Librarian-owned service boundaries while preserving HTTPS JSON/SSE for
+the browser and vendor-native adapters for OpenSearch and Ollama.
+
+The planned broker migration covers chat, summaries, tags, genres,
+recommendations, workers, and evaluation. It uses per-principal Compose secrets
+and private broker networks, sanitized single-file runtime configuration, an
+authenticated release/contract handshake, and an explicit host-CLI guard; it
+does not expose the broker on a host port.
+
+Start with M00: publish and approve the design set, then make the contracts and
+fixtures reproducible in M01. The work preserves grounding checks in both
+delivery modes and coordinates architecture work in #83 and latency work in
+#86. gRPC contracts, streaming configuration, and the browser event contract are
+planned, not yet implemented.
+
 Before continuing the remaining Phase 8 operational polish, prioritize
 [search performance (#73)](https://github.com/JonathanGWesterfield/Librarian/issues/73)
 and [answer correctness (#74)](https://github.com/JonathanGWesterfield/Librarian/issues/74):
