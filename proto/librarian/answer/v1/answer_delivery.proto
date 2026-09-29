@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package librarian.answer.v1;
+
+service GenerationBroker {
+  // Authenticated startup compatibility check; it does not run Codex.
+  rpc GetCapabilities(CapabilitiesRequest) returns (Capabilities);
+  // The sole v1 provider-execution RPC.
+  rpc Generate(GenerateRequest) returns (GenerateResult);
+}
+
+message CapabilitiesRequest {
+  uint32 contract_major = 1;  // Must be 1.
+  uint32 contract_minor = 2;  // Must be in the server's inclusive range.
+  bytes descriptor_sha256 = 3;  // Exactly 32 raw SHA-256 bytes.
+  string stack_release_sha = 4;  // Exactly 40 lowercase hexadecimal characters.
+  reserved 5 to 15;
+}
+
+message Capabilities {
+  uint32 contract_major = 1;
+  uint32 min_contract_minor = 2;
+  uint32 max_contract_minor = 3;
+  bytes descriptor_sha256 = 4;  // Exactly 32 raw SHA-256 bytes.
+  string stack_release_sha = 5;  // Exactly 40 lowercase hexadecimal characters.
+  repeated GenerationOperation operations = 6;
+  reserved 7 to 15;
+}
+
+enum GenerationOperation {
+  GENERATION_OPERATION_UNSPECIFIED = 0;
+  GROUNDED_SYNTHESIS = 1;
+  SEMANTIC_SOURCE_SELECTION = 2;
+  SUPPORT_REVIEW = 3;
+  EVALUATOR_JUDGEMENT = 4;
+  CHAPTER_SUMMARIZATION = 5;
+  BOOK_SUMMARIZATION = 6;
+  TAG_GENERATION = 7;
+  GENRE_GENERATION = 8;
+  RECOMMENDATION_SYNTHESIS = 9;
+  reserved 10 to 15;
+}
+
+enum OutputContract {
+  OUTPUT_CONTRACT_UNSPECIFIED = 0;
+  GROUNDED_ANSWER_JSON_V1 = 1;
+  SOURCE_SELECTION_JSON_V1 = 2;
+  SUPPORT_REVIEW_JSON_V1 = 3;
+  EVALUATOR_VERDICT_JSON_V1 = 4;
+  PLAIN_TEXT_V1 = 5;
+  TAGS_JSON_V1 = 6;
+  GENRES_JSON_V1 = 7;
+  reserved 8 to 15;
+}
+
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  SYSTEM = 1;
+  USER = 2;
+  ASSISTANT = 3;
+}
+
+message ChatMessage {
+  MessageRole role = 1;
+  string content = 2;
+  reserved 3 to 15;
+}
+
+message EvidenceCandidate {
+  string candidate_id = 1;
+  string book_id = 2;
+  string chunk_id = 3;
+  bytes source_sha256 = 4;  // Exactly 32 raw SHA-256 bytes.
+  string scope_fingerprint = 5;
+  bool body_text_eligible = 6;
+  string retrieval_provenance = 7;
+  string excerpt = 8;
+  string source_revision = 9;  // ASCII 1..128 stable source-store revision.
+  reserved 10 to 15;
+}
+
+message EvidenceSnapshot {
+  repeated EvidenceCandidate candidates = 1;
+  bytes snapshot_sha256 = 2;  // Exactly 32 raw SHA-256 bytes.
+  reserved 3 to 15;
+}
+
+message GenerateRequest {
+  string request_id = 1;  // Canonical UUID.
+  string correlation_id = 2;  // ASCII 1..128 characters.
+  GenerationOperation operation = 3;
+  string model_id = 4;  // 1..256 UTF-8 bytes.
+  repeated ChatMessage messages = 5;
+  OutputContract output_contract = 6;
+  EvidenceSnapshot evidence_snapshot = 7;  // Omitted only where the matrix permits.
+  reserved 8 to 15;
+}
+
+message GenerationSuccess {
+  string content = 1;
+  reserved 2 to 15;
+}
+
+enum OutputViolation {
+  OUTPUT_VIOLATION_UNSPECIFIED = 0;
+  MALFORMED = 1;
+  TOO_LARGE = 2;
+}
+
+message InvalidStructuredOutput {
+  OutputViolation violation = 1;
+  reserved 2 to 15;
+}
+
+message GenerateResult {
+  string request_id = 1;
+  string provider_model_id = 2;
+  uint64 queue_wait_ms = 3;
+  uint64 execution_ms = 4;
+  oneof outcome {
+    GenerationSuccess success = 5;
+    InvalidStructuredOutput invalid_structured_output = 6;
+  }
+  reserved 7 to 15;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  REQUEST_LIMIT_EXCEEDED = 1;
+  UNKNOWN_ENUM = 2;
+  CONTRACT_MISMATCH = 3;
+  CALLER_DENIED = 4;
+  OPERATION_DENIED = 5;
+  BROKER_NOT_READY = 6;
+  ADMISSION_FULL = 7;
+  EXECUTION_TIMEOUT = 8;
+  EXECUTION_FAILED = 9;
+}
+
+message ErrorDetail {
+  ErrorCode code = 1;
+  bool retryable = 2;
+  uint32 retry_after_ms = 3;
+  string safe_message = 4;  // 1..256 bytes; never source/provider stderr.
+  string request_id = 5;
+  reserved 6 to 15;
+}

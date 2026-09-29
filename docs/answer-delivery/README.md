@@ -46,8 +46,8 @@ required M00/M01 deliverables have passed review.
 
 | ID | Deliverable | Depends on | Status |
 | --- | --- | --- | --- |
-| M00 | Publish and approve the design source of truth | none | Not started |
-| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Not started |
+| M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) |
+| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | In progress ([M01a #89](https://github.com/JonathanGWesterfield/Librarian/issues/89)) |
 | M02 | In-process answer-runtime extraction and parity | M01 | Not started |
 | M03 | Atomic gRPC Codex-broker migration | M02 | Not started |
 | M04 | Buffered JSON and progressive SSE delivery adapters | M03 | Not started |
@@ -62,11 +62,11 @@ required M00/M01 deliverables have passed review.
 
 Owner: architecture/documentation.
 
-- [ ] Merge the ADR, technical design, compatibility plan, acceptance charter,
+- [x] Merge the ADR, technical design, compatibility plan, acceptance charter,
   and this roadmap in one focused documentation PR.
-- [ ] Update #87 to link to the merged file paths and retain only milestone
+- [x] Update #87 to link to the merged file paths and retain only milestone
   status, PR links, blockers, and acceptance reports.
-- [ ] Obtain architecture review approval for ADR 001 and the design's security,
+- [x] Obtain architecture review approval for ADR 001 and the design's security,
   lifecycle, and resource decisions.
 
 **Exit:** all source links resolve on `main`; #87 does not duplicate the
@@ -76,6 +76,12 @@ for the unpublished-tracker P0.
 ### M01 — Contract, toolchain, inventory audit, and deterministic fixtures
 
 Owner: contracts, configuration, and broker owners.
+
+The first focused implementation slice is
+[#89](https://github.com/JonathanGWesterfield/Librarian/issues/89): the canonical
+protobuf source, checked-in Python bindings, reproducible generation, and
+contract-drift tests. It does not implement a broker, browser delivery, or
+Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and
