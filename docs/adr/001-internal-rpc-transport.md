@@ -5,8 +5,7 @@ M01's contract and toolchain gate passes.
 
 **Date:** 2026-09-29
 
-**Related:** [design review](../modular-answer-streaming-design-review.md),
-[answer-delivery design](../design/answer-delivery.md), and
+**Related:** [answer-delivery design](../design/answer-delivery.md), and
 [roadmap](../modular-answer-streaming-roadmap.md).
 
 ## Context
