@@ -3,10 +3,10 @@
 **Status:** Proposed implementation specification. M01 must approve this
 document's open implementation values before code changes.
 
-**Related:** [ADR 001](../adr/001-internal-rpc-transport.md),
-[compatibility plan](answer-delivery-compatibility.md),
-[acceptance charter](../acceptance/answer-delivery.md), and
-[roadmap](../modular-answer-streaming-roadmap.md).
+**Related:** [ADR 001](adr-internal-rpc-transport.md),
+[compatibility plan](compatibility-and-migration.md),
+[acceptance charter](acceptance.md), and
+[roadmap](README.md).
 
 ## Goals and non-goals
 

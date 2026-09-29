@@ -3,7 +3,7 @@
 ## Active architecture roadmap
 
 - At the start of every repository task, read
-  [`docs/modular-answer-streaming-roadmap.md`](docs/modular-answer-streaming-roadmap.md).
+  [`docs/answer-delivery/README.md`](docs/answer-delivery/README.md).
   For answer delivery, chat, broker, gRPC, streaming, configuration, testing,
   or architecture work, also read the ADR, technical design, compatibility
   plan, and acceptance charter linked from that roadmap.

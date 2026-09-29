@@ -6,10 +6,10 @@ linked from [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87).
 
 **Design source of truth:**
 
-- [ADR 001: internal RPC transport](adr/001-internal-rpc-transport.md)
-- [Answer delivery technical design](design/answer-delivery.md)
-- [Compatibility and migration plan](design/answer-delivery-compatibility.md)
-- [Acceptance charter](acceptance/answer-delivery.md)
+- [ADR 001: internal RPC transport](adr-internal-rpc-transport.md)
+- [Answer delivery technical design](technical-design.md)
+- [Compatibility and migration plan](compatibility-and-migration.md)
+- [Acceptance charter](acceptance.md)
 
 ## Outcome
 
@@ -21,7 +21,7 @@ Candidate progress never becomes answer prose before validation.
 
 Every Librarian-owned inter-process boundary uses gRPC. In-process composition,
 browser HTTP/SSE, and third-party vendor protocols remain the explicit
-exceptions defined in [ADR 001](adr/001-internal-rpc-transport.md). gRPC is a
+exceptions defined in [ADR 001](adr-internal-rpc-transport.md). gRPC is a
 typed, observable contract choice, not a claim that it alone improves latency.
 
 ## Start gate
@@ -33,14 +33,14 @@ required M00/M01 deliverables have passed review.
 | Review finding | Resolution and acceptance condition |
 | --- | --- |
 | P0: tracker pointed to an unpublished design | **M00:** merge this documentation set in a focused PR; #87 then links to the immutable files and contains status/evidence only. Until then, #87 must say implementation is blocked on documentation publication. |
-| P0: migration inventory omitted callers | [Technical design inventory](design/answer-delivery.md#complete-boundary-and-migration-inventory) now enumerates chat, API and worker summary, tag, genre, recommendation, evaluator, and every host CLI disposition. M03 migrates every supported Compose caller and rejects host Docker-broker execution before transport. |
-| P0: trust/authentication deferred | [ADR 001](adr/001-internal-rpc-transport.md#local-compose-trust-model) fixes the single-host Compose exception: five named networks, role-specific Compose secret mounts, generated sanitized per-service config files, health identity, rotation, and the multi-host block. M03 proves isolation as well as authorization denial. |
-| P1: incomplete proto and event semantics | The normative [v1 contract](design/answer-delivery.md#v1-grpc-contract) specifies canonical messages, fields, reservations, output matrix, typed error/status mapping, limits, and metadata. Its [compatibility handshake](design/answer-delivery.md#atomic-compatibility-handshake), evidence snapshot, and runtime lifecycle define the required implementation. M01 adds the canonical proto, JSON schema, generated stubs, and fixtures. |
+| P0: migration inventory omitted callers | [Technical design inventory](technical-design.md#complete-boundary-and-migration-inventory) now enumerates chat, API and worker summary, tag, genre, recommendation, evaluator, and every host CLI disposition. M03 migrates every supported Compose caller and rejects host Docker-broker execution before transport. |
+| P0: trust/authentication deferred | [ADR 001](adr-internal-rpc-transport.md#local-compose-trust-model) fixes the single-host Compose exception: five named networks, role-specific Compose secret mounts, generated sanitized per-service config files, health identity, rotation, and the multi-host block. M03 proves isolation as well as authorization denial. |
+| P1: incomplete proto and event semantics | The normative [v1 contract](technical-design.md#v1-grpc-contract) specifies canonical messages, fields, reservations, output matrix, typed error/status mapping, limits, and metadata. Its [compatibility handshake](technical-design.md#atomic-compatibility-handshake), evidence snapshot, and runtime lifecycle define the required implementation. M01 adds the canonical proto, JSON schema, generated stubs, and fixtures. |
 | P1: overlapping broker RPCs | v1 has one unary `GenerationBroker.Generate`; no `ObserveGenerate`. The runtime owns progress. A broker stream needs a future ADR amendment and concrete consumer. |
-| P1: unspecified cancellation and resource bounds | [Execution design](design/answer-delivery.md#admission-execution-cancellation-and-shutdown) selects `grpc.aio`, process-group ownership, cleanup escalation, and initial limits. M03 includes a real subprocess cancellation test. |
-| P1: mixed-protocol rollout risk | [Compatibility plan](design/answer-delivery-compatibility.md) selects atomic Compose R2, an authenticated release/protocol/descriptor handshake, configuration validation, rollback, and HTTP retirement proof. |
-| P1: toolchain/ownership absent | [Toolchain and ownership](design/answer-delivery.md#toolchain-and-ownership) specifies canonical proto ownership, generation, checked-in output, and CI drift/breaking checks. |
-| P1: non-reproducible acceptance | The [acceptance charter](acceptance/answer-delivery.md) separates tracked deterministic fixtures from local private-library Chrome UAT and specifies report evidence. |
+| P1: unspecified cancellation and resource bounds | [Execution design](technical-design.md#admission-execution-cancellation-and-shutdown) selects `grpc.aio`, process-group ownership, cleanup escalation, and initial limits. M03 includes a real subprocess cancellation test. |
+| P1: mixed-protocol rollout risk | [Compatibility plan](compatibility-and-migration.md) selects atomic Compose R2, an authenticated release/protocol/descriptor handshake, configuration validation, rollback, and HTTP retirement proof. |
+| P1: toolchain/ownership absent | [Toolchain and ownership](technical-design.md#toolchain-and-ownership) specifies canonical proto ownership, generation, checked-in output, and CI drift/breaking checks. |
+| P1: non-reproducible acceptance | The [acceptance charter](acceptance.md) separates tracked deterministic fixtures from local private-library Chrome UAT and specifies report evidence. |
 
 ## Milestones
 
@@ -235,7 +235,7 @@ changing grounding policy. #87 links the final evidence and reconciles #74,
 
 ## Release evidence
 
-The [acceptance charter](acceptance/answer-delivery.md) is normative. In short,
+The [acceptance charter](acceptance.md) is normative. In short,
 every behavior-changing milestone requires deterministic fixtures, actual Chrome
 UAT where applicable, independent review, and full checks in that order.
 Existing warm-eight-second and cold-thirty-second targets remain visible;
