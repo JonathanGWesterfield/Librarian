@@ -1,5 +1,20 @@
 # Codex Instructions
 
+## Active architecture roadmap
+
+- At the start of every repository task, read
+  [`docs/modular-answer-streaming-roadmap.md`](docs/modular-answer-streaming-roadmap.md).
+  For answer delivery, chat, broker, gRPC, streaming, configuration, testing,
+  or architecture work, also read the ADR, technical design, compatibility
+  plan, and acceptance charter linked from that roadmap.
+- The M00–M10 answer-delivery sequence is the active course. Do not start a
+  later milestone before its documented exit conditions pass, and do not resume
+  or reprioritize the higher-level README roadmap until this roadmap reaches its
+  documented handoff or the user explicitly changes direction.
+- Treat issue #87 as the progress ledger after the roadmap documentation is
+  published. Keep technical decisions in the versioned documents rather than
+  duplicating them in issues or pull requests.
+
 ## GitHub
 
 - Prefer the GitHub connector for reading PRs, comments, review threads, issues,
