@@ -358,6 +358,18 @@ An SSE adapter maps one event to one named event with the same JSON envelope.
 Events use `id: <request_id>:<sequence>`. There is no replay, transparent retry,
 or `Last-Event-ID` promise in v1. A POST disconnect creates no duplicate work.
 
+The canonical browser contract is
+`schemas/librarian/answer/v1/answer_event.schema.json`. Its `v1` envelope has
+only `schema_version`, a canonical request UUID, a positive sequence, an event
+name, and the payload fields for that named event. The schema rejects unknown
+fields. `evidence_candidates` carries a count plus candidate IDs, book IDs, and
+book titles; it deliberately cannot carry excerpts, source text, answer prose,
+or provider output. `answer_validated` and `completed` carry the same complete
+`AnswerResult`, while `failed` carries only a bounded safe error and `cancelled`
+has no additional payload. The checked-in TypeScript types are generated from
+this schema; a generator drift check protects the browser contract before the
+SSE adapter is implemented.
+
 ## Admission, execution, cancellation, and shutdown
 
 The initial broker uses `grpc.aio`, one shared channel/stub per caller process,
@@ -543,10 +555,12 @@ committed so package builds do not require a compiler.
 
 The browser is not generated from gRPC. M01 adds a separate versioned JSON
 Schema for its event projection, committed fixtures, and a pinned TypeScript
-generation command. CI runs the protobuf and TypeScript generators, fails if
-their output differs, compiles the contracts, runs a protobuf breaking-change
-check against the prior released schema, and verifies that no prohibited
-`http://codex-broker` target exists outside a documented, temporary amendment.
+generation command. The browser generator is
+`npm --prefix apps/web run generate:answer-event-contract -- --check`. CI runs
+the protobuf and TypeScript generators, fails if their output differs, compiles
+the contracts, runs a protobuf breaking-change check against the prior released
+schema, and verifies that no prohibited `http://codex-broker` target exists
+outside a documented, temporary amendment.
 
 M01 acceptance is a clean checkout command that runs the generators and all
 contract fixtures without local EPUBs, secrets, Docker credentials, or a model.
