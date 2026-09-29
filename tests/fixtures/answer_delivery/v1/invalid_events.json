@@ -1,0 +1,30 @@
+[
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 0,
+    "event": "started"
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 2,
+    "event": "evidence_candidates",
+    "candidate_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "candidate-1",
+        "book_id": "book-1",
+        "book_title": "The Brass Orchard",
+        "excerpt": "This must never cross the progress boundary."
+      }
+    ]
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 3,
+    "event": "started",
+    "answer": "Raw answer prose is not a progress payload."
+  }
+]

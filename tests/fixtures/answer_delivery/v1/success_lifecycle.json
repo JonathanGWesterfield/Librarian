@@ -1,0 +1,131 @@
+[
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 1,
+    "event": "started"
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 2,
+    "event": "evidence_candidates",
+    "candidate_count": 2,
+    "candidates": [
+      {
+        "candidate_id": "candidate-1",
+        "book_id": "book-1",
+        "book_title": "The Brass Orchard"
+      },
+      {
+        "candidate_id": "candidate-2",
+        "book_id": "book-2",
+        "book_title": null
+      }
+    ]
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 3,
+    "event": "generation_started",
+    "attempt": 1
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 4,
+    "event": "validation_started",
+    "attempt": 1
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 5,
+    "event": "answer_validated",
+    "result": {
+      "outcome": "answered",
+      "minimum_citation_count": 1,
+      "citation_count": 1,
+      "question": "What is psychohistory?",
+      "answer": "Psychohistory models broad historical movements [S1].",
+      "embedding_provider": "ollama",
+      "embedding_model": "all-minilm",
+      "generation_provider": "codex",
+      "generation_model": "gpt-5.6-terra",
+      "answer_capability": "quality",
+      "retrieval_limit": 30,
+      "candidate_count": 2,
+      "filters": { "book_id": "book-1" },
+      "retrieval_backend": "opensearch",
+      "sources": [
+        {
+          "source_id": "S1",
+          "score": 0.98,
+          "chunk_id": "book-1:7",
+          "book_id": "book-1",
+          "relative_path": "brass-orchard.epub",
+          "title": "The Brass Orchard",
+          "authors": ["Test Author"],
+          "chunk_index": 7,
+          "content_type": "body",
+          "text": "Psychohistory measures the movements of large populations."
+        }
+      ],
+      "timings": {
+        "query_embedding_seconds": 0.01,
+        "retrieval_seconds": 0.02,
+        "prompt_construction_seconds": 0.01,
+        "generation_seconds": 0.15,
+        "validation_seconds": 0.03,
+        "repair_seconds": 0,
+        "total_seconds": 0.22
+      }
+    }
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 6,
+    "event": "completed",
+    "result": {
+      "outcome": "answered",
+      "minimum_citation_count": 1,
+      "citation_count": 1,
+      "question": "What is psychohistory?",
+      "answer": "Psychohistory models broad historical movements [S1].",
+      "embedding_provider": "ollama",
+      "embedding_model": "all-minilm",
+      "generation_provider": "codex",
+      "generation_model": "gpt-5.6-terra",
+      "answer_capability": "quality",
+      "retrieval_limit": 30,
+      "candidate_count": 2,
+      "filters": { "book_id": "book-1" },
+      "retrieval_backend": "opensearch",
+      "sources": [
+        {
+          "source_id": "S1",
+          "score": 0.98,
+          "chunk_id": "book-1:7",
+          "book_id": "book-1",
+          "relative_path": "brass-orchard.epub",
+          "title": "The Brass Orchard",
+          "authors": ["Test Author"],
+          "chunk_index": 7,
+          "content_type": "body",
+          "text": "Psychohistory measures the movements of large populations."
+        }
+      ],
+      "timings": {
+        "query_embedding_seconds": 0.01,
+        "retrieval_seconds": 0.02,
+        "prompt_construction_seconds": 0.01,
+        "generation_seconds": 0.15,
+        "validation_seconds": 0.03,
+        "repair_seconds": 0,
+        "total_seconds": 0.22
+      }
+    }
+  }
+]

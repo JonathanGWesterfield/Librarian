@@ -1,0 +1,19 @@
+[
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 2,
+    "event": "failed",
+    "error": {
+      "code": "broker_unavailable",
+      "message": "Answer generation is temporarily unavailable.",
+      "retryable": true
+    }
+  },
+  {
+    "schema_version": "v1",
+    "request_id": "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+    "sequence": 2,
+    "event": "cancelled"
+  }
+]

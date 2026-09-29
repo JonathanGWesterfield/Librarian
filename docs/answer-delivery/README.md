@@ -77,11 +77,14 @@ for the unpublished-tracker P0.
 
 Owner: contracts, configuration, and broker owners.
 
-The first focused implementation slice is
-[#89](https://github.com/JonathanGWesterfield/Librarian/issues/89): the canonical
-protobuf source, checked-in Python bindings, reproducible generation, and
-contract-drift tests. It does not implement a broker, browser delivery, or
-Compose migration.
+The first focused implementation slice,
+[#89](https://github.com/JonathanGWesterfield/Librarian/issues/89), is complete
+in [PR #90](https://github.com/JonathanGWesterfield/Librarian/pull/90): the
+canonical protobuf source, checked-in Python bindings, reproducible generation,
+and contract-drift tests. The active second slice is
+[#91](https://github.com/JonathanGWesterfield/Librarian/issues/91): the public
+event JSON Schema, generated TypeScript types, fixtures, and drift gate. Neither
+slice implements a broker, browser delivery, or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and

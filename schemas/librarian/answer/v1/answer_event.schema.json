@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://librarian.local/schemas/librarian/answer/v1/answer_event.schema.json",
+  "title": "AnswerEvent",
+  "description": "The public v1 event envelope for progressive answer delivery.",
+  "oneOf": [
+    { "$ref": "#/$defs/StartedEvent" },
+    { "$ref": "#/$defs/EvidenceCandidatesEvent" },
+    { "$ref": "#/$defs/GenerationStartedEvent" },
+    { "$ref": "#/$defs/ValidationStartedEvent" },
+    { "$ref": "#/$defs/AnswerValidatedEvent" },
+    { "$ref": "#/$defs/CompletedEvent" },
+    { "$ref": "#/$defs/FailedEvent" },
+    { "$ref": "#/$defs/CancelledEvent" }
+  ],
+  "$defs": {
+    "EvidenceCandidateProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "book_id", "book_title"],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "book_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "book_title": { "type": ["string", "null"], "maxLength": 512 }
+      }
+    },
+    "ChatSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "score",
+        "chunk_id",
+        "book_id",
+        "relative_path",
+        "title",
+        "authors",
+        "chunk_index",
+        "content_type",
+        "text"
+      ],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "score": { "type": "number" },
+        "chunk_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "book_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "relative_path": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "title": { "type": ["string", "null"], "maxLength": 512 },
+        "authors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "maxItems": 64
+        },
+        "chunk_index": { "type": "integer", "minimum": 0 },
+        "content_type": { "enum": ["body", "front_matter", "back_matter"] },
+        "text": { "type": "string", "maxLength": 65536 }
+      }
+    },
+    "AnswerTimings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_embedding_seconds",
+        "retrieval_seconds",
+        "prompt_construction_seconds",
+        "generation_seconds",
+        "validation_seconds",
+        "repair_seconds",
+        "total_seconds"
+      ],
+      "properties": {
+        "query_embedding_seconds": { "type": "number", "minimum": 0 },
+        "retrieval_seconds": { "type": "number", "minimum": 0 },
+        "prompt_construction_seconds": { "type": "number", "minimum": 0 },
+        "generation_seconds": { "type": "number", "minimum": 0 },
+        "validation_seconds": { "type": "number", "minimum": 0 },
+        "repair_seconds": { "type": "number", "minimum": 0 },
+        "total_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "AnswerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "minimum_citation_count",
+        "citation_count",
+        "question",
+        "answer",
+        "embedding_provider",
+        "embedding_model",
+        "generation_provider",
+        "generation_model",
+        "answer_capability",
+        "retrieval_limit",
+        "candidate_count",
+        "filters",
+        "retrieval_backend",
+        "sources",
+        "timings"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "answered",
+            "insufficient_evidence",
+            "generation_unavailable",
+            "source_changed"
+          ]
+        },
+        "minimum_citation_count": { "type": "integer", "minimum": 1 },
+        "citation_count": { "type": "integer", "minimum": 0 },
+        "question": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "answer": { "type": "string", "maxLength": 65536 },
+        "embedding_provider": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "embedding_model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "generation_provider": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "generation_model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "answer_capability": { "enum": ["quality", "lightweight"] },
+        "retrieval_limit": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "candidate_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "filters": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 512 }
+        },
+        "retrieval_backend": { "enum": ["opensearch", "sqlite"] },
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ChatSource" },
+          "maxItems": 128
+        },
+        "timings": { "$ref": "#/$defs/AnswerTimings" }
+      }
+    },
+    "SafeError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "enum": [
+            "generation_unavailable",
+            "broker_unavailable",
+            "deadline_exceeded",
+            "admission_full",
+            "contract_mismatch",
+            "internal_error"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "StartedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "started" }
+      }
+    },
+    "EvidenceCandidatesEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event", "candidate_count", "candidates"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "evidence_candidates" },
+        "candidate_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "candidates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/EvidenceCandidateProgress" },
+          "maxItems": 32
+        }
+      }
+    },
+    "GenerationStartedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event", "attempt"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "generation_started" },
+        "attempt": { "type": "integer", "minimum": 1, "maximum": 2 }
+      }
+    },
+    "ValidationStartedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event", "attempt"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "validation_started" },
+        "attempt": { "type": "integer", "minimum": 1, "maximum": 2 }
+      }
+    },
+    "AnswerValidatedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event", "result"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "answer_validated" },
+        "result": { "$ref": "#/$defs/AnswerResult" }
+      }
+    },
+    "CompletedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event", "result"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "completed" },
+        "result": { "$ref": "#/$defs/AnswerResult" }
+      }
+    },
+    "FailedEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event", "error"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "failed" },
+        "error": { "$ref": "#/$defs/SafeError" }
+      }
+    },
+    "CancelledEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "sequence", "event"],
+      "properties": {
+        "schema_version": { "const": "v1" },
+        "request_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "event": { "const": "cancelled" }
+      }
+    }
+  }
+}
