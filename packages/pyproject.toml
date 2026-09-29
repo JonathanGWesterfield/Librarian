@@ -6,12 +6,18 @@ requires-python = ">=3.12"
 dependencies = [
   "beautifulsoup4>=4.12.0",
   "ebooklib>=0.18",
+  "googleapis-common-protos==1.75.0",
+  "grpcio==1.80.0",
+  "grpcio-health-checking==1.80.0",
+  "grpcio-status==1.80.0",
   "numpy>=1.26.0",
   "pydantic>=2.10.0",
+  "protobuf==6.33.6",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "grpcio-tools==1.80.0",
   "pytest>=8.3.0",
   "ruff>=0.8.0",
 ]
@@ -32,4 +38,5 @@ packages = [
   "librarian_recommendations",
   "librarian_evaluation",
   "librarian_logging",
+  "librarian_contracts",
 ]

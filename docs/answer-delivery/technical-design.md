@@ -1,7 +1,7 @@
 # Answer delivery technical design
 
-**Status:** Proposed implementation specification. M01 must approve this
-document's open implementation values before code changes.
+**Status:** Approved M01 implementation baseline. Each focused implementation
+slice must retain the contract and acceptance conditions in this document.
 
 **Related:** [ADR 001](adr-internal-rpc-transport.md),
 [compatibility plan](compatibility-and-migration.md),
@@ -533,12 +533,13 @@ distinguish unavailable provider internals from measured values.
 ## Toolchain and ownership
 
 M01 adds `packages/librarian_contracts`, `proto/`, and a repository-owned
-`scripts/generate_contracts.sh`. The script invokes an exact, lockfile-pinned
-`grpcio-tools`/`protobuf` version in the project development environment to
-generate Python `pb2` and `pb2_grpc` sources. `grpcio` and
-`grpcio-health-checking` are exact runtime dependencies of the broker and its
-clients. The generated sources are committed so package builds do not require a
-compiler.
+`scripts/generate_contracts.sh`. The script invokes the exact project-pinned
+`grpcio-tools`/`protobuf` versions in the project development environment to
+generate Python `pb2` and `pb2_grpc` sources. The initial pins are
+`grpcio-tools==1.80.0` and `protobuf==6.33.6`; the script rejects another
+generator version. `grpcio` and `grpcio-health-checking` are exact runtime
+dependencies of the broker and its clients. The generated sources are
+committed so package builds do not require a compiler.
 
 The browser is not generated from gRPC. M01 adds a separate versioned JSON
 Schema for its event projection, committed fixtures, and a pinned TypeScript
