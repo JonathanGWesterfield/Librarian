@@ -10,7 +10,6 @@ linked from [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87).
 - [Answer delivery technical design](design/answer-delivery.md)
 - [Compatibility and migration plan](design/answer-delivery-compatibility.md)
 - [Acceptance charter](acceptance/answer-delivery.md)
-- [Principal design review](modular-answer-streaming-design-review.md)
 
 ## Outcome
 
@@ -64,7 +63,7 @@ required M00/M01 deliverables have passed review.
 Owner: architecture/documentation.
 
 - [ ] Merge the ADR, technical design, compatibility plan, acceptance charter,
-  review, and this roadmap in one focused documentation PR.
+  and this roadmap in one focused documentation PR.
 - [ ] Update #87 to link to the merged file paths and retain only milestone
   status, PR links, blockers, and acceptance reports.
 - [ ] Obtain architecture review approval for ADR 001 and the design's security,
