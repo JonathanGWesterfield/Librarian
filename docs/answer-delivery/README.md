@@ -33,7 +33,7 @@ required M00/M01 deliverables have passed review.
 | Review finding | Resolution and acceptance condition |
 | --- | --- |
 | P0: tracker pointed to an unpublished design | **M00:** merge this documentation set in a focused PR; #87 then links to the immutable files and contains status/evidence only. Until then, #87 must say implementation is blocked on documentation publication. |
-| P0: migration inventory omitted callers | [Technical design inventory](technical-design.md#complete-boundary-and-migration-inventory) now enumerates chat, API and worker summary, tag, genre, recommendation, evaluator, and every host CLI disposition. M03 migrates every supported Compose caller and rejects host Docker-broker execution before transport. |
+| P0: migration inventory omitted callers | [Technical design inventory](technical-design.md#complete-boundary-and-migration-inventory) now enumerates chat, API and worker summary, metadata tag/genre, recommendation, evaluator, and every host CLI disposition. M03 migrates every supported Compose caller and rejects host Docker-broker execution before transport. |
 | P0: trust/authentication deferred | [ADR 001](adr-internal-rpc-transport.md#local-compose-trust-model) fixes the single-host Compose exception: five named networks, role-specific Compose secret mounts, generated sanitized per-service config files, health identity, rotation, and the multi-host block. M03 proves isolation as well as authorization denial. |
 | P1: incomplete proto and event semantics | The normative [v1 contract](technical-design.md#v1-grpc-contract) specifies canonical messages, fields, reservations, output matrix, typed error/status mapping, limits, and metadata. Its [compatibility handshake](technical-design.md#atomic-compatibility-handshake), evidence snapshot, and runtime lifecycle define the required implementation. M01 adds the canonical proto, JSON schema, generated stubs, and fixtures. |
 | P1: overlapping broker RPCs | v1 has one unary `GenerationBroker.Generate`; no `ObserveGenerate`. The runtime owns progress. A broker stream needs a future ADR amendment and concrete consumer. |
@@ -81,10 +81,14 @@ The first focused implementation slice,
 [#89](https://github.com/JonathanGWesterfield/Librarian/issues/89), is complete
 in [PR #90](https://github.com/JonathanGWesterfield/Librarian/pull/90): the
 canonical protobuf source, checked-in Python bindings, reproducible generation,
-and contract-drift tests. The active second slice is
-[#91](https://github.com/JonathanGWesterfield/Librarian/issues/91): the public
-event JSON Schema, generated TypeScript types, fixtures, and drift gate. Neither
-slice implements a broker, browser delivery, or Compose migration.
+and contract-drift tests. The second slice, [#91](https://github.com/JonathanGWesterfield/Librarian/issues/91),
+is complete in [PR #92](https://github.com/JonathanGWesterfield/Librarian/pull/92):
+the public event JSON Schema, generated TypeScript types, fixtures, and drift
+gate. The active third slice makes the complete broker-boundary inventory
+executable: a versioned manifest and static tests must account for every direct
+legacy generator or judge construction and every API or host entry point before
+M03 migration begins. These slices do not implement a broker, browser delivery,
+or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and
@@ -134,8 +138,8 @@ owners.
 - [ ] Implement the unary v1 broker service, generated clients, authenticated
   Health and `GetCapabilities`, release-manifest enforcement, scheduler,
   process-group cleanup, deadlines, limits, and metrics.
-- [ ] Migrate chat synthesis/selection/review, API summary/tag/genre/
-  recommendation, summary worker, metadata worker, and evaluator in the atomic
+- [ ] Migrate chat synthesis/selection/review, API summary/genre/recommendation,
+  summary worker, metadata worker, and evaluator in the atomic
   Compose R2 release. Do not add a hidden HTTP fallback; host use is rejected
   before transport.
 - [ ] Create the metadata-worker profile, role-specific secret mounts, named

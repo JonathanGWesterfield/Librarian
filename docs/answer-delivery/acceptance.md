@@ -51,7 +51,7 @@ cannot replace it.
 
 M03's deterministic and Compose suites test every disposition in the technical
 design inventory. The generated-client suite covers API chat synthesis,
-selection, support review, chapter/book summary, tags, genres, recommendation,
+selection, support review, chapter/book summary, genres, recommendation,
 summary-worker summary, metadata-worker tag/genre, and evaluator judgement. A
 parameterized authorization suite tries every operation with every principal;
 only the approved cells in the operation matrix may reach the fake provider.
