@@ -57,17 +57,29 @@ broker as chat-only. The following is the complete R0 source and entry-point
 inventory, and is the M03 migration scope. No `Migrate R2` row may remain on
 the legacy HTTP endpoint after its release.
 
+`tests/fixtures/answer_delivery/v1/boundary_inventory.json` is the versioned,
+machine-readable companion to this table. Its contract test scans direct legacy
+generator or judge construction and the API and host entry points that reach
+those surfaces. A new call site fails the test until it is added to the
+inventory and this table is updated with its R2 operation, principal, and
+retirement proof.
+
+The audit found no R0 FastAPI tag endpoint. `generate_book_tags()` is presently
+reachable through the metadata worker and host CLI only, so `TAG_GENERATION` is
+not an API authority in R2. Adding an API tag route requires an explicit
+inventory entry, API documentation, authorization change, and Compose test;
+the broker must not silently grant that capability because the enum exists.
+
 | Current caller / entry point | R0 source path and work | R2 disposition, operation, and principal | Deadline / cancellation | Proof and retirement condition |
 | --- | --- | --- | --- | --- |
 | API chat (`/chat`, `/chat/stream`, later events) | `prepare_answer_question()` invokes grounded synthesis, semantic selection, and support/repair review | **Migrate R2:** `GROUNDED_SYNTHESIS`, `SEMANTIC_SOURCE_SELECTION`, `SUPPORT_REVIEW`; `api` principal | 30 s parent, 10 s selector, remaining parent budget for review; disconnect cancels | parity, timeout, repair/refusal, and live API Compose tests; delete HTTP generator path |
 | API book summary (`POST /books/{id}/summary`) | `summarize_book()` generates chapter, reduction, and book summaries | **Migrate R2:** `CHAPTER_SUMMARIZATION`, `BOOK_SUMMARIZATION`; `api` principal | configured summary deadline capped by broker maximum; API cancellation cancels | chapter/reduce/book fixture and API Compose test; delete HTTP generator path |
-| API tags (`POST /books/{id}/tags`) | `generate_book_tags()` calls the configured generator | **Migrate R2:** `TAG_GENERATION`; `api` principal | 30 s; request cancellation cancels | tag fixture and API Compose test; delete HTTP generator path |
 | API genres (`POST /books/{id}/genres`) | `generate_book_genres()` calls the configured generator | **Migrate R2:** `GENRE_GENERATION`; `api` principal | 30 s; request cancellation cancels | genre fixture and API Compose test; delete HTTP generator path |
 | API recommendations | `recommend_books()` generates a narrative for ranked candidates | **Migrate R2:** `RECOMMENDATION_SYNTHESIS`; `api` principal | 30 s; request cancellation cancels | recommendation fixture and API Compose test; delete HTTP generator path |
 | `summary-worker` Compose profile | `scripts/process_summary_jobs.py` calls `summarize_book()` with configured generation | **Migrate R2:** `CHAPTER_SUMMARIZATION`, `BOOK_SUMMARIZATION`; `summary-worker` principal | job deadline is capped by the broker maximum; worker shutdown cancels | worker-profile Compose test with both operations; delete HTTP generator path |
 | metadata worker profile added in R2 | `scripts/process_metadata_jobs.py` calls tag/genre generation | **Migrate R2:** `TAG_GENERATION`, `GENRE_GENERATION`; `metadata-worker` principal | 30 s per job; worker shutdown cancels | metadata-worker profile Compose test; delete HTTP generator path |
 | evaluator Compose profile | `DockerCodexBrokerJudge` in `scripts/evaluate_retrieval.py` | **Migrate R2:** `EVALUATOR_JUDGEMENT`; `evaluator` principal | 30 s per judgement; evaluator cancellation cancels | evaluator Compose test, wrong-principal denial, and delete HTTP judge |
-| Host CLI: `scripts/chat.py`, `scripts/summarize.py`, `scripts/process_summary_jobs.py`, `scripts/process_metadata_jobs.py`, `scripts/play/librarian.py`, and host `scripts/evaluate_retrieval.py` | Each can inherit the default configured generator or judge, yet the broker has no host port | **Guard before R2 and retain in R2:** Docker-broker mode requires a matching runtime role **and** the exact non-symlink Docker-secret file at `/run/secrets/codex-broker-<role>`; `LIBRARIAN_EXECUTION_PRINCIPAL` alone is never sufficient. Host CLIs must select Codex/Ollama/external provider or run the corresponding Compose profile. | fails before target/channel/HTTP-client construction | tests exercise every listed host entry point, including forged `LIBRARIAN_EXECUTION_PRINCIPAL=api` without a secret mount; error names the allowed profile/provider |
+| Host CLI: `scripts/chat.py`, `scripts/summarize.py`, `scripts/tags.py`, `scripts/genres.py`, `scripts/process_summary_jobs.py`, `scripts/process_metadata_jobs.py`, `scripts/play/librarian.py`, `scripts/play/summary_jobs.py`, and host `scripts/evaluate_retrieval.py` | Each can inherit the default configured generator or judge, yet the broker has no host port | **Guard before R2 and retain in R2:** Docker-broker mode requires a matching runtime role **and** the exact non-symlink Docker-secret file at `/run/secrets/codex-broker-<role>`; `LIBRARIAN_EXECUTION_PRINCIPAL` alone is never sufficient. Host CLIs must select Codex/Ollama/external provider or run the corresponding Compose profile. | fails before target/channel/HTTP-client construction | tests exercise every listed host entry point, including forged `LIBRARIAN_EXECUTION_PRINCIPAL=api` without a secret mount; error names the allowed profile/provider |
 | Future extracted answer runtime | any answer operation after M09 only | deferred; `answer-runtime` principal and a dedicated private network | propagated absolute deadline and cancellation | required only if M09 is approved |
 
 The API receives the `api` credential only, so it may serve all six API
@@ -218,7 +230,7 @@ metadata allow-list apart from gRPC's standard transport keys.
 | `SUPPORT_REVIEW` | `SUPPORT_REVIEW_JSON_V1` | required | `api`, future `answer-runtime` |
 | `EVALUATOR_JUDGEMENT` | `EVALUATOR_VERDICT_JSON_V1` | forbidden | `evaluator` |
 | `CHAPTER_SUMMARIZATION`, `BOOK_SUMMARIZATION` | `PLAIN_TEXT_V1` | forbidden | `api`, `summary-worker` |
-| `TAG_GENERATION` | `TAGS_JSON_V1` | forbidden | `api`, `metadata-worker` |
+| `TAG_GENERATION` | `TAGS_JSON_V1` | forbidden | `metadata-worker` |
 | `GENRE_GENERATION` | `GENRES_JSON_V1` | forbidden | `api`, `metadata-worker` |
 | `RECOMMENDATION_SYNTHESIS` | `PLAIN_TEXT_V1` | forbidden | `api` |
 

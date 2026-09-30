@@ -1,0 +1,208 @@
+{
+  "schema_version": "v1",
+  "surfaces": [
+    {
+      "id": "grounded-chat",
+      "factory_call": {
+        "source": "packages/librarian_chat/chat.py",
+        "callable": "prepare_answer_question",
+        "factory": "create_configured_generator"
+      },
+      "r2_consumers": [
+        {
+          "principal": "api",
+          "operations": [
+            "GROUNDED_SYNTHESIS",
+            "SEMANTIC_SOURCE_SELECTION",
+            "SUPPORT_REVIEW"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "book-summaries",
+      "factory_call": {
+        "source": "packages/librarian_summarization/summarize.py",
+        "callable": "summarize_book",
+        "factory": "create_configured_generator"
+      },
+      "r2_consumers": [
+        {
+          "principal": "api",
+          "operations": [
+            "CHAPTER_SUMMARIZATION",
+            "BOOK_SUMMARIZATION"
+          ]
+        },
+        {
+          "principal": "summary-worker",
+          "operations": [
+            "CHAPTER_SUMMARIZATION",
+            "BOOK_SUMMARIZATION"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "book-tags",
+      "factory_call": {
+        "source": "packages/librarian_metadata/tags.py",
+        "callable": "generate_book_tags",
+        "factory": "create_configured_generator"
+      },
+      "r2_consumers": [
+        {
+          "principal": "metadata-worker",
+          "operations": [
+            "TAG_GENERATION"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "book-genres",
+      "factory_call": {
+        "source": "packages/librarian_metadata/genres.py",
+        "callable": "generate_book_genres",
+        "factory": "create_configured_generator"
+      },
+      "r2_consumers": [
+        {
+          "principal": "api",
+          "operations": [
+            "GENRE_GENERATION"
+          ]
+        },
+        {
+          "principal": "metadata-worker",
+          "operations": [
+            "GENRE_GENERATION"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recommendations",
+      "factory_call": {
+        "source": "packages/librarian_recommendations/recommendations.py",
+        "callable": "recommend_books",
+        "factory": "create_configured_generator"
+      },
+      "r2_consumers": [
+        {
+          "principal": "api",
+          "operations": [
+            "RECOMMENDATION_SYNTHESIS"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "retrieval-evaluator",
+      "factory_call": {
+        "source": "packages/librarian_evaluation/llm_judge.py",
+        "callable": "create_judge",
+        "factory": "DockerCodexBrokerJudge"
+      },
+      "r2_consumers": [
+        {
+          "principal": "evaluator",
+          "operations": [
+            "EVALUATOR_JUDGEMENT"
+          ]
+        }
+      ]
+    }
+  ],
+  "api_entrypoints": [
+    {
+      "source": "apps/api/librarian_api/main.py",
+      "callable": "chat_endpoint",
+      "target": "answer_question"
+    },
+    {
+      "source": "apps/api/librarian_api/main.py",
+      "callable": "chat_stream_endpoint",
+      "target": "prepare_answer_question"
+    },
+    {
+      "source": "apps/api/librarian_api/main.py",
+      "callable": "event_bytes",
+      "target": "stream_answer_question"
+    },
+    {
+      "source": "apps/api/librarian_api/main.py",
+      "callable": "recommendations_endpoint",
+      "target": "recommend_books"
+    },
+    {
+      "source": "apps/api/librarian_api/main.py",
+      "callable": "summarize_book_endpoint",
+      "target": "summarize_book"
+    },
+    {
+      "source": "apps/api/librarian_api/main.py",
+      "callable": "generate_book_genres_endpoint",
+      "target": "generate_book_genres"
+    }
+  ],
+  "host_entrypoints": [
+    {
+      "source": "scripts/chat.py",
+      "targets": [
+        "answer_question"
+      ]
+    },
+    {
+      "source": "scripts/evaluate_retrieval.py",
+      "targets": [
+        "answer_question",
+        "evaluate_answers_with_llm_judge"
+      ]
+    },
+    {
+      "source": "scripts/genres.py",
+      "targets": [
+        "generate_book_genres"
+      ]
+    },
+    {
+      "source": "scripts/play/librarian.py",
+      "targets": [
+        "recommend_books"
+      ]
+    },
+    {
+      "source": "scripts/play/summary_jobs.py",
+      "targets": [
+        "process_summary_jobs"
+      ]
+    },
+    {
+      "source": "scripts/process_metadata_jobs.py",
+      "targets": [
+        "process_metadata_jobs",
+        "run_metadata_job_worker"
+      ]
+    },
+    {
+      "source": "scripts/process_summary_jobs.py",
+      "targets": [
+        "process_summary_jobs",
+        "run_summary_job_worker"
+      ]
+    },
+    {
+      "source": "scripts/summarize.py",
+      "targets": [
+        "summarize_book"
+      ]
+    },
+    {
+      "source": "scripts/tags.py",
+      "targets": [
+        "generate_book_tags"
+      ]
+    }
+  ]
+}
