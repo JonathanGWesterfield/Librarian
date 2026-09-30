@@ -48,7 +48,7 @@ same domain events; the browser is not a gRPC client.
 | API answer path | Codex broker | Librarian service | gRPC | none |
 | API semantic selection | Codex broker | Librarian service | gRPC | none |
 | API support review | Codex broker | Librarian service | gRPC | none |
-| API summary, tag, genre, recommendation | Codex broker | Librarian service | gRPC | none |
+| API summary, genre, recommendation | Codex broker | Librarian service | gRPC | none |
 | summary worker | Codex broker | Librarian service | gRPC | none |
 | metadata worker | Codex broker | Librarian service | gRPC | none |
 | evaluator container | Codex broker | Librarian service | gRPC | none |
@@ -77,7 +77,7 @@ operations:
 
 | Principal | Permitted operation |
 | --- | --- |
-| `api` | synthesis, semantic selection, support review, chapter/book summary, tags, genres, recommendations |
+| `api` | synthesis, semantic selection, support review, chapter/book summary, genres, recommendations |
 | `summary-worker` | chapter/book summary |
 | `metadata-worker` | tags and genres |
 | `evaluator` | evaluator judgement |
