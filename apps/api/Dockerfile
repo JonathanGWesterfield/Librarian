@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY scripts/resolve_provider_config.py scripts/
 COPY packages/librarian_config packages/librarian_config
+COPY packages/librarian_contracts packages/librarian_contracts
 
 ENV PYTHONPATH=/app/packages
 
