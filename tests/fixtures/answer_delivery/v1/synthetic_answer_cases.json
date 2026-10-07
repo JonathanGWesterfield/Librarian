@@ -1,0 +1,347 @@
+{
+  "fixture_version": "v1",
+  "cases": [
+    {
+      "id": "point_fact",
+      "request": {
+        "request_id": "10000000-0000-4000-8000-000000000001",
+        "question": "Which synthetic observatory measures the blue comet?",
+        "scope": {"book_id": "synthetic-almanac"},
+        "evidence_snapshot": [
+          {
+            "candidate_id": "point-candidate-1",
+            "book_id": "synthetic-almanac",
+            "book_title": "The Synthetic Almanac",
+            "chunk_id": "point-chunk-1",
+            "source_revision": "r1",
+            "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "body_text_eligible": true
+          }
+        ]
+      },
+      "provider": {
+        "expected_calls": 1,
+        "responses": [
+          {
+            "operation": "GROUNDED_SYNTHESIS",
+            "body": "{\"answer\":\"The Meridian Observatory measures the blue comet [P1].\",\"sentence_ids\":[\"P1\"]}"
+          }
+        ]
+      },
+      "expected": {
+        "terminal_event": "completed",
+        "whole_library_retry": false,
+        "result": {
+          "outcome": "answered",
+          "minimum_citation_count": 1,
+          "citation_count": 1,
+          "question": "Which synthetic observatory measures the blue comet?",
+          "answer": "The Meridian Observatory measures the blue comet [P1].",
+          "embedding_provider": "synthetic-embedder",
+          "embedding_model": "fixture-embed-v1",
+          "generation_provider": "synthetic-provider",
+          "generation_model": "fixture-model-v1",
+          "answer_capability": "quality",
+          "retrieval_limit": 1,
+          "candidate_count": 1,
+          "filters": {"book_id": "synthetic-almanac"},
+          "retrieval_backend": "sqlite",
+          "sources": [
+            {
+              "source_id": "P1",
+              "score": 0.99,
+              "chunk_id": "point-chunk-1",
+              "book_id": "synthetic-almanac",
+              "relative_path": "synthetic/almanac.epub",
+              "title": "The Synthetic Almanac",
+              "authors": ["Fixture Author"],
+              "chunk_index": 0,
+              "content_type": "body",
+              "text": "The Meridian Observatory measures the blue comet each autumn."
+            }
+          ],
+          "timings": {"query_embedding_seconds": 0.01, "retrieval_seconds": 0.01, "prompt_construction_seconds": 0.01, "generation_seconds": 0.01, "validation_seconds": 0.01, "repair_seconds": 0, "total_seconds": 0.05}
+        }
+      },
+      "event_sequence": [
+        {"event": "started"},
+        {"event": "evidence_candidates"},
+        {"event": "generation_started", "attempt": 1},
+        {"event": "validation_started", "attempt": 1},
+        {"event": "answer_validated"},
+        {"event": "completed"}
+      ]
+    },
+    {
+      "id": "bounded_explanation",
+      "request": {
+        "request_id": "10000000-0000-4000-8000-000000000002",
+        "question": "How does the synthetic council preserve water?",
+        "scope": {"book_id": "synthetic-council"},
+        "evidence_snapshot": [
+          {"candidate_id": "bounded-candidate-1", "book_id": "synthetic-council", "book_title": "The Synthetic Council", "chunk_id": "bounded-chunk-1", "source_revision": "r2", "source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "body_text_eligible": true},
+          {"candidate_id": "bounded-candidate-2", "book_id": "synthetic-council", "book_title": "The Synthetic Council", "chunk_id": "bounded-chunk-2", "source_revision": "r2", "source_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "body_text_eligible": true}
+        ]
+      },
+      "provider": {
+        "expected_calls": 1,
+        "responses": [
+          {"operation": "GROUNDED_SYNTHESIS", "body": "{\"answer\":\"The council pairs rain cisterns with seasonal rationing [B1][B2].\",\"sentence_ids\":[\"B1\",\"B2\"]}"}
+        ]
+      },
+      "expected": {
+        "terminal_event": "completed",
+        "whole_library_retry": false,
+        "result": {
+          "outcome": "answered",
+          "minimum_citation_count": 2,
+          "citation_count": 2,
+          "question": "How does the synthetic council preserve water?",
+          "answer": "The council pairs rain cisterns with seasonal rationing [B1][B2].",
+          "embedding_provider": "synthetic-embedder",
+          "embedding_model": "fixture-embed-v1",
+          "generation_provider": "synthetic-provider",
+          "generation_model": "fixture-model-v1",
+          "answer_capability": "quality",
+          "retrieval_limit": 2,
+          "candidate_count": 2,
+          "filters": {"book_id": "synthetic-council"},
+          "retrieval_backend": "sqlite",
+          "sources": [
+            {"source_id": "B1", "score": 0.98, "chunk_id": "bounded-chunk-1", "book_id": "synthetic-council", "relative_path": "synthetic/council.epub", "title": "The Synthetic Council", "authors": ["Fixture Author"], "chunk_index": 1, "content_type": "body", "text": "The council stores spring rain in public cisterns."},
+            {"source_id": "B2", "score": 0.96, "chunk_id": "bounded-chunk-2", "book_id": "synthetic-council", "relative_path": "synthetic/council.epub", "title": "The Synthetic Council", "authors": ["Fixture Author"], "chunk_index": 2, "content_type": "body", "text": "During dry months, the council rations water by season."}
+          ],
+          "timings": {"query_embedding_seconds": 0.01, "retrieval_seconds": 0.01, "prompt_construction_seconds": 0.01, "generation_seconds": 0.01, "validation_seconds": 0.01, "repair_seconds": 0, "total_seconds": 0.05}
+        }
+      },
+      "event_sequence": [
+        {"event": "started"},
+        {"event": "evidence_candidates"},
+        {"event": "generation_started", "attempt": 1},
+        {"event": "validation_started", "attempt": 1},
+        {"event": "answer_validated"},
+        {"event": "completed"}
+      ]
+    },
+    {
+      "id": "broad_synthesis",
+      "request": {
+        "request_id": "10000000-0000-4000-8000-000000000003",
+        "question": "What does the synthetic archive say about collective responsibility?",
+        "scope": {"book_id": "synthetic-archive"},
+        "evidence_snapshot": [
+          {"candidate_id": "broad-candidate-1", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-1", "source_revision": "r3", "source_sha256": "0101010101010101010101010101010101010101010101010101010101010101", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-2", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-2", "source_revision": "r3", "source_sha256": "0202020202020202020202020202020202020202020202020202020202020202", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-3", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-3", "source_revision": "r3", "source_sha256": "0303030303030303030303030303030303030303030303030303030303030303", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-4", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-4", "source_revision": "r3", "source_sha256": "0404040404040404040404040404040404040404040404040404040404040404", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-5", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-5", "source_revision": "r3", "source_sha256": "0505050505050505050505050505050505050505050505050505050505050505", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-6", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-6", "source_revision": "r3", "source_sha256": "0606060606060606060606060606060606060606060606060606060606060606", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-7", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-7", "source_revision": "r3", "source_sha256": "0707070707070707070707070707070707070707070707070707070707070707", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-8", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-8", "source_revision": "r3", "source_sha256": "0808080808080808080808080808080808080808080808080808080808080808", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-9", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-9", "source_revision": "r3", "source_sha256": "0909090909090909090909090909090909090909090909090909090909090909", "body_text_eligible": true},
+          {"candidate_id": "broad-candidate-10", "book_id": "synthetic-archive", "book_title": "The Synthetic Archive", "chunk_id": "broad-chunk-10", "source_revision": "r3", "source_sha256": "1010101010101010101010101010101010101010101010101010101010101010", "body_text_eligible": true}
+        ]
+      },
+      "provider": {
+        "expected_calls": 1,
+        "responses": [
+          {"operation": "GROUNDED_SYNTHESIS", "body": "{\"answer\":\"The archive presents responsibility as shared stewardship across civic life [A1][A2][A3][A4][A5][A6][A7][A8][A9][A10].\",\"sentence_ids\":[\"A1\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"A9\",\"A10\"]}"}
+        ]
+      },
+      "expected": {
+        "terminal_event": "completed",
+        "whole_library_retry": false,
+        "result": {
+          "outcome": "answered",
+          "minimum_citation_count": 10,
+          "citation_count": 10,
+          "question": "What does the synthetic archive say about collective responsibility?",
+          "answer": "The archive presents responsibility as shared stewardship across civic life [A1][A2][A3][A4][A5][A6][A7][A8][A9][A10].",
+          "embedding_provider": "synthetic-embedder",
+          "embedding_model": "fixture-embed-v1",
+          "generation_provider": "synthetic-provider",
+          "generation_model": "fixture-model-v1",
+          "answer_capability": "quality",
+          "retrieval_limit": 10,
+          "candidate_count": 10,
+          "filters": {"book_id": "synthetic-archive"},
+          "retrieval_backend": "sqlite",
+          "sources": [
+            {"source_id": "A1", "score": 0.99, "chunk_id": "broad-chunk-1", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 1, "content_type": "body", "text": "Residents maintain the common wells together."},
+            {"source_id": "A2", "score": 0.98, "chunk_id": "broad-chunk-2", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 2, "content_type": "body", "text": "Wardens publish the town accounts each winter."},
+            {"source_id": "A3", "score": 0.97, "chunk_id": "broad-chunk-3", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 3, "content_type": "body", "text": "Neighbors rotate night watch duties."},
+            {"source_id": "A4", "score": 0.96, "chunk_id": "broad-chunk-4", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 4, "content_type": "body", "text": "Each guild repairs a public bridge."},
+            {"source_id": "A5", "score": 0.95, "chunk_id": "broad-chunk-5", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 5, "content_type": "body", "text": "The council hears petitions in open session."},
+            {"source_id": "A6", "score": 0.94, "chunk_id": "broad-chunk-6", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 6, "content_type": "body", "text": "Farmers reserve seed for difficult years."},
+            {"source_id": "A7", "score": 0.93, "chunk_id": "broad-chunk-7", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 7, "content_type": "body", "text": "Teachers share lessons among every district."},
+            {"source_id": "A8", "score": 0.92, "chunk_id": "broad-chunk-8", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 8, "content_type": "body", "text": "Builders inspect roofs after each storm."},
+            {"source_id": "A9", "score": 0.91, "chunk_id": "broad-chunk-9", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 9, "content_type": "body", "text": "Families welcome travelers during the frost."},
+            {"source_id": "A10", "score": 0.9, "chunk_id": "broad-chunk-10", "book_id": "synthetic-archive", "relative_path": "synthetic/archive.epub", "title": "The Synthetic Archive", "authors": ["Fixture Author"], "chunk_index": 10, "content_type": "body", "text": "Archivists preserve records for future citizens."}
+          ],
+          "timings": {"query_embedding_seconds": 0.01, "retrieval_seconds": 0.01, "prompt_construction_seconds": 0.01, "generation_seconds": 0.02, "validation_seconds": 0.01, "repair_seconds": 0, "total_seconds": 0.06}
+        }
+      },
+      "event_sequence": [
+        {"event": "started"},
+        {"event": "evidence_candidates"},
+        {"event": "generation_started", "attempt": 1},
+        {"event": "validation_started", "attempt": 1},
+        {"event": "answer_validated"},
+        {"event": "completed"}
+      ]
+    },
+    {
+      "id": "insufficient_evidence",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000004", "question": "What did the absent synthetic captain promise?", "scope": {"book_id": "synthetic-almanac"}, "evidence_snapshot": []},
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {
+        "terminal_event": "completed",
+        "whole_library_retry": false,
+        "result": {
+          "outcome": "insufficient_evidence", "minimum_citation_count": 1, "citation_count": 0,
+          "question": "What did the absent synthetic captain promise?", "answer": "I could not find enough relevant body-text evidence to answer that reliably.",
+          "embedding_provider": "synthetic-embedder", "embedding_model": "fixture-embed-v1", "generation_provider": "synthetic-provider", "generation_model": "fixture-model-v1", "answer_capability": "quality",
+          "retrieval_limit": 1, "candidate_count": 0, "filters": {"book_id": "synthetic-almanac"}, "retrieval_backend": "sqlite", "sources": [],
+          "timings": {"query_embedding_seconds": 0.01, "retrieval_seconds": 0.01, "prompt_construction_seconds": 0, "generation_seconds": 0, "validation_seconds": 0, "repair_seconds": 0, "total_seconds": 0.02}
+        }
+      },
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "completed"}]
+    },
+    {
+      "id": "wrong_scope",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000005", "question": "Who built the Meridian Observatory?", "scope": {"book_id": "synthetic-wrong-book"}, "evidence_snapshot": []},
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {
+        "terminal_event": "completed", "whole_library_retry": true,
+        "result": {
+          "outcome": "insufficient_evidence", "minimum_citation_count": 1, "citation_count": 0,
+          "question": "Who built the Meridian Observatory?", "answer": "I could not find enough relevant body-text evidence in the selected book. Try the whole library.",
+          "embedding_provider": "synthetic-embedder", "embedding_model": "fixture-embed-v1", "generation_provider": "synthetic-provider", "generation_model": "fixture-model-v1", "answer_capability": "quality",
+          "retrieval_limit": 1, "candidate_count": 0, "filters": {"book_id": "synthetic-wrong-book"}, "retrieval_backend": "sqlite", "sources": [],
+          "timings": {"query_embedding_seconds": 0.01, "retrieval_seconds": 0.01, "prompt_construction_seconds": 0, "generation_seconds": 0, "validation_seconds": 0, "repair_seconds": 0, "total_seconds": 0.02}
+        }
+      },
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "completed"}]
+    },
+    {
+      "id": "source_changed",
+      "request": {
+        "request_id": "10000000-0000-4000-8000-000000000006",
+        "question": "Which observatory measures the comet?",
+        "scope": {"book_id": "synthetic-almanac"},
+        "evidence_snapshot": [{"candidate_id": "stale-candidate-1", "book_id": "synthetic-almanac", "book_title": "The Synthetic Almanac", "chunk_id": "stale-chunk-1", "source_revision": "r1", "source_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "body_text_eligible": true}]
+      },
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {
+        "terminal_event": "completed", "whole_library_retry": false,
+        "source_change": {"expected_revision": "r1", "actual_revision": "r2", "expected_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "actual_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+        "result": {
+          "outcome": "source_changed", "minimum_citation_count": 1, "citation_count": 0,
+          "question": "Which observatory measures the comet?", "answer": "The source changed while this answer was being prepared. Please ask again.",
+          "embedding_provider": "synthetic-embedder", "embedding_model": "fixture-embed-v1", "generation_provider": "synthetic-provider", "generation_model": "fixture-model-v1", "answer_capability": "quality",
+          "retrieval_limit": 1, "candidate_count": 1, "filters": {"book_id": "synthetic-almanac"}, "retrieval_backend": "sqlite", "sources": [],
+          "timings": {"query_embedding_seconds": 0.01, "retrieval_seconds": 0.01, "prompt_construction_seconds": 0, "generation_seconds": 0, "validation_seconds": 0.01, "repair_seconds": 0, "total_seconds": 0.03}
+        }
+      },
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "validation_started", "attempt": 1}, {"event": "completed"}]
+    },
+    {
+      "id": "malformed_provider_structure",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000007", "question": "What is the comet called?", "scope": {"book_id": "synthetic-almanac"}, "evidence_snapshot": [{"candidate_id": "malformed-candidate-1", "book_id": "synthetic-almanac", "book_title": "The Synthetic Almanac", "chunk_id": "malformed-chunk-1", "source_revision": "r1", "source_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "body_text_eligible": true}]},
+      "provider": {"expected_calls": 2, "responses": [{"operation": "GROUNDED_SYNTHESIS", "body": "not-json"}, {"operation": "GROUNDED_SYNTHESIS", "body": "{\"unsupported\":true}"}]},
+      "expected": {"terminal_event": "failed", "error": {"code": "generation_unavailable", "message": "The generated answer could not be validated.", "retryable": false}},
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "generation_started", "attempt": 1}, {"event": "validation_started", "attempt": 1}, {"event": "generation_started", "attempt": 2}, {"event": "validation_started", "attempt": 2}, {"event": "failed"}]
+    },
+    {
+      "id": "broker_unavailable",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000008", "question": "What is the comet called?", "scope": {"book_id": "synthetic-almanac"}, "evidence_snapshot": [{"candidate_id": "broker-candidate-1", "book_id": "synthetic-almanac", "book_title": "The Synthetic Almanac", "chunk_id": "broker-chunk-1", "source_revision": "r1", "source_sha256": "1111111111111111111111111111111111111111111111111111111111111111", "body_text_eligible": true}]},
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {"terminal_event": "failed", "grpc_status": "UNAVAILABLE", "error": {"code": "broker_unavailable", "message": "Generation is temporarily unavailable.", "retryable": true}},
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "failed"}]
+    },
+    {
+      "id": "deadline_exceeded",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000009", "question": "What is the comet called?", "scope": {"book_id": "synthetic-almanac"}, "evidence_snapshot": [{"candidate_id": "deadline-candidate-1", "book_id": "synthetic-almanac", "book_title": "The Synthetic Almanac", "chunk_id": "deadline-chunk-1", "source_revision": "r1", "source_sha256": "1212121212121212121212121212121212121212121212121212121212121212", "body_text_eligible": true}]},
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {"terminal_event": "failed", "grpc_status": "DEADLINE_EXCEEDED", "error": {"code": "deadline_exceeded", "message": "Generation did not finish in time.", "retryable": false}},
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "failed"}]
+    },
+    {
+      "id": "queue_full",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000010", "question": "What is the comet called?", "scope": {"book_id": "synthetic-almanac"}, "evidence_snapshot": [{"candidate_id": "queue-candidate-1", "book_id": "synthetic-almanac", "book_title": "The Synthetic Almanac", "chunk_id": "queue-chunk-1", "source_revision": "r1", "source_sha256": "1313131313131313131313131313131313131313131313131313131313131313", "body_text_eligible": true}]},
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {"terminal_event": "failed", "grpc_status": "RESOURCE_EXHAUSTED", "error": {"code": "admission_full", "message": "Generation is busy. Try again shortly.", "retryable": true}},
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "failed"}]
+    },
+    {
+      "id": "cancelled",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000011", "question": "What is the comet called?", "scope": {"book_id": "synthetic-almanac"}, "evidence_snapshot": [{"candidate_id": "cancel-candidate-1", "book_id": "synthetic-almanac", "book_title": "The Synthetic Almanac", "chunk_id": "cancel-chunk-1", "source_revision": "r1", "source_sha256": "1414141414141414141414141414141414141414141414141414141414141414", "body_text_eligible": true}]},
+      "provider": {"expected_calls": 1, "responses": [{"operation": "GROUNDED_SYNTHESIS", "body": "blocked_until_cancelled"}]},
+      "expected": {"terminal_event": "cancelled"},
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "generation_started", "attempt": 1}, {"event": "cancelled"}]
+    },
+    {
+      "id": "oversized_provider_result",
+      "request": {
+        "request_id": "10000000-0000-4000-8000-000000000014",
+        "question": "Which synthetic observatory measures the comet?",
+        "scope": {"book_id": "synthetic-almanac"},
+        "evidence_snapshot": [
+          {"candidate_id": "oversized-result-candidate-1", "book_id": "synthetic-almanac", "book_title": "The Synthetic Almanac", "chunk_id": "oversized-result-chunk-1", "source_revision": "r1", "source_sha256": "1515151515151515151515151515151515151515151515151515151515151515", "body_text_eligible": true}
+        ]
+      },
+      "provider": {
+        "expected_calls": 2,
+        "responses": [
+          {"operation": "GROUNDED_SYNTHESIS", "outcome": "invalid_structured_output:TOO_LARGE"},
+          {"operation": "GROUNDED_SYNTHESIS", "body": "{\"answer\":\"The Meridian Observatory measures the comet [R1].\",\"sentence_ids\":[\"R1\"]}"}
+        ]
+      },
+      "expected": {
+        "terminal_event": "completed",
+        "whole_library_retry": false,
+        "result": {
+          "outcome": "answered", "minimum_citation_count": 1, "citation_count": 1,
+          "question": "Which synthetic observatory measures the comet?", "answer": "The Meridian Observatory measures the comet [R1].",
+          "embedding_provider": "synthetic-embedder", "embedding_model": "fixture-embed-v1", "generation_provider": "synthetic-provider", "generation_model": "fixture-model-v1", "answer_capability": "quality",
+          "retrieval_limit": 1, "candidate_count": 1, "filters": {"book_id": "synthetic-almanac"}, "retrieval_backend": "sqlite",
+          "sources": [{"source_id": "R1", "score": 0.99, "chunk_id": "oversized-result-chunk-1", "book_id": "synthetic-almanac", "relative_path": "synthetic/almanac.epub", "title": "The Synthetic Almanac", "authors": ["Fixture Author"], "chunk_index": 1, "content_type": "body", "text": "The Meridian Observatory measures the comet during clear nights."}],
+          "timings": {"query_embedding_seconds": 0.01, "retrieval_seconds": 0.01, "prompt_construction_seconds": 0.01, "generation_seconds": 0.02, "validation_seconds": 0.01, "repair_seconds": 0.01, "total_seconds": 0.07}
+        }
+      },
+      "event_sequence": [{"event": "started"}, {"event": "evidence_candidates"}, {"event": "generation_started", "attempt": 1}, {"event": "validation_started", "attempt": 1}, {"event": "generation_started", "attempt": 2}, {"event": "validation_started", "attempt": 2}, {"event": "answer_validated"}, {"event": "completed"}]
+    },
+    {
+      "id": "pre_admission_rejections",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000012", "question": "Synthetic rejected request", "scope": {}, "evidence_snapshot": []},
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {
+        "terminal_event": "pre_admission_rejection",
+        "variants": [
+          {"id": "oversized_request", "grpc_status": "INVALID_ARGUMENT", "error_code": "REQUEST_LIMIT_EXCEEDED"},
+          {"id": "oversized_message", "grpc_status": "INVALID_ARGUMENT", "error_code": "REQUEST_LIMIT_EXCEEDED"},
+          {"id": "oversized_excerpt", "grpc_status": "INVALID_ARGUMENT", "error_code": "REQUEST_LIMIT_EXCEEDED"},
+          {"id": "oversized_snapshot", "grpc_status": "INVALID_ARGUMENT", "error_code": "REQUEST_LIMIT_EXCEEDED"},
+          {"id": "unknown_enum", "grpc_status": "INVALID_ARGUMENT", "error_code": "UNKNOWN_ENUM"},
+          {"id": "operation_output_mismatch", "grpc_status": "INVALID_ARGUMENT", "error_code": "REQUEST_LIMIT_EXCEEDED"}
+        ]
+      },
+      "event_sequence": []
+    },
+    {
+      "id": "contract_mismatch",
+      "request": {"request_id": "10000000-0000-4000-8000-000000000013", "question": "Synthetic compatibility check", "scope": {}, "evidence_snapshot": []},
+      "provider": {"expected_calls": 0, "responses": []},
+      "expected": {
+        "terminal_event": "pre_admission_rejection",
+        "variants": [
+          {"id": "major", "grpc_status": "FAILED_PRECONDITION", "error_code": "CONTRACT_MISMATCH"},
+          {"id": "minor", "grpc_status": "FAILED_PRECONDITION", "error_code": "CONTRACT_MISMATCH"},
+          {"id": "descriptor", "grpc_status": "FAILED_PRECONDITION", "error_code": "CONTRACT_MISMATCH"},
+          {"id": "release_sha", "grpc_status": "FAILED_PRECONDITION", "error_code": "CONTRACT_MISMATCH"}
+        ]
+      },
+      "event_sequence": []
+    }
+  ]
+}
