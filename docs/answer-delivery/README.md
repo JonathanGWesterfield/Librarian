@@ -87,8 +87,10 @@ the public event JSON Schema, generated TypeScript types, fixtures, and drift
 gate. The third slice is complete in [PR #93](https://github.com/JonathanGWesterfield/Librarian/pull/93):
 a versioned manifest and static tests account for every direct legacy generator
 or judge construction and every API or host entry point before M03 migration
-begins. The active fourth slice adds the tracked synthetic answer-fixture bank
-and lifecycle checks required by the acceptance charter. These slices do not
+begins. The fourth slice is complete in [PR #94](https://github.com/JonathanGWesterfield/Librarian/pull/94):
+the tracked synthetic answer-fixture bank and lifecycle checks required by the
+acceptance charter. The active fifth slice adds the base-descriptor compatibility
+gate required before a v1 protobuf change can merge. These slices do not
 implement a broker, browser delivery, or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python

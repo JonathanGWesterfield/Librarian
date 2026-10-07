@@ -39,6 +39,7 @@ cleanup_test_config() {
 trap cleanup_test_config EXIT
 
 scripts/generate_contracts.sh --check
+python3 scripts/check_contract_breaking.py
 python3 -m compileall apps/api apps/codex_broker packages scripts tests
 scripts/test.sh
 python3 scripts/evaluate_retrieval.py --check

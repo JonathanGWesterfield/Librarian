@@ -43,7 +43,13 @@ jobs:
         run: docker build -f apps/api/Dockerfile --target test -t librarian-test:${{ github.sha }} .
 
       - name: Run checks
-        run: scripts/check.sh
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            export LIBRARIAN_CONTRACT_BASE_REF="origin/$GITHUB_BASE_REF"
+          else
+            export LIBRARIAN_CONTRACT_BASE_REF="HEAD^"
+          fi
+          scripts/check.sh
 
       - name: Verify browser event contract
         run: |
