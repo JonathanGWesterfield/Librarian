@@ -65,11 +65,12 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
+from librarian_config.config import enforce_docker_broker_host_guard
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_summarization.summarize import (
     DeleteSummariesOptions,
-    SummaryProgress,
     SummarizeBookOptions,
+    SummaryProgress,
     delete_summaries,
     summarize_book,
 )
@@ -161,6 +162,10 @@ def main(argv: list[str] | None = None) -> int:
     configure_cli_logging(console=not args.json)
     try:
         if args.command == "book":
+            enforce_docker_broker_host_guard(
+                generation_provider=args.generation_provider,
+                entrypoint="scripts/summarize.py",
+            )
             result = summarize_book(
                 SummarizeBookOptions(
                     database_url=args.database_url,

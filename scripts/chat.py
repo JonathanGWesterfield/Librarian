@@ -52,6 +52,7 @@ if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatOptions, answer_question
+from librarian_config.config import enforce_docker_broker_host_guard
 from librarian_logging import configure_cli_logging, emit_json
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     configure_cli_logging(console=not args.json)
+    try:
+        enforce_docker_broker_host_guard(
+            generation_provider=args.generation_provider,
+            entrypoint="scripts/chat.py",
+        )
+    except ValueError as error:
+        logger.error("Error: %s", error)
+        return 2
 
     question = " ".join(args.question).strip()
     if not question:

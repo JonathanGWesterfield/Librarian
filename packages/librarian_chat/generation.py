@@ -6,13 +6,14 @@ import shutil
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 from urllib import error, request
 
 from librarian_config.config import (
+    enforce_docker_broker_host_guard,
     resolve_codex_executable,
     resolve_generation_model,
     resolve_generation_ollama_base_url,
@@ -342,6 +343,10 @@ def create_configured_generator(
     ollama_base_url: str | None = None,
 ) -> Generator:
     resolved_provider = resolve_generation_provider(provider)
+    enforce_docker_broker_host_guard(
+        generation_provider=resolved_provider,
+        entrypoint="configured generation",
+    )
     # Direct Codex remains a normal JSON-configured generation provider.  Do
     # not replace a configured model (for example ``gpt-5.6-sol``) with the legacy
     # ``codex`` placeholder simply because this request did not override it.

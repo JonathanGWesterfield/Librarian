@@ -96,10 +96,14 @@ the remaining R0 HTTP broker target is an explicit M03-removal exception and a
 new runtime target is blocked in CI. The seventh slice is complete in
 [PR #97](https://github.com/JonathanGWesterfield/Librarian/pull/97): it
 generates and strictly validates the immutable, descriptor-bound release
-manifest that M03 will package into every R2 image. The active eighth slice
-turns the v1 admission matrix, size bounds, and non-OK status/detail mapping
-into reusable contract code in [PR #98](https://github.com/JonathanGWesterfield/Librarian/pull/98).
-These slices do not implement a broker, browser delivery, or Compose migration.
+manifest that M03 will package into every R2 image. The eighth slice is complete
+in [PR #98](https://github.com/JonathanGWesterfield/Librarian/pull/98): it turns
+the v1 admission matrix, size bounds, and non-OK status/detail mapping into
+reusable contract code. The active ninth slice rejects host CLI use of the
+private `docker_codex_broker` before a broker URL, client, or provider process
+can be constructed; M03 will replace R0's compatibility check with the full
+role-and-secret admission rule. These slices do not implement a broker, browser
+delivery, or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and

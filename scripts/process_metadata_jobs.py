@@ -46,15 +46,18 @@ from __future__ import annotations
 
 import argparse
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import resolve_database_url
+from librarian_config.config import (
+    enforce_docker_broker_host_guard,
+    resolve_database_url,
+)
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_metadata.jobs import (
     METADATA_JOB_TYPE_GENRES,
@@ -154,6 +157,10 @@ def main(argv: list[str] | None = None) -> int:
                 logger.info("Requeue status: failed")
                 logger.info("Requeued: %s", requeued)
             return 0
+
+        enforce_docker_broker_host_guard(
+            entrypoint="scripts/process_metadata_jobs.py",
+        )
 
         if args.watch:
             result = run_metadata_job_worker(

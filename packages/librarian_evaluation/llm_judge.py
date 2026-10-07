@@ -7,8 +7,12 @@ from dataclasses import asdict, dataclass
 from typing import Literal, Protocol
 from urllib import error, request
 
-from librarian_config.config import resolve_codex_executable
+from librarian_config.config import (
+    enforce_docker_broker_host_guard,
+    resolve_codex_executable,
+)
 from librarian_config.openai_compatible import build_openai_compatible_endpoint
+
 from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase
 
 
@@ -314,6 +318,10 @@ def create_judge(
             raise ValueError(
                 "Docker Codex broker judge requires the configured broker URL and token"
             )
+        enforce_docker_broker_host_guard(
+            generation_provider="docker_codex_broker",
+            entrypoint="Docker Codex broker judge",
+        )
         return DockerCodexBrokerJudge(
             model=model,
             base_url=broker_base_url,

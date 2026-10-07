@@ -82,6 +82,15 @@ the broker must not silently grant that capability because the enum exists.
 | Host CLI: `scripts/chat.py`, `scripts/summarize.py`, `scripts/tags.py`, `scripts/genres.py`, `scripts/process_summary_jobs.py`, `scripts/process_metadata_jobs.py`, `scripts/play/librarian.py`, `scripts/play/summary_jobs.py`, and host `scripts/evaluate_retrieval.py` | Each can inherit the default configured generator or judge, yet the broker has no host port | **Guard before R2 and retain in R2:** Docker-broker mode requires a matching runtime role **and** the exact non-symlink Docker-secret file at `/run/secrets/codex-broker-<role>`; `LIBRARIAN_EXECUTION_PRINCIPAL` alone is never sufficient. Host CLIs must select Codex/Ollama/external provider or run the corresponding Compose profile. | fails before target/channel/HTTP-client construction | tests exercise every listed host entry point, including forged `LIBRARIAN_EXECUTION_PRINCIPAL=api` without a secret mount; error names the allowed profile/provider |
 | Future extracted answer runtime | any answer operation after M09 only | deferred; `answer-runtime` principal and a dedicated private network | propagated absolute deadline and cancellation | required only if M09 is approved |
 
+R0/R1's executable host guard identifies the existing Compose compatibility
+configuration by its mounted `/config/librarian.json` path and rejects every
+other Docker-broker selection without consulting an execution-principal
+environment variable. It preserves the current in-container HTTP exception
+only until M03. It is intentionally a topology denial rather than a claim that
+the R2 role/credential checks already exist; M03 replaces this branch with the
+full runtime-role, environment-role, exact-secret-path, non-symlink, and
+readability validation below.
+
 The API receives the `api` credential only, so it may serve all six API
 operations but cannot impersonate a worker or evaluator. The operation matrix
 below is allow-list based: an unknown operation, a known operation with the

@@ -63,6 +63,17 @@ if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.chat import ChatOptions, ChatResponse, answer_question
+from librarian_config.config import (
+    enforce_docker_broker_host_guard,
+    get_librarian_config,
+    resolve_evaluation_judge,
+)
+from librarian_evaluation.answer import (
+    AnswerCandidate,
+    AnswerEvaluationCase,
+    AnswerSource,
+    evaluate_answer_cases,
+)
 from librarian_evaluation.comparison import compare_report_documents
 from librarian_evaluation.llm_judge import (
     LLMJudge,
@@ -74,19 +85,12 @@ from librarian_evaluation.reporting import (
     build_retrieval_report_document,
     render_evaluation_markdown,
 )
-from librarian_evaluation.answer import (
-    AnswerCandidate,
-    AnswerEvaluationCase,
-    AnswerSource,
-    evaluate_answer_cases,
-)
 from librarian_evaluation.retrieval import (
     RetrievalEvaluationCase,
     RetrievalResult,
     evaluate_retrieval_cases,
 )
 from librarian_logging import configure_cli_logging
-from librarian_config.config import get_librarian_config, resolve_evaluation_judge
 from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
 from librarian_search.search import SearchResponse, SearchResult
 
@@ -261,11 +265,15 @@ def main() -> int:
         help="Fail if the output file does not match the generated report.",
     )
     args = parser.parse_args()
-    judge = _create_optional_judge(
-        enabled=args.llm_judge,
-        mode=args.judge_mode,
-        ollama_base_url=args.ollama_base_url,
-    )
+    try:
+        judge = _create_optional_judge(
+            enabled=args.llm_judge,
+            mode=args.judge_mode,
+            ollama_base_url=args.ollama_base_url,
+        )
+    except (LLMJudgeError, ValueError) as exc:
+        logger.error("LLM semantic judge failed: %s", exc)
+        return 1
 
     try:
         if args.live:
@@ -768,6 +776,10 @@ def _create_optional_judge(
         # for generation, including its model and ignored internal token. The
         # evaluator must run as a Compose service: `codex-broker` deliberately
         # has no host port.
+        enforce_docker_broker_host_guard(
+            generation_provider="docker_codex_broker",
+            entrypoint="scripts/evaluate_retrieval.py --llm-judge",
+        )
         generation = get_librarian_config().generation
         broker_base_url = generation.base_url
         broker_api_key = generation.api_key
