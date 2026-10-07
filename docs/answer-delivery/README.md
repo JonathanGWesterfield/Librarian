@@ -93,11 +93,13 @@ acceptance charter. The fifth slice is complete in [PR #95](https://github.com/J
 the base-descriptor compatibility gate required before a v1 protobuf change can
 merge. The sixth slice is complete in [PR #96](https://github.com/JonathanGWesterfield/Librarian/pull/96):
 the remaining R0 HTTP broker target is an explicit M03-removal exception and a
-new runtime target is blocked in CI. The active seventh slice,
-[PR #97](https://github.com/JonathanGWesterfield/Librarian/pull/97), generates
-and strictly validates the immutable, descriptor-bound release manifest that
-M03 will package into every R2 image. These slices do not implement a broker,
-browser delivery, or Compose migration.
+new runtime target is blocked in CI. The seventh slice is complete in
+[PR #97](https://github.com/JonathanGWesterfield/Librarian/pull/97): it
+generates and strictly validates the immutable, descriptor-bound release
+manifest that M03 will package into every R2 image. The active eighth slice
+turns the v1 admission matrix, size bounds, and non-OK status/detail mapping
+into reusable contract code in [PR #98](https://github.com/JonathanGWesterfield/Librarian/pull/98).
+These slices do not implement a broker, browser delivery, or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and
