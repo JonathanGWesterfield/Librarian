@@ -185,6 +185,25 @@ class BrokerRuntimeConfigTests(unittest.TestCase):
             path.write_text(serialize_broker_client_runtime_config(config), encoding="utf-8")
             self.assertEqual(load_broker_client_runtime_config(path), config)
 
+    def test_loader_refuses_symlinked_or_non_regular_configuration_files(self) -> None:
+        config = build_broker_client_runtime_config(
+            model="gpt-5.6-sol",
+            answer_capability="quality",
+            credential_role="api",
+        )
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "actual-librarian.json"
+            target.write_text(serialize_broker_client_runtime_config(config), encoding="utf-8")
+            symlink = root / "librarian.json"
+            symlink.symlink_to(target)
+
+            with self.assertRaisesRegex(RuntimeConfigError, "could not read"):
+                load_broker_client_runtime_config(symlink)
+
+            with self.assertRaisesRegex(RuntimeConfigError, "could not read"):
+                load_broker_client_runtime_config(root)
+
 
 if __name__ == "__main__":
     unittest.main()
