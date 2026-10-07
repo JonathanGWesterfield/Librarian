@@ -89,9 +89,11 @@ a versioned manifest and static tests account for every direct legacy generator
 or judge construction and every API or host entry point before M03 migration
 begins. The fourth slice is complete in [PR #94](https://github.com/JonathanGWesterfield/Librarian/pull/94):
 the tracked synthetic answer-fixture bank and lifecycle checks required by the
-acceptance charter. The active fifth slice adds the base-descriptor compatibility
-gate required before a v1 protobuf change can merge. These slices do not
-implement a broker, browser delivery, or Compose migration.
+acceptance charter. The fifth slice is complete in [PR #95](https://github.com/JonathanGWesterfield/Librarian/pull/95):
+the base-descriptor compatibility gate required before a v1 protobuf change can
+merge. The active sixth slice makes the remaining R0 HTTP broker target an
+explicit M03-removal exception and blocks a new runtime target in CI. These
+slices do not implement a broker, browser delivery, or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and

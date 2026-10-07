@@ -63,6 +63,17 @@ The current `/v1/chat/completions` broker route is retired in the M03 atomic
 release. A temporary dual-protocol period would require a new ADR amendment,
 an owner, a removal release, a test, and an issue entry before it is added.
 
+### R0 HTTP broker exception
+
+R0 and R1 retain one existing private HTTP broker target while M01 contracts
+and M02 in-process parity are built. The versioned
+[`http_broker_target_exceptions.json`](../../tests/fixtures/answer_delivery/v1/http_broker_target_exceptions.json)
+inventory documents its exact source, URL, rationale, and M03 removal owner.
+Its static contract test scans runtime source roots and fails if another
+`http://codex-broker` target appears. This is a bounded R0 exception, not
+permission to add a dual-protocol migration path. M03 deletes both the target
+and this exception inventory as part of HTTP retirement.
+
 ## Local-Compose trust model
 
 The initial single-host Compose deployment uses plaintext gRPC **only** over
