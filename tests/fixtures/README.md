@@ -17,6 +17,11 @@ runtime HTTP Codex-broker URL that remains until M03. Its static test scans the
 runtime source roots, so any added broker target must be explicitly reviewed
 and cannot silently extend the pre-gRPC topology.
 
+`answer_delivery/v1/broker_runtime_config.json` is the canonical sanitized R2
+broker-client configuration. It locks the generated model, gRPC target,
+contract version, and caller role while demonstrating that a runtime document
+contains neither a credential value nor a credential path.
+
 `sample.epub` is a deterministic EPUB used as a parser source of truth.
 
 The unzipped source files live in `epub_source/` so expected title, author, and

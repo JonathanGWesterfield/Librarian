@@ -460,6 +460,18 @@ contract version, and logical credential role but no `api_key_file`, token,
 secret directory, or path which can reach a different principal. Each service
 bind-mounts exactly its one resolved file at `/config/librarian.json:ro`.
 
+The generated broker-client file is a strict JSON document. Its only mutable
+generation fields are `model` and `answer_capability`; its only broker fields
+are `transport: "grpc"`, the fixed Docker target
+`dns:///codex-broker:50051`, `contract_major`, `contract_minor`, and the
+caller `credential_role`. The permitted caller roles are `api`,
+`summary-worker`, `metadata-worker`, and `evaluator`. The runtime file has no
+release SHA or descriptor hash because clients load those immutable values from
+the packaged stack manifest. It has no credential field or credential path:
+the secret location comes solely from the service environment. The strict
+parser rejects unknown and duplicate fields, including `api_key_file`, token,
+and secret-path fields, before a client constructs a target or channel.
+
 R2 **forbids** a recursive mount of `config/`, `config/secrets/`, or any
 ancestor that exposes either path in broker, API, summary-worker,
 metadata-worker, evaluator, or web containers. In particular,

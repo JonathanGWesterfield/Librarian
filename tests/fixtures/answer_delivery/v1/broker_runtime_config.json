@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "generation": {
+    "model": "gpt-5.6-sol",
+    "answer_capability": "quality"
+  },
+  "services": {
+    "codex_broker": {
+      "transport": "grpc",
+      "target": "dns:///codex-broker:50051",
+      "contract_major": 1,
+      "contract_minor": 3,
+      "credential_role": "api"
+    }
+  }
+}
