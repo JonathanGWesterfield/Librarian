@@ -84,11 +84,12 @@ canonical protobuf source, checked-in Python bindings, reproducible generation,
 and contract-drift tests. The second slice, [#91](https://github.com/JonathanGWesterfield/Librarian/issues/91),
 is complete in [PR #92](https://github.com/JonathanGWesterfield/Librarian/pull/92):
 the public event JSON Schema, generated TypeScript types, fixtures, and drift
-gate. The active third slice makes the complete broker-boundary inventory
-executable: a versioned manifest and static tests must account for every direct
-legacy generator or judge construction and every API or host entry point before
-M03 migration begins. These slices do not implement a broker, browser delivery,
-or Compose migration.
+gate. The third slice is complete in [PR #93](https://github.com/JonathanGWesterfield/Librarian/pull/93):
+a versioned manifest and static tests account for every direct legacy generator
+or judge construction and every API or host entry point before M03 migration
+begins. The active fourth slice adds the tracked synthetic answer-fixture bank
+and lifecycle checks required by the acceptance charter. These slices do not
+implement a broker, browser delivery, or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and
