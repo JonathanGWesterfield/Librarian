@@ -276,6 +276,14 @@ computes `descriptor_sha256` from the checked-in canonical descriptor set. Field
 are additive only within the declared major. Unknown event kinds, unsupported
 majors, and unsupported contract minors are rejected rather than guessed.
 
+`librarian_contracts.admission` makes the v1 operation/output/evidence matrix,
+pre-admission request limits, outbound result bounds, principal allow-list, and
+permitted non-OK status/detail pairs executable without a running broker. M03
+applies request validation before queue admission, converts an invalid generated
+result into its bounded domain outcome, and writes non-OK standard status into
+`grpc-status-details-bin`; the helpers do not create a broker listener or a
+transport fallback.
+
 ### Atomic compatibility handshake
 
 Every R2 image is built from one clean, committed Git SHA. The release build
