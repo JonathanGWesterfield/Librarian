@@ -20,6 +20,8 @@ services:
       - /output/librarian.compose.json
       - --state-output
       - /output/librarian.state.json
+      - --broker-runtime-output-dir
+      - /output/config
 
   opensearch:
     image: opensearchproject/opensearch:2.15.0

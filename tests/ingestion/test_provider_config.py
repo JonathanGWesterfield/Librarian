@@ -11,23 +11,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "packages"))
-RESOLVER_PATH = REPO_ROOT / "scripts" / "resolve_provider_config.py"
-SPEC = importlib.util.spec_from_file_location("librarian_compose_resolver", RESOLVER_PATH)
-assert SPEC is not None and SPEC.loader is not None
-resolver = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = resolver
-SPEC.loader.exec_module(resolver)
-
-from librarian_config.config import (  # noqa: E402
+from librarian_config.config import (
     LibrarianConfigError,
     clear_librarian_config_cache,
     get_librarian_config,
     resolve_evaluation_judge,
     resolve_generation_answer_capability,
 )
+
+RESOLVER_PATH = REPO_ROOT / "scripts" / "resolve_provider_config.py"
+SPEC = importlib.util.spec_from_file_location("librarian_compose_resolver", RESOLVER_PATH)
+assert SPEC is not None and SPEC.loader is not None
+resolver = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = resolver
+SPEC.loader.exec_module(resolver)
 
 
 class LibrarianConfigTests(unittest.TestCase):
@@ -468,6 +467,75 @@ class LibrarianConfigTests(unittest.TestCase):
             },
         )
         self.assertNotIn("generation-secret", json.dumps(override))
+
+    def test_resolver_writes_per_client_broker_configs_without_a_host_secret(self) -> None:
+        """The resolver consumes the host credential without publishing it."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            _write_config(
+                path,
+                generation=_selection("docker_codex_broker", "generation"),
+            )
+            _write_secret_files(root, "docker_ollama", "docker_codex_broker")
+            config = get_librarian_config(path)
+            output_directory = root / "runtime-config"
+
+            rendered = resolver.render_broker_client_runtime_configs(config)
+            written_paths = resolver.write_broker_client_runtime_configs(
+                output_directory,
+                config,
+            )
+            written_by_role = {
+                generated_path.parent.name: generated_path.read_text(encoding="utf-8")
+                for generated_path in written_paths
+            }
+
+        self.assertEqual(set(rendered), set(resolver.CLIENT_CREDENTIAL_ROLES))
+        self.assertEqual(
+            {path.parent.name for path in written_paths},
+            set(resolver.CLIENT_CREDENTIAL_ROLES),
+        )
+        for role, runtime_json in rendered.items():
+            with self.subTest(role=role):
+                payload = json.loads(runtime_json)
+                self.assertEqual(payload["generation"]["model"], "gpt-5.6-sol")
+                self.assertEqual(
+                    payload["services"]["codex_broker"]["credential_role"],
+                    role,
+                )
+                self.assertNotIn("generation-secret", runtime_json)
+                self.assertNotIn("api_key_file", runtime_json)
+                self.assertNotIn("/run/secrets", runtime_json)
+                self.assertEqual(written_by_role[role], runtime_json)
+
+    def test_resolver_does_not_generate_broker_files_for_non_broker_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            broker_path = root / "broker-librarian.json"
+            _write_config(
+                broker_path,
+                generation=_selection("docker_codex_broker", "generation"),
+            )
+            _write_secret_files(root, "docker_ollama", "docker_codex_broker")
+            output_directory = root / "runtime-config"
+            resolver.write_broker_client_runtime_configs(
+                output_directory,
+                get_librarian_config(broker_path),
+            )
+
+            path = root / "librarian.json"
+            _write_config(path)
+
+            self.assertEqual(
+                resolver.write_broker_client_runtime_configs(
+                    output_directory,
+                    get_librarian_config(path),
+                ),
+                [],
+            )
+            for role in resolver.CLIENT_CREDENTIAL_ROLES:
+                self.assertFalse((output_directory / role / "librarian.json").exists())
 
 
 def _write_config(
