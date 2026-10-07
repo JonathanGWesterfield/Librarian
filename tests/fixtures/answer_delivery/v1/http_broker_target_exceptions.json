@@ -1,0 +1,13 @@
+{
+  "schema_version": "v1",
+  "exceptions": [
+    {
+      "id": "r0-docker-codex-broker-config",
+      "source": "packages/librarian_config/config.py",
+      "target": "http://codex-broker:3000/v1",
+      "rationale": "R0/R1 keeps the existing private Docker broker endpoint until the atomic M03 gRPC release.",
+      "removal_milestone": "M03",
+      "documentation": "docs/answer-delivery/adr-internal-rpc-transport.md#r0-http-broker-exception"
+    }
+  ]
+}

@@ -12,6 +12,11 @@ private books, or model access. Python lifecycle checks and the browser event
 schema test consume the same bank so later runtime, gRPC, and SSE work retain a
 single deterministic baseline.
 
+`answer_delivery/v1/http_broker_target_exceptions.json` records the one R0
+runtime HTTP Codex-broker URL that remains until M03. Its static test scans the
+runtime source roots, so any added broker target must be explicitly reviewed
+and cannot silently extend the pre-gRPC topology.
+
 `sample.epub` is a deterministic EPUB used as a parser source of truth.
 
 The unzipped source files live in `epub_source/` so expected title, author, and
