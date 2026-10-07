@@ -353,6 +353,47 @@ def resolve_generation_openai_compatible() -> tuple[str | None, str | None, dict
     return selection.base_url, selection.api_key, dict(selection.headers or {})
 
 
+def enforce_docker_broker_host_guard(
+    *,
+    generation_provider: str | None = None,
+    entrypoint: str,
+    config: LibrarianConfig | None = None,
+) -> None:
+    """Reject a host process before it can construct the private broker client.
+
+    R0 keeps a private HTTP broker so the existing Compose stack can continue to
+    run while M01 and M02 establish the gRPC migration.  That broker has no host
+    port, however, and a host CLI must not mistake its configuration default for
+    a supported topology.  R2 replaces this compatibility check with the
+    stricter role-and-Docker-secret admission rule in the answer-delivery
+    design.  The environment is intentionally not consulted here: exporting a
+    principal must never turn a host process into a Compose caller.
+    """
+    normalized_provider = (generation_provider or "").strip().casefold()
+    if normalized_provider in {"codex", "ollama", "noop"}:
+        return
+
+    resolved_config = config or get_librarian_config()
+    docker_broker_selected = (
+        normalized_provider == "docker_codex_broker"
+        or (
+            normalized_provider in {"", "openai_compatible"}
+            and resolved_config.generation.uses_docker_codex_broker
+        )
+    )
+    if not docker_broker_selected:
+        return
+    if resolved_config.path == CONTAINER_CONFIG_PATH.resolve():
+        return
+
+    raise LibrarianConfigError(
+        f"{entrypoint} cannot use docker_codex_broker from the host. "
+        "Run the corresponding Docker Compose service with the codex-broker "
+        "profile, or select codex, ollama, noop, or an independently configured "
+        "external openai_compatible provider."
+    )
+
+
 def resolve_opensearch_url(opensearch_url: str | None = None) -> str:
     return _validate_http_url(opensearch_url, "opensearch_url") if opensearch_url else get_librarian_config().search.opensearch_url
 

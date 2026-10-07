@@ -76,7 +76,10 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import resolve_database_url
+from librarian_config.config import (
+    enforce_docker_broker_host_guard,
+    resolve_database_url,
+)
 from librarian_ingestion.embedding_ops import (
     RebuildEmbeddingsOptions,
     rebuild_embeddings,
@@ -332,6 +335,20 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     configure_cli_logging(console=not getattr(args, "json", False))
+    try:
+        if args.command == "recommend":
+            enforce_docker_broker_host_guard(
+                generation_provider=args.generation_provider,
+                entrypoint="scripts/play/librarian.py recommend",
+            )
+        elif args.command == "ingest" and args.enqueue_summaries:
+            enforce_docker_broker_host_guard(
+                generation_provider=args.summary_generation_provider,
+                entrypoint="scripts/play/librarian.py ingest --enqueue-summaries",
+            )
+    except ValueError as error:
+        logger.error("Error: %s", error)
+        return 2
     database_url = resolve_database_url(args.database_url)
 
     try:

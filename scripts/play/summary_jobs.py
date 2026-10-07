@@ -49,7 +49,10 @@ PACKAGES_DIR = REPO_ROOT / "packages"
 if str(PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(PACKAGES_DIR))
 
-from librarian_config.config import resolve_database_url
+from librarian_config.config import (
+    enforce_docker_broker_host_guard,
+    resolve_database_url,
+)
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.jobs import (
@@ -120,6 +123,14 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     configure_cli_logging(console=not args.json)
+    if args.command == "process":
+        try:
+            enforce_docker_broker_host_guard(
+                entrypoint="scripts/play/summary_jobs.py",
+            )
+        except ValueError as error:
+            logger.error("Error: %s", error)
+            return 2
     database_url = resolve_database_url(args.database_url)
 
     try:

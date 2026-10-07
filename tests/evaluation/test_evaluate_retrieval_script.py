@@ -81,6 +81,7 @@ class EvaluateRetrievalScriptTests(unittest.TestCase):
                 "get_librarian_config",
                 return_value=SimpleNamespace(generation=generation),
             ),
+            patch.object(module, "enforce_docker_broker_host_guard"),
             patch.object(module, "create_judge", return_value=broker_judge) as create,
         ):
             judge = module._create_optional_judge(
