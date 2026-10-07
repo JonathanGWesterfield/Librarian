@@ -91,9 +91,13 @@ begins. The fourth slice is complete in [PR #94](https://github.com/JonathanGWes
 the tracked synthetic answer-fixture bank and lifecycle checks required by the
 acceptance charter. The fifth slice is complete in [PR #95](https://github.com/JonathanGWesterfield/Librarian/pull/95):
 the base-descriptor compatibility gate required before a v1 protobuf change can
-merge. The active sixth slice makes the remaining R0 HTTP broker target an
-explicit M03-removal exception and blocks a new runtime target in CI. These
-slices do not implement a broker, browser delivery, or Compose migration.
+merge. The sixth slice is complete in [PR #96](https://github.com/JonathanGWesterfield/Librarian/pull/96):
+the remaining R0 HTTP broker target is an explicit M03-removal exception and a
+new runtime target is blocked in CI. The active seventh slice,
+[PR #97](https://github.com/JonathanGWesterfield/Librarian/pull/97), generates
+and strictly validates the immutable, descriptor-bound release manifest that
+M03 will package into every R2 image. These slices do not implement a broker,
+browser delivery, or Compose migration.
 
 - [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and

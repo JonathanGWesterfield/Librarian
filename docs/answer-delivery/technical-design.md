@@ -286,6 +286,13 @@ lowercase hex. The broker, API, summary worker, metadata worker, and evaluator
 read that same immutable manifest from their image; it is not user configuration
 and cannot be overridden by an environment variable.
 
+`scripts/generate_stack_contract.py` renders this exact contract from the
+canonical descriptor and an explicitly supplied clean release SHA. Its strict
+parser and descriptor-digest verification live in
+`librarian_contracts.stack_contract`. M01 proves the format and deterministic
+generation; M03 packages the generated file into every R2 image and wires it
+into the authenticated startup and request checks below.
+
 At process startup each generated client reads the manifest, opens its shared
 channel, and calls authenticated `GetCapabilities` with all four request fields
 and matching release metadata. The broker performs these checks in order:
