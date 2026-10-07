@@ -8,6 +8,8 @@ document from this module for each broker caller after it has read that input.
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -143,14 +145,17 @@ def serialize_broker_client_runtime_config(config: BrokerClientRuntimeConfig) ->
 
 
 def load_broker_client_runtime_config(path: Path) -> BrokerClientRuntimeConfig:
-    """Load a generated runtime file without following configuration references."""
+    """Load a generated runtime file without following configuration references.
+
+    The caller's configuration mount is intended to be one regular read-only
+    file.  Refusing symlinks closes the otherwise surprising path from a
+    harmless-looking mount to an arbitrary file outside that mount.
+    """
 
     try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise RuntimeConfigError(
-            f"could not read broker runtime configuration {path}: {error}"
-        ) from error
+        raw = _read_regular_file_without_following_links(path)
+    except (OSError, UnicodeError) as error:
+        raise RuntimeConfigError("could not read broker runtime configuration") from error
     return parse_broker_client_runtime_config(raw)
 
 
@@ -228,3 +233,27 @@ def _reject_duplicate_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise RuntimeConfigError(f"broker runtime configuration repeats field: {field}")
         decoded[field] = value
     return decoded
+
+
+def _read_regular_file_without_following_links(path: Path) -> str:
+    """Read one regular file while detecting link and replacement races."""
+
+    initial_stat = path.lstat()
+    if stat.S_ISLNK(initial_stat.st_mode):
+        raise OSError("broker runtime configuration must not be a symlink")
+    if not stat.S_ISREG(initial_stat.st_mode):
+        raise OSError("broker runtime configuration must be a regular file")
+
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(opened_stat.st_mode):
+            raise OSError("broker runtime configuration must be a regular file")
+        if (opened_stat.st_dev, opened_stat.st_ino) != (initial_stat.st_dev, initial_stat.st_ino):
+            raise OSError("broker runtime configuration changed while opening")
+        with os.fdopen(descriptor, encoding="utf-8") as file:
+            descriptor = -1
+            return file.read()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
