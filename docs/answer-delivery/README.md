@@ -47,7 +47,7 @@ required M00/M01 deliverables have passed review.
 | ID | Deliverable | Depends on | Status |
 | --- | --- | --- | --- |
 | M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) |
-| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | In progress ([M01a #89](https://github.com/JonathanGWesterfield/Librarian/issues/89)) |
+| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Complete ([PR #101](https://github.com/JonathanGWesterfield/Librarian/pull/101)) |
 | M02 | In-process answer-runtime extraction and parity | M01 | Not started |
 | M03 | Atomic gRPC Codex-broker migration | M02 | Not started |
 | M04 | Buffered JSON and progressive SSE delivery adapters | M03 | Not started |
@@ -105,27 +105,33 @@ host CLI use of the private `docker_codex_broker` before a broker URL, client,
 or provider process can be constructed. The tenth slice adds the remaining
 deterministic prerequisites for that R2 boundary: resolver-owned, sanitized
 per-role configuration; client-side capability validation; and a fixed-path
-configuration-and-secret preflight. M03 wires those already-tested components
-into the full role-and-secret admission rule. These slices do not implement a
-broker, browser delivery, or Compose migration.
+configuration-and-secret preflight. The eleventh slice records validated broker
+scheduler, deadline, validation-reserve, buffering, and shutdown limits. The
+twelfth makes provider diagnostics safe for operators by redacting
+credential-shaped stderr and omitting prompt or evidence content. The thirteenth
+adds an executable R2 Compose topology policy for per-role secrets, private
+networks, broker-only egress, fixed sanitized config mounts, and Docker's
+normalized rendered path form. M03 wires those already-tested components into
+the full role-and-secret admission rule. These slices do not implement a broker,
+browser delivery, or Compose migration.
 
-- [ ] Add the canonical v1 proto, public event JSON Schema, generated Python
+- [x] Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and
   breaking-change checks described in the technical design.
-- [ ] Turn each enumerated chat, summary, tag, genre, recommendation, worker,
+- [x] Turn each enumerated chat, summary, tag, genre, recommendation, worker,
   evaluator, and host-guard row into a testable migration ticket. Re-run the
   source/configuration inventory; a new call site blocks M03 until it is added
   to the matrix with a migration or pre-transport rejection.
-- [ ] Add tracked synthetic corpus fixtures and contract tests from the
+- [x] Add tracked synthetic corpus fixtures and contract tests from the
   acceptance charter. They must run without Docker, private books, credentials,
   or model access.
-- [ ] Implement and validate the full proto and status/size rules, immutable
+- [x] Implement and validate the full proto and status/size rules, immutable
   release manifest, per-principal Compose secrets/networks, authenticated Health
   and capabilities handshake with client response validation, sanitized
   single-file config mounts, non-spoofable host guard, timeout/limit validation,
   log redaction, and deployment preflight specified by ADR 001 and the
   compatibility plan.
-- [ ] Record a fresh baseline with the existing stack; label unavailable model
+- [x] Record a fresh baseline with the existing stack; label unavailable model
   or Docker conditions rather than synthesizing measurements.
 
 **Exit:** a clean checkout generates and compiles contracts, detects descriptor
