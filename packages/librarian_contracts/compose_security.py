@@ -23,8 +23,11 @@ BROKER_PRIVATE_NETWORKS = {
     "evaluator": "broker-evaluator",
 }
 BROKER_SECRET_NAMES = {
-    role: f"codex-broker-{role}"
-    for role in (*sorted(CLIENT_CREDENTIAL_ROLES), BROKER_HEALTH_ROLE)
+    **{role: f"codex-broker-{role}" for role in sorted(CLIENT_CREDENTIAL_ROLES)},
+    # This control-plane identity is named after its purpose in the deployment
+    # rather than its logical gRPC principal.  The principal remains
+    # ``compose-health`` and is intentionally broker-only.
+    BROKER_HEALTH_ROLE: "codex-broker-health",
 }
 RUNTIME_CONFIG_TARGET = "/config/librarian.json"
 BROKER_GRPC_PORT = "50051"

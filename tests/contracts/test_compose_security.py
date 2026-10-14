@@ -20,6 +20,9 @@ from librarian_contracts.compose_security import (
 class ComposeSecurityPolicyTests(unittest.TestCase):
     """M03 must not be able to widen any documented broker boundary."""
 
+    def test_health_principal_uses_the_documented_broker_only_secret_name(self) -> None:
+        self.assertEqual(BROKER_SECRET_NAMES["compose-health"], "codex-broker-health")
+
     def test_canonical_r2_shape_is_accepted(self) -> None:
         validate_r2_compose_security(_r2_compose())
 

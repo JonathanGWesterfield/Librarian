@@ -116,6 +116,11 @@ class GeneratedGrpcBrokerClient:
             ) from error
         self._ready = True
 
+    async def close(self) -> None:
+        """Close the process-owned channel during startup failure or shutdown."""
+
+        await self.channel.close()
+
     async def generate(
         self,
         request: delivery_pb2.GenerateRequest,

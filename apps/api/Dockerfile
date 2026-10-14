@@ -37,3 +37,29 @@ COPY tests tests
 COPY scripts/evaluate_retrieval.py scripts/verify_compose.py scripts/
 
 RUN pip install --no-cache-dir -e "apps/api[dev]" -e "packages[dev]"
+
+
+# The separate R2 composition supplies this build argument from its release
+# pipeline.  A missing SHA fails the build instead of producing an image that
+# could hand-shake as an unspecified release.  Keep this target after ``test``
+# so normal R0 test-image builds never need an R2 release SHA.
+FROM runtime AS r2-runtime
+
+ARG STACK_RELEASE_SHA
+
+COPY proto proto
+COPY scripts/generate_stack_contract.py scripts/generate_stack_contract.py
+COPY scripts/process_metadata_jobs.py scripts/process_metadata_jobs.py
+
+RUN test -n "$STACK_RELEASE_SHA" \
+    && python scripts/generate_stack_contract.py \
+      --stack-release-sha "$STACK_RELEASE_SHA" \
+      --output /app/librarian-stack-contract.json
+
+
+FROM r2-runtime AS r2-evaluator
+
+COPY tests tests
+COPY scripts/evaluate_retrieval.py scripts/verify_compose.py scripts/
+
+RUN pip install --no-cache-dir -e "apps/api[dev]" -e "packages[dev]"

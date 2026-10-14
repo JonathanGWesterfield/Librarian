@@ -130,7 +130,7 @@ class BrokerClientAdmissionTests(unittest.TestCase):
             validate_broker_client_admission(
                 invalid_config,
                 environ=_environment(
-                    "compose-health", directory / "codex-broker-compose-health"
+                    "compose-health", directory / "codex-broker-health"
                 ),
             )
 
