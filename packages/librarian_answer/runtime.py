@@ -173,6 +173,7 @@ class AnswerRuntime:
             try:
                 review = self.support_reviewer.review(
                     SupportReviewRequest(
+                        request_id=request.request_id,
                         question=request.question,
                         answer=answer,
                         citations=citations,
@@ -180,8 +181,13 @@ class AnswerRuntime:
                     ),
                     context,
                 )
+                if isawaitable(review):
+                    review = await review
             except Exception:  # noqa: BLE001 - a review failure consumes the repair budget.
                 review = None
+            if context.is_cancelled():
+                yield event("cancelled")
+                return
             if review is None or not review.supported:
                 repair_hint = review.reason if review is not None else None
                 repair_answer = answer

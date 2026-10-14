@@ -39,6 +39,18 @@ class R2StartupError(RuntimeError):
 async def verify_r2_client_startup(*, expected_principal: str) -> None:
     """Validate local R2 admission and the remote release compatibility gate."""
 
+    client = await open_r2_client(expected_principal=expected_principal)
+    await client.close()
+
+
+async def open_r2_client(*, expected_principal: str) -> GeneratedGrpcBrokerClient:
+    """Open one ready process-owned R2 client for a caller composition root.
+
+    The caller owns closing the returned channel.  Keeping this construction
+    separate from the command-wrapper check lets a long-running API retain one
+    channel/stub rather than creating a channel for each request.
+    """
+
     if expected_principal not in CLIENT_CREDENTIAL_ROLES:
         raise R2StartupError("R2 startup principal is not a broker caller")
     try:
@@ -78,9 +90,9 @@ async def verify_r2_client_startup(*, expected_principal: str) -> None:
     try:
         await client.ensure_ready(timeout=STARTUP_HANDSHAKE_TIMEOUT_SECONDS)
     except GrpcBrokerClientError as error:
-        raise R2StartupError("R2 broker capability handshake failed") from error
-    finally:
         await client.close()
+        raise R2StartupError("R2 broker capability handshake failed") from error
+    return client
 
 
 def main(argv: list[str] | None = None) -> int:

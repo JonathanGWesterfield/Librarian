@@ -207,6 +207,7 @@ class SupportReviewRequest:
     answer: str
     citations: tuple[AnswerCitation, ...]
     evidence_snapshot: tuple[EvidenceSnapshot, ...]
+    request_id: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "citations", tuple(self.citations))

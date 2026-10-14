@@ -52,5 +52,5 @@ class SupportReviewer(Protocol):
 
     def review(
         self, request: SupportReviewRequest, context: RequestContext
-    ) -> SupportReviewResult:
+    ) -> SupportReviewResult | Awaitable[SupportReviewResult]:
         """Return whether the proposed answer is evidence-supported."""

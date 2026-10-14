@@ -100,6 +100,14 @@ Until the atomic caller migration makes R2 the normal launcher, validate the
 R2 overlay with every required profile enabled. This does not alter ordinary R0
 startup, which continues to use `docker-compose.yml` alone:
 
+The API chat migration first exposes a composition seam that owns one ready
+generated client and its synthesis, source-selection, and support-review
+adapters. It remains deliberately inactive while the API's existing retrieval
+settings still require the legacy application configuration and R2 mounts only
+the strict broker-client document at `/config/librarian.json`. Enabling that
+seam is part of the later atomic configuration/caller cutover; this interim
+seam must not be presented as an R2-launchable API path or as HTTP fallback.
+
 ```sh
 LIBRARIAN_STACK_RELEASE_SHA=<clean-40-character-sha> \
   docker compose \
