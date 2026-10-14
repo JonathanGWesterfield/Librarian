@@ -172,6 +172,7 @@ class GenerationRequest:
     operation: str
     messages: tuple[GenerationMessage, ...]
     response_format: str | None = None
+    repair_hint: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))
@@ -182,6 +183,8 @@ class GenerationResult:
     body: str
     provider: str
     model: str
+    repair_hint: str | None = None
+    repairable: bool = True
 
 
 @dataclass(frozen=True)

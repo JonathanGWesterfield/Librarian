@@ -203,3 +203,170 @@ def _bounded_excerpt(text: str) -> str:
     """Retain valid UTF-8 while enforcing the runtime's 8 KiB excerpt bound."""
 
     return text.encode("utf-8")[: 8 * 1024].decode("utf-8", errors="ignore")
+
+
+@dataclass(frozen=True)
+class LegacySentenceEvidenceRetriever:
+    """Adapt R1's validated sentence candidates to immutable runtime evidence.
+
+    The chat implementation already defines the candidate sentence algorithm
+    used by production prompts.  Keeping that implementation at the adapter
+    boundary preserves R1's exact selection contract while the runtime owns
+    lifecycle, citation identity, freshness, review, and repair.
+    """
+
+    question: str
+    sources: Sequence[ChatSource]
+    required_sources: int
+    store_factory: IngestionStoreFactory
+    retrieval_backend: str
+
+    def candidates(self) -> tuple[object, ...]:
+        from librarian_chat.chat import _source_sentence_candidates
+
+        return tuple(
+            _source_sentence_candidates(
+                self.question, list(self.sources), required_sources=self.required_sources
+            )
+        )
+
+    def retrieve(
+        self, request: AnswerRequest, context: RequestContext
+    ) -> tuple[EvidenceSnapshot, ...]:
+        if context.is_cancelled():
+            return ()
+        snapshots: list[EvidenceSnapshot] = []
+        for candidate in self.candidates():
+            source = candidate.source
+            record = self.reload_source(book_id=source.book_id, chunk_id=source.chunk_id)
+            if record is None:
+                # Synthetic/host fixture retrieval has no persisted source
+                # store. It remains valid R1 evidence, but production records
+                # always replace this fallback and receive a real revision.
+                record = SourceRecord(
+                    book_id=source.book_id,
+                    chunk_id=source.chunk_id,
+                    source_revision=f"legacy:{source.book_id}:{source.chunk_id}",
+                    text=source.text,
+                    content_type=source.content_type,
+                )
+            snapshots.append(
+                EvidenceSnapshot.from_source_record(
+                    candidate_id=candidate.sentence_id,
+                    source=record,
+                    body_text_eligible=source.content_type == "body",
+                    retrieval_provenance={
+                        "backend": self.retrieval_backend,
+                        "legacy_source_id": source.source_id,
+                        "relative_path": source.relative_path,
+                    },
+                    excerpt=candidate.sentence,
+                    book_title=source.title,
+                )
+            )
+        return tuple(snapshots)
+
+    def reload_source(self, *, book_id: str, chunk_id: str) -> SourceRecord | None:
+        try:
+            source = _reload_source(self.store_factory, book_id=book_id, chunk_id=chunk_id)
+        except Exception:  # noqa: BLE001 - the R1 fixture path has no source store.
+            source = None
+        if source is not None:
+            return source
+        original = next(
+            (item for item in self.sources if item.book_id == book_id and item.chunk_id == chunk_id),
+            None,
+        )
+        if original is None:
+            return None
+        return SourceRecord(
+            book_id=original.book_id,
+            chunk_id=original.chunk_id,
+            source_revision=f"legacy:{original.book_id}:{original.chunk_id}",
+            text=original.text,
+            content_type=original.content_type,
+        )
+
+    def source_for_candidate(self, candidate_id: str) -> ChatSource | None:
+        for candidate in self.candidates():
+            if candidate.sentence_id == candidate_id:
+                return candidate.source
+        return None
+
+
+@dataclass(frozen=True)
+class LegacySemanticGenerationBroker:
+    """Send R1's exact selection prompt through the runtime broker port."""
+
+    generator: Generator
+    question: str
+    candidates: Sequence[object]
+    required_sources: int
+
+    def generate(
+        self, request: GenerationRequest, context: RequestContext
+    ) -> GenerationResult:
+        from librarian_chat.chat import (
+            _REPAIRABLE_SYNTHESIS_REJECTIONS,
+            _semantic_synthesis_prompt,
+            _semantic_synthesis_repair_prompt,
+            _semantic_synthesis_system_prompt,
+            _validated_semantic_synthesis,
+        )
+        from librarian_chat.generation import GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT
+
+        if context.is_cancelled():
+            raise RuntimeError("answer request was cancelled before generation")
+        prompt = _semantic_synthesis_prompt(
+            self.question, list(self.candidates), required_sources=self.required_sources
+        )
+        if request.repair_hint:
+            prompt = _semantic_synthesis_repair_prompt(
+                self.question,
+                list(self.candidates),
+                required_sources=self.required_sources,
+                rejection_reason=request.repair_hint,
+            )
+        body = self.generator.generate(
+            [
+                ChatMessage(role="system", content=_semantic_synthesis_system_prompt()),
+                ChatMessage(role="user", content=prompt),
+            ],
+            response_format=GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+        )
+        # R1's established validator rejects source markers, quote dumps,
+        # unsupported causal claims, and invalid sentence references before the
+        # domain runtime can consider a repair.  A fixed malformed payload keeps
+        # the repair decision in ``AnswerRuntime`` rather than the adapter.
+        validation = _validated_semantic_synthesis(
+            body, list(self.candidates), required_sources=self.required_sources
+        )
+        if validation.answer is None:
+            body = "{}"
+        return GenerationResult(
+            body=body,
+            provider=self.generator.provider,
+            model=self.generator.model,
+            repair_hint=validation.rejection_reason,
+            repairable=validation.rejection_reason in _REPAIRABLE_SYNTHESIS_REJECTIONS,
+        )
+
+
+def _reload_source(
+    store_factory: IngestionStoreFactory, *, book_id: str, chunk_id: str
+) -> SourceRecord | None:
+    store = store_factory()
+    try:
+        store.initialize()
+        chunk = store.get_source_chunk(book_id=book_id, chunk_id=chunk_id)
+        if chunk is None:
+            return None
+        return SourceRecord(
+            book_id=chunk.book_id,
+            chunk_id=chunk.id,
+            source_revision=chunk.source_revision,
+            text=chunk.text,
+            content_type=chunk.content_type,
+        )
+    finally:
+        store.close()
