@@ -33,6 +33,7 @@ packages = [
   "librarian_storage",
   "librarian_search",
   "librarian_chat",
+  "librarian_answer",
   "librarian_summarization",
   "librarian_metadata",
   "librarian_recommendations",
