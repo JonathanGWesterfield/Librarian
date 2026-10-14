@@ -1,34 +1,35 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from dataclasses import asdict, dataclass, field
+import asyncio
 import json
 import logging
 import re
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, field
 from time import perf_counter
+from uuid import uuid4
 
-from librarian_chat.generation import (
-    ChatMessage,
-    GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
-    GenerationError,
-    Generator,
-    create_configured_generator,
-    create_generator,
-)
 from librarian_config.config import (
     LibrarianConfigError,
     get_librarian_config,
-    resolve_database_url,
     resolve_chat_retrieval_backend,
+    resolve_database_url,
     resolve_generation_answer_capability,
+)
+from librarian_evaluation.answer import (
+    AnswerCandidate,
+    AnswerEvaluationCase,
+    AnswerSource,
+)
+from librarian_evaluation.llm_judge import (
+    LLMJudgeError,
+    evaluate_answers_with_llm_judge,
 )
 from librarian_ingestion.embedding_ops import (
     EmbedQueryOptions,
     EmbedQueryResult,
     embed_query,
 )
-from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase, AnswerSource
-from librarian_evaluation.llm_judge import LLMJudgeError, evaluate_answers_with_llm_judge
 from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
 from librarian_search.opensearch import OpenSearchError
 from librarian_search.search import (
@@ -39,6 +40,14 @@ from librarian_search.search import (
 )
 from librarian_storage.storage import classify_chunk_content, create_ingestion_store
 
+from librarian_chat.generation import (
+    GROUNDED_CHAT_SYNTHESIS_RESPONSE_FORMAT,
+    ChatMessage,
+    GenerationError,
+    Generator,
+    create_configured_generator,
+    create_generator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -420,48 +429,65 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         )
     else:
         synthesis_started = perf_counter()
-        synthesis = _semantic_grounded_synthesis_answer(
-            question,
-            sources,
+        runtime_answer = _run_legacy_answer_runtime(
+            question=question,
+            sources=sources,
             required_sources=required_sources,
             answer_capability=answer_capability,
             generator=generator,
             scope=search_response.filters,
+            database_url=options.database_url,
+            retrieval_backend=retrieval_backend,
         )
         synthesis_generation_seconds = perf_counter() - synthesis_started
-        if synthesis.answer is not None:
-            sources, immediate_answer = synthesis.answer
+        if runtime_answer is not None:
+            runtime_outcome, runtime_sources, runtime_prose = runtime_answer
+            sources = runtime_sources
+            immediate_answer = runtime_prose
+            outcome = runtime_outcome
             grounded_tokens = [immediate_answer]
-        elif synthesis.attempted:
+        else:
+            synthesis = _semantic_grounded_synthesis_answer(
+                question,
+                sources,
+                required_sources=required_sources,
+                answer_capability=answer_capability,
+                generator=generator,
+                scope=search_response.filters,
+            )
+            if synthesis.answer is not None:
+                sources, immediate_answer = synthesis.answer
+                grounded_tokens = [immediate_answer]
+            elif synthesis.attempted:
             # A trusted quality generator is allowed to write prose only when
             # it also returns a valid, scoped evidence selection.  Do not turn
             # an invalid model response into a successful-looking quotation
             # dump: that would obscure the generation failure and contradict
             # the user-facing synthesis contract.
-            sources = []
-            outcome = "generation_unavailable"
-            immediate_answer = _grounded_generation_unavailable_answer()
-        else:
-            grounded_answer = _grounded_extractive_answer(
-                question,
-                sources,
-                required_sources=required_sources,
-            )
-            if grounded_answer is None:
-                # Retrieval candidates without a directly relevant source
-                # sentence are diagnostics, not answer evidence. This applies
-                # to every configured provider and capability: no model may
-                # alter or invent a claim from those chunks.
                 sources = []
-                outcome = "insufficient_evidence"
-                immediate_answer = _insufficient_evidence_answer(
-                    publication_question=publication_question,
-                    required_sources=required_sources,
-                    scope=search_response.filters,
-                )
+                outcome = "generation_unavailable"
+                immediate_answer = _grounded_generation_unavailable_answer()
             else:
-                sources, grounded_tokens = grounded_answer
-                immediate_answer = "\n\n".join(grounded_tokens)
+                grounded_answer = _grounded_extractive_answer(
+                    question,
+                    sources,
+                    required_sources=required_sources,
+                )
+                if grounded_answer is None:
+                    # Retrieval candidates without a directly relevant source
+                    # sentence are diagnostics, not answer evidence. This applies
+                    # to every configured provider and capability: no model may
+                    # alter or invent a claim from those chunks.
+                    sources = []
+                    outcome = "insufficient_evidence"
+                    immediate_answer = _insufficient_evidence_answer(
+                        publication_question=publication_question,
+                        required_sources=required_sources,
+                        scope=search_response.filters,
+                    )
+                else:
+                    sources, grounded_tokens = grounded_answer
+                    immediate_answer = "\n\n".join(grounded_tokens)
     preparation = PreparedChat(
         total_started=total_started,
         question=question,
@@ -484,6 +510,101 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         grounded_tokens=grounded_tokens,
     )
     return preparation
+
+
+def _run_legacy_answer_runtime(
+    *,
+    question: str,
+    sources: list[ChatSource],
+    required_sources: int,
+    answer_capability: str,
+    generator: Generator,
+    scope: dict[str, str],
+    database_url: str | None,
+    retrieval_backend: str,
+) -> tuple[str, list[ChatSource], str] | None:
+    """Run the R1 chat facade through the in-process answer runtime.
+
+    The existing sentence-selection prompt and its strict validator remain an
+    adapter concern.  From this point onward the domain runtime owns the
+    visible result, source freshness check, support review, and one repair
+    budget.  Returning ``None`` retains the R1 extractive path when no trusted
+    semantic selector is configured.
+    """
+
+    selector = _trusted_semantic_selector(
+        answer_capability=answer_capability, generator=generator
+    )
+    if selector is None or _asks_for_publication_metadata(question):
+        return None
+
+    from librarian_answer import AnswerRequest, AnswerRuntime, AnswerScope
+    from librarian_answer_adapters import (
+        LegacySemanticGenerationBroker,
+        LegacySentenceEvidenceRetriever,
+        LegacySupportReviewer,
+    )
+
+    class _Context:
+        def is_cancelled(self) -> bool:
+            return False
+
+        def remaining_seconds(self) -> float | None:
+            return None
+
+    store_factory = lambda: create_ingestion_store(resolve_database_url(database_url))
+    evidence = LegacySentenceEvidenceRetriever(
+        question=question,
+        sources=sources,
+        required_sources=required_sources,
+        store_factory=store_factory,
+        retrieval_backend=retrieval_backend,
+    )
+    candidates = evidence.candidates()
+    if len({candidate.source.chunk_id for candidate in candidates}) < required_sources:
+        return None
+    runtime = AnswerRuntime(
+        evidence_retriever=evidence,
+        generation_broker=LegacySemanticGenerationBroker(
+            generator=selector,
+            question=question,
+            candidates=candidates,
+            required_sources=required_sources,
+        ),
+        support_reviewer=LegacySupportReviewer(selector),
+    )
+    result = asyncio.run(
+        runtime.collect(
+            AnswerRequest(
+                request_id=str(uuid4()),
+                question=question,
+                scope=AnswerScope(
+                    book_id=scope.get("book_id"),
+                    book_title=scope.get("book_title"),
+                    author=scope.get("author"),
+                ),
+                minimum_citation_count=required_sources,
+            ),
+            _Context(),
+        )
+    )
+    if result is None:
+        return None
+    if result.outcome != "answered":
+        if result.outcome == "generation_unavailable":
+            logger.info(
+                "grounded_synthesis_rejected reason=%s",
+                result.error_code or "runtime_validation",
+            )
+            return result.outcome, [], _grounded_generation_unavailable_answer()
+        return result.outcome, [], result.answer
+    selected: list[ChatSource] = []
+    for citation in result.citations:
+        source = evidence.source_for_candidate(citation.candidate_id)
+        if source is not None and source.chunk_id not in {item.chunk_id for item in selected}:
+            selected.append(source)
+    citations = " ".join(f"[{source.source_id}]" for source in selected)
+    return result.outcome, selected, f"{result.answer} {citations}".strip()
 
 
 def answer_question(options: ChatOptions) -> ChatResponse:

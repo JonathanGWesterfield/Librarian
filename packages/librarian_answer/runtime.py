@@ -98,6 +98,7 @@ class AnswerRuntime:
             yield event("completed", {"result": result})
             return
 
+        repair_hint: str | None = None
         for attempt in range(1, _MAX_REPAIR_ATTEMPTS + 2):
             if context.is_cancelled():
                 yield event("cancelled")
@@ -111,6 +112,7 @@ class AnswerRuntime:
                             request.question, eligible, repair=attempt > 1
                         ),
                         response_format="grounded_chat_synthesis",
+                        repair_hint=repair_hint,
                     ),
                     context,
                 )
@@ -131,10 +133,14 @@ class AnswerRuntime:
                 required_sources=required_sources,
             )
             if candidate is None:
-                if attempt <= _MAX_REPAIR_ATTEMPTS:
+                repair_hint = generated.repair_hint
+                if generated.repairable and attempt <= _MAX_REPAIR_ATTEMPTS:
                     continue
                 result = _result(
-                    request, "generation_unavailable", _SAFE_GENERATION_FAILURE
+                    request,
+                    "generation_unavailable",
+                    _SAFE_GENERATION_FAILURE,
+                    error_code=repair_hint,
                 )
                 yield event("completed", {"result": result})
                 return
@@ -163,6 +169,7 @@ class AnswerRuntime:
             except Exception:  # noqa: BLE001 - a review failure consumes the repair budget.
                 review = None
             if review is None or not review.supported:
+                repair_hint = review.reason if review is not None else None
                 if attempt <= _MAX_REPAIR_ATTEMPTS:
                     continue
                 result = _result(
@@ -244,8 +251,11 @@ def _validated_candidate(
 ) -> tuple[str, tuple[AnswerCitation, ...], tuple[EvidenceSnapshot, ...]] | None:
     """Parse and validate untrusted synthesis output before it can be visible."""
 
+    payload_text = body.strip()
+    if payload_text.startswith("```json") and payload_text.endswith("```"):
+        payload_text = payload_text.removeprefix("```json").removesuffix("```").strip()
     try:
-        payload = json.loads(body)
+        payload = json.loads(payload_text)
     except (TypeError, json.JSONDecodeError):
         return None
     if set(payload) != {"answer", "sentence_ids"}:
@@ -283,10 +293,12 @@ def _result(
     outcome: str,
     answer: str,
     citations: Sequence[AnswerCitation] = (),
+    error_code: str | None = None,
 ) -> AnswerResult:
     return AnswerResult(
         request_id=request.request_id,
         outcome=outcome,
         answer=answer,
         citations=tuple(citations),
+        error_code=error_code,
     )
