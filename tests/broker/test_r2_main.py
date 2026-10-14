@@ -62,10 +62,7 @@ class R2BrokerStartupTests(unittest.TestCase):
                 r2_main.load_r2_broker_inputs()
 
     def test_duplicate_role_credentials_are_rejected(self) -> None:
-        with _r2_broker_files() as files:
-            (files.secrets / BROKER_SECRET_NAMES["evaluator"]).write_text(
-                "api-token\n", encoding="utf-8"
-            )
+        with _r2_broker_files({"evaluator": "api-token"}) as files:
             with _patch_paths(files), self.assertRaisesRegex(
                 r2_main.BrokerStartupError, "credential material is invalid"
             ):
@@ -87,6 +84,9 @@ class R2BrokerStartupTests(unittest.TestCase):
 
 
 class _r2_broker_files:
+    def __init__(self, token_overrides: dict[str, str] | None = None) -> None:
+        self._token_overrides = token_overrides or {}
+
     def __enter__(self):
         self._temporary_directory = tempfile.TemporaryDirectory()
         root = Path(self._temporary_directory.name)
@@ -104,7 +104,10 @@ class _r2_broker_files:
         self.secrets.mkdir()
         for role, secret_name in BROKER_SECRET_NAMES.items():
             path = self.secrets / secret_name
-            path.write_text(f"{role}-token\n", encoding="utf-8")
+            path.write_text(
+                f"{self._token_overrides.get(role, f'{role}-token')}\n",
+                encoding="utf-8",
+            )
             path.chmod(0o400)
         self.descriptor = root / "answer_delivery.pb"
         self.descriptor.write_bytes(b"fixture descriptor")
