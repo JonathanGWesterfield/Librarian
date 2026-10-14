@@ -439,7 +439,6 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
             database_url=options.database_url,
             retrieval_backend=retrieval_backend,
         )
-        synthesis_generation_seconds = perf_counter() - synthesis_started
         if runtime_answer is not None:
             runtime_outcome, runtime_sources, runtime_prose = runtime_answer
             sources = runtime_sources
@@ -488,6 +487,10 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
                 else:
                     sources, grounded_tokens = grounded_answer
                     immediate_answer = "\n\n".join(grounded_tokens)
+        # The facade may retain the R1 extractive/semantic fallback when a
+        # snapshot cannot be admitted. Include either path's structured
+        # synthesis work in the public generation timing.
+        synthesis_generation_seconds = perf_counter() - synthesis_started
     preparation = PreparedChat(
         total_started=total_started,
         question=question,
