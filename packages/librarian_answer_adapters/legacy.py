@@ -240,16 +240,7 @@ class LegacySentenceEvidenceRetriever:
             source = candidate.source
             record = self.reload_source(book_id=source.book_id, chunk_id=source.chunk_id)
             if record is None:
-                # Synthetic/host fixture retrieval has no persisted source
-                # store. It remains valid R1 evidence, but production records
-                # always replace this fallback and receive a real revision.
-                record = SourceRecord(
-                    book_id=source.book_id,
-                    chunk_id=source.chunk_id,
-                    source_revision=f"legacy:{source.book_id}:{source.chunk_id}",
-                    text=source.text,
-                    content_type=source.content_type,
-                )
+                continue
             snapshots.append(
                 EvidenceSnapshot.from_source_record(
                     candidate_id=candidate.sentence_id,
@@ -268,23 +259,16 @@ class LegacySentenceEvidenceRetriever:
 
     def reload_source(self, *, book_id: str, chunk_id: str) -> SourceRecord | None:
         try:
-            source = _reload_source(self.store_factory, book_id=book_id, chunk_id=chunk_id)
-        except Exception:  # noqa: BLE001 - the R1 fixture path has no source store.
-            source = None
-        if source is not None:
-            return source
-        original = next(
-            (item for item in self.sources if item.book_id == book_id and item.chunk_id == chunk_id),
-            None,
-        )
-        if original is None:
+            return _reload_source(self.store_factory, book_id=book_id, chunk_id=chunk_id)
+        except Exception:  # noqa: BLE001 - a source-store failure is treated as missing evidence.
             return None
-        return SourceRecord(
-            book_id=original.book_id,
-            chunk_id=original.chunk_id,
-            source_revision=f"legacy:{original.book_id}:{original.chunk_id}",
-            text=original.text,
-            content_type=original.content_type,
+
+    def can_snapshot_all_sources(self) -> bool:
+        """Require persisted source records before choosing the runtime path."""
+
+        return all(
+            self.reload_source(book_id=source.book_id, chunk_id=source.chunk_id) is not None
+            for source in self.sources
         )
 
     def source_for_candidate(self, candidate_id: str) -> ChatSource | None:

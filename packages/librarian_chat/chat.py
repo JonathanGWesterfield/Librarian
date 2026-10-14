@@ -563,6 +563,12 @@ def _run_legacy_answer_runtime(
     candidates = evidence.candidates()
     if len({candidate.source.chunk_id for candidate in candidates}) < required_sources:
         return None
+    if not evidence.can_snapshot_all_sources():
+        # A legacy fixture or source store without a persisted record stays on
+        # the old facade. Runtime admission requires a real source revision so
+        # a later missing record is a source-changed terminal result, never a
+        # silently accepted in-memory replacement.
+        return None
     runtime = AnswerRuntime(
         evidence_retriever=evidence,
         generation_broker=LegacySemanticGenerationBroker(
