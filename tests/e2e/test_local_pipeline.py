@@ -5,7 +5,7 @@ from contextlib import contextmanager, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib import error
+from urllib import error as urlerror
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -33,10 +33,10 @@ from tests.ingestion.fixtures import SAMPLE_EPUB
 try:
     from fastapi.testclient import TestClient
     from librarian_api.main import app
-except (ModuleNotFoundError, RuntimeError) as error:
+except (ModuleNotFoundError, RuntimeError) as import_error:
     TestClient = None
     app = None
-    API_IMPORT_ERROR = error
+    API_IMPORT_ERROR = import_error
 else:
     API_IMPORT_ERROR = None
 
@@ -609,7 +609,7 @@ class _FakeOllamaTransport:
             # This SQLite-only pipeline deliberately has no OpenSearch service.
             # The regular transport failure mirrors an unavailable projection so
             # chat can exercise its configured ``auto`` fallback.
-            raise error.URLError("OpenSearch is unavailable in this fixture")
+            raise urlerror.URLError("OpenSearch is unavailable in this fixture")
         payload = json.loads(http_request.data.decode("utf-8"))
         self.requests.append(
             {
