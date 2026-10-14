@@ -24,6 +24,7 @@ from librarian_answer import (
 from librarian_answer_adapters import (
     LegacyEvidenceRetriever,
     LegacyGenerationBroker,
+    LegacySentenceEvidenceRetriever,
     LegacySupportReviewer,
 )
 from librarian_chat.chat import ChatSource
@@ -176,6 +177,45 @@ class AnswerRuntimeAdapterTests(unittest.TestCase):
         assert generator.messages is not None
         self.assertEqual(generator.messages[0].content, "Question")
         self.assertEqual(generator.response_format, "grounded_chat_synthesis")
+
+    def test_sentence_evidence_marks_deleted_persisted_source_as_changed(self) -> None:
+        """A missing source record can never fall back to indexed in-memory text."""
+
+        store = _Store(_Chunk(text="Mara opens the gate."))
+        source = ChatSource(
+            source_id="S1",
+            score=0.9,
+            chunk_id="chunk-1",
+            book_id="book-1",
+            relative_path="book.epub",
+            title="A Book",
+            authors=["An Author"],
+            chunk_index=0,
+            text="Mara opens the gate.",
+        )
+        adapter = LegacySentenceEvidenceRetriever(
+            question="Who opens the gate?",
+            sources=[source],
+            required_sources=1,
+            store_factory=lambda: store,  # type: ignore[arg-type]
+            retrieval_backend="sqlite",
+        )
+        snapshot = adapter.retrieve(
+            AnswerRequest(request_id="request-1", question="Who opens the gate?"),
+            _Context(),
+        )[0]
+        store.chunk = None
+
+        self.assertIsNone(adapter.reload_source(book_id="book-1", chunk_id="chunk-1"))
+        self.assertFalse(adapter.can_snapshot_all_sources())
+        self.assertFalse(
+            reload_snapshot_source(
+                snapshot,
+                lambda book_id, chunk_id: adapter.reload_source(
+                    book_id=book_id, chunk_id=chunk_id
+                ),
+            ).is_current
+        )
 
     def test_support_review_adapter_uses_r1_enforcing_judge(self) -> None:
         generator = _Generator(response=json.dumps({
