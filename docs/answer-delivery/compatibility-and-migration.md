@@ -96,6 +96,20 @@ health secret. `docker compose config`, a rendered mount/network assertion, and
 an in-container assertion that `/config/secrets` is absent are release gates,
 not documentation-only checks.
 
+Until the atomic caller migration makes R2 the normal launcher, validate the
+R2 overlay with every required profile enabled. This does not alter ordinary R0
+startup, which continues to use `docker-compose.yml` alone:
+
+```sh
+LIBRARIAN_STACK_RELEASE_SHA=<clean-40-character-sha> \
+  docker compose \
+    --profile codex-broker \
+    --profile workers \
+    --profile metadata-workers \
+    --profile evaluation \
+    -f docker-compose.yml -f docker-compose.r2.yml config --format json
+```
+
 Before R2, the launcher creates timestamped local backups of the ignored
 configuration file and role-specific secret files, validates the R2 shape and
 required secret readability, and fails before stopping the current stack if

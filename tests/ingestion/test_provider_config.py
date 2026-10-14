@@ -509,6 +509,54 @@ class LibrarianConfigTests(unittest.TestCase):
                 self.assertNotIn("/run/secrets", runtime_json)
                 self.assertEqual(written_by_role[role], runtime_json)
 
+    def test_r2_resolver_requires_all_role_secret_sources_and_writes_broker_config(self) -> None:
+        """R2 cannot replace R0 with a partial identity or secret topology."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            _write_config(
+                path,
+                generation=_selection("docker_codex_broker", "generation"),
+            )
+            _write_secret_files(root, "docker_ollama", "docker_codex_broker")
+            config = get_librarian_config(path)
+            output_directory = root / "runtime-config"
+
+            with self.assertRaisesRegex(LibrarianConfigError, "credential sources are incomplete"):
+                resolver.write_r2_runtime_configs(output_directory, config)
+
+            _write_r2_broker_secret_files(root)
+            _write_r2_broker_secret_file(
+                root / "secrets" / resolver.BROKER_SECRET_NAMES["evaluator"],
+                "api-secret\n",
+            )
+            with self.assertRaisesRegex(LibrarianConfigError, "must be distinct"):
+                resolver.write_r2_runtime_configs(output_directory, config)
+
+            _write_r2_broker_secret_files(root)
+            rendered = resolver.render_r2_runtime_configs(config)
+            written_paths = resolver.write_r2_runtime_configs(output_directory, config)
+
+        self.assertEqual(
+            {path.parent.name for path in written_paths},
+            {*resolver.CLIENT_CREDENTIAL_ROLES, "codex-broker"},
+        )
+        self.assertEqual(
+            json.loads(rendered["codex-broker"]),
+            {
+                "version": 1,
+                "generation": {
+                    "model": "gpt-5.6-sol",
+                    "answer_capability": "quality",
+                },
+            },
+        )
+        for service, runtime_json in rendered.items():
+            with self.subTest(service=service):
+                self.assertNotIn("generation-secret", runtime_json)
+                self.assertNotIn("api_key_file", runtime_json)
+                self.assertNotIn("/run/secrets", runtime_json)
+
     def test_resolver_does_not_generate_broker_files_for_non_broker_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -587,6 +635,23 @@ def _write_secret_files(root: Path, embedding_mode: str, generation_mode: str) -
         (secrets / "embedding.token").write_text("embedding-secret\n", encoding="utf-8")
     if generation_mode in {"openai_compatible", "docker_codex_broker"}:
         (secrets / "generation.token").write_text("generation-secret\n", encoding="utf-8")
+
+
+def _write_r2_broker_secret_files(root: Path) -> None:
+    secrets = root / "secrets"
+    secrets.mkdir(exist_ok=True)
+    for role in resolver.R2_BROKER_SECRET_ROLES:
+        path = secrets / resolver.BROKER_SECRET_NAMES[role]
+        _write_r2_broker_secret_file(path, f"{role}-secret\n")
+
+
+def _write_r2_broker_secret_file(path: Path, content: str) -> None:
+    """Rewrite a fixture secret and restore the Compose-like read-only mode."""
+
+    if path.exists():
+        path.chmod(0o600)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o400)
 
 
 if __name__ == "__main__":
