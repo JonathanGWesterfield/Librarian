@@ -6,10 +6,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from librarian_answer.models import (
-    AnswerCitation,
+    MAX_EVIDENCE_CANDIDATES,
+    MAX_EVIDENCE_SNAPSHOT_BYTES,
     AnswerRequest,
     EvidenceSnapshot,
-    GenerationMessage,
     GenerationRequest,
     GenerationResult,
     SourceRecord,
@@ -19,10 +19,13 @@ from librarian_answer.models import (
 from librarian_answer.ports import RequestContext
 from librarian_chat.chat import ChatSource, SynthesisSupportJudge
 from librarian_chat.generation import ChatMessage, Generator
-from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase, AnswerSource
+from librarian_evaluation.answer import (
+    AnswerCandidate,
+    AnswerEvaluationCase,
+    AnswerSource,
+)
 from librarian_evaluation.llm_judge import evaluate_answers_with_llm_judge
 from librarian_storage.storage import IngestionStore
-
 
 LegacySourceRetriever = Callable[[AnswerRequest], Sequence[ChatSource]]
 IngestionStoreFactory = Callable[[], IngestionStore]
@@ -51,10 +54,17 @@ class LegacyEvidenceRetriever:
             if value
         }
         snapshots: list[EvidenceSnapshot] = []
+        snapshot_bytes = 0
         for source in self.retrieve_sources(request):
             record = self.reload_source(book_id=source.book_id, chunk_id=source.chunk_id)
             if record is None:
                 continue
+            if len(snapshots) >= MAX_EVIDENCE_CANDIDATES:
+                raise ValueError("retrieval exceeded the 32-candidate evidence limit")
+            excerpt = _bounded_excerpt(source.text)
+            excerpt_bytes = len(excerpt.encode("utf-8"))
+            if snapshot_bytes + excerpt_bytes > MAX_EVIDENCE_SNAPSHOT_BYTES:
+                raise ValueError("retrieval exceeded the 256 KiB evidence snapshot limit")
             retrieved = SourceRecord(
                 book_id=source.book_id,
                 chunk_id=source.chunk_id,
@@ -73,10 +83,11 @@ class LegacyEvidenceRetriever:
                         "legacy_source_id": source.source_id,
                         "relative_path": source.relative_path,
                     },
-                    excerpt=_bounded_excerpt(source.text),
+                    excerpt=excerpt,
                     book_title=source.title,
                 )
             )
+            snapshot_bytes += excerpt_bytes
         return tuple(snapshots)
 
     def reload_source(self, *, book_id: str, chunk_id: str) -> SourceRecord | None:
