@@ -5,6 +5,7 @@ from librarian_answer_adapters.grpc_broker import (
     GrpcBrokerClientError,
     GrpcRuntimeGenerationBroker,
 )
+from librarian_answer_adapters.grpc_chat import GrpcChatOperations
 from librarian_answer_adapters.legacy import (
     LegacyEvidenceRetriever,
     LegacyGenerationBroker,
@@ -17,6 +18,7 @@ __all__ = [
     "GeneratedGrpcBrokerClient",
     "GrpcBrokerClientError",
     "GrpcRuntimeGenerationBroker",
+    "GrpcChatOperations",
     "LegacyEvidenceRetriever",
     "LegacyGenerationBroker",
     "LegacySemanticGenerationBroker",
