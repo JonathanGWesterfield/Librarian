@@ -7,6 +7,9 @@ at the composition boundary.
 
 from librarian_answer.models import (
     ANSWER_EVENT_SCHEMA_VERSION,
+    MAX_EVIDENCE_CANDIDATES,
+    MAX_EVIDENCE_EXCERPT_BYTES,
+    MAX_EVIDENCE_SNAPSHOT_BYTES,
     AnswerCitation,
     AnswerEvent,
     AnswerRequest,
@@ -35,6 +38,9 @@ from librarian_answer.snapshots import (
 
 __all__ = [
     "ANSWER_EVENT_SCHEMA_VERSION",
+    "MAX_EVIDENCE_CANDIDATES",
+    "MAX_EVIDENCE_EXCERPT_BYTES",
+    "MAX_EVIDENCE_SNAPSHOT_BYTES",
     "AnswerCitation",
     "AnswerEvent",
     "AnswerRequest",
@@ -47,12 +53,12 @@ __all__ = [
     "GenerationRequest",
     "GenerationResult",
     "RequestContext",
+    "SourceFreshness",
     "SourceRecord",
-    "SupportReviewer",
+    "SourceReloadResult",
     "SupportReviewRequest",
     "SupportReviewResult",
-    "SourceFreshness",
-    "SourceReloadResult",
+    "SupportReviewer",
     "reload_citation_sources",
     "reload_snapshot_source",
 ]

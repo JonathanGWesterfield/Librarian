@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 import sys
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
-from librarian_answer import (  # noqa: E402
+from librarian_answer import (
+    MAX_EVIDENCE_CANDIDATES,
+    MAX_EVIDENCE_EXCERPT_BYTES,
     AnswerCitation,
     AnswerRequest,
     EvidenceSnapshot,
@@ -19,12 +21,12 @@ from librarian_answer import (  # noqa: E402
     SupportReviewRequest,
     reload_snapshot_source,
 )
-from librarian_answer.adapters import (  # noqa: E402
+from librarian_answer_adapters import (
     LegacyEvidenceRetriever,
     LegacyGenerationBroker,
     LegacySupportReviewer,
 )
-from librarian_chat.chat import ChatSource  # noqa: E402
+from librarian_chat.chat import ChatSource
 
 
 @dataclass
@@ -114,6 +116,49 @@ class AnswerRuntimeAdapterTests(unittest.TestCase):
                 text="Current source text.",
             )).is_current
         )
+
+    def test_retrieval_adapter_enforces_runtime_snapshot_limits(self) -> None:
+        source = ChatSource(
+            source_id="S1",
+            score=0.9,
+            chunk_id="chunk-1",
+            book_id="book-1",
+            relative_path="book.epub",
+            title="A Book",
+            authors=["An Author"],
+            chunk_index=0,
+            text="x" * MAX_EVIDENCE_EXCERPT_BYTES,
+        )
+        adapter = LegacyEvidenceRetriever(
+            retrieve_sources=lambda _request: [
+                replace(source, source_id=f"S{index}")
+                for index in range(MAX_EVIDENCE_CANDIDATES)
+            ],
+            store_factory=lambda: _Store(_Chunk(text=source.text)),  # type: ignore[arg-type]
+            retrieval_backend="sqlite",
+        )
+        snapshots = adapter.retrieve(
+            AnswerRequest(request_id="request-1", question="What happened?"), _Context()
+        )
+        self.assertEqual(len(snapshots), MAX_EVIDENCE_CANDIDATES)
+        self.assertEqual(
+            sum(len(snapshot.excerpt.encode("utf-8")) for snapshot in snapshots),
+            MAX_EVIDENCE_CANDIDATES * MAX_EVIDENCE_EXCERPT_BYTES,
+        )
+
+        oversized = LegacyEvidenceRetriever(
+            retrieve_sources=lambda _request: [
+                replace(source, source_id=f"S{index}")
+                for index in range(MAX_EVIDENCE_CANDIDATES + 1)
+            ],
+            store_factory=lambda: _Store(_Chunk(text=source.text)),  # type: ignore[arg-type]
+            retrieval_backend="sqlite",
+        )
+        with self.assertRaisesRegex(ValueError, "32-candidate"):
+            oversized.retrieve(
+                AnswerRequest(request_id="request-1", question="What happened?"),
+                _Context(),
+            )
 
     def test_generation_adapter_preserves_legacy_generator_contract(self) -> None:
         generator = _Generator(response="generated")

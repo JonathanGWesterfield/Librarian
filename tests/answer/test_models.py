@@ -5,14 +5,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
-from librarian_answer import (  # noqa: E402
+from librarian_answer import (
     ANSWER_EVENT_SCHEMA_VERSION,
     AnswerEvent,
     AnswerRequest,
     AnswerScope,
     EvidenceSnapshot,
-    SourceRecord,
     SourceFreshness,
+    SourceRecord,
     reload_citation_sources,
     reload_snapshot_source,
 )
@@ -126,7 +126,17 @@ class AnswerRuntimeModelTests(unittest.TestCase):
                 text="Original body text.",
             ),
         )
+        changed_chunk = reload_snapshot_source(
+            snapshot,
+            lambda _book_id, _chunk_id: SourceRecord(
+                book_id="book-1",
+                chunk_id="replacement-chunk",
+                source_revision="revision-1",
+                text="Original body text.",
+            ),
+        )
 
         self.assertTrue(current.is_current)
         self.assertEqual(changed_content.status, SourceFreshness.SOURCE_CHANGED)
         self.assertEqual(changed_revision, SourceFreshness.SOURCE_CHANGED)
+        self.assertEqual(changed_chunk.status, SourceFreshness.SOURCE_CHANGED)

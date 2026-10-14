@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Optional
 
 from librarian_answer.models import EvidenceSnapshot, SourceRecord
 
@@ -26,7 +26,7 @@ class SourceReloadResult:
         return self.status is SourceFreshness.CURRENT
 
 
-SourceReloader = Callable[[str, str], Optional[SourceRecord]]
+SourceReloader = Callable[[str, str], SourceRecord | None]
 
 
 def reload_snapshot_source(
@@ -41,7 +41,11 @@ def reload_snapshot_source(
     """
 
     source = reloader(snapshot.book_id, snapshot.chunk_id)
-    if source is None or source.book_id != snapshot.book_id:
+    if (
+        source is None
+        or source.book_id != snapshot.book_id
+        or source.chunk_id != snapshot.chunk_id
+    ):
         return SourceReloadResult(SourceFreshness.SOURCE_CHANGED)
     if (
         source.source_revision != snapshot.source_revision

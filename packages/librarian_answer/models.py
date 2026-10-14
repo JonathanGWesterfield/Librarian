@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
 from types import MappingProxyType
-from typing import Mapping
-
 
 ANSWER_EVENT_SCHEMA_VERSION = "v1"
 MAX_EVIDENCE_EXCERPT_BYTES = 8 * 1024
