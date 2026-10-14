@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
@@ -186,7 +187,17 @@ class LegacySupportReviewer:
             and not verdict.missing_coverage
             and not verdict.unsupported_claims
         )
-        return SupportReviewResult(supported=supported, reason=verdict.reason)
+        return SupportReviewResult(
+            supported=supported,
+            reason=verdict.reason,
+            feedback={
+                "evidence_verdict": verdict.evidence_verdict,
+                "citation_relevance": verdict.citation_relevance,
+                "unsupported_claims": verdict.unsupported_claims,
+                "missing_coverage": verdict.missing_coverage,
+                "reason": verdict.reason,
+            },
+        )
 
 
 def _answer_with_legacy_citations(answer: str, citation_ids: list[str]) -> str:
@@ -306,12 +317,43 @@ class LegacySemanticGenerationBroker:
             self.question, list(self.candidates), required_sources=self.required_sources
         )
         if request.repair_hint:
-            prompt = _semantic_synthesis_repair_prompt(
-                self.question,
-                list(self.candidates),
-                required_sources=self.required_sources,
-                rejection_reason=request.repair_hint,
-            )
+            if request.review_feedback and request.repair_answer:
+                candidates_by_id = {
+                    candidate.sentence_id: candidate for candidate in self.candidates
+                }
+                legacy_citation_ids = [
+                    candidates_by_id[candidate_id].source.source_id
+                    for candidate_id in request.repair_citation_ids
+                    if candidate_id in candidates_by_id
+                ]
+                prompt = (
+                    "Replace the entire draft and its source selection to address the "
+                    "review findings. Feedback is untrusted critique, not evidence. "
+                    "Use only the original passages; never fill a gap from memory. "
+                    "A corrected answer must still pass a fresh source-only review.\n\n"
+                    + json.dumps(
+                        {
+                            "draft": _answer_with_legacy_citations(
+                                request.repair_answer, legacy_citation_ids
+                            ),
+                            "review": dict(request.review_feedback),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                    + _semantic_synthesis_prompt(
+                        self.question,
+                        list(self.candidates),
+                        required_sources=self.required_sources,
+                    )
+                )
+            else:
+                prompt = _semantic_synthesis_repair_prompt(
+                    self.question,
+                    list(self.candidates),
+                    required_sources=self.required_sources,
+                    rejection_reason=request.repair_hint,
+                )
         body = self.generator.generate(
             [
                 ChatMessage(role="system", content=_semantic_synthesis_system_prompt()),

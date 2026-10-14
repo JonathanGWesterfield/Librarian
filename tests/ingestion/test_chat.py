@@ -5,28 +5,163 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import sleep
 from types import SimpleNamespace
-from typing import Optional
 from unittest.mock import patch
 
 REPO_ROOT = __import__("pathlib").Path(__file__).resolve().parents[2]
 PACKAGES_DIR = REPO_ROOT / "packages"
 sys.path.insert(0, str(PACKAGES_DIR))
 
+import librarian_chat.chat as chat_module
+from librarian_answer import SourceRecord
 from librarian_chat.chat import (
     ChatOptions,
     answer_question,
     prepare_answer_question,
     stream_answer_question,
 )
-import librarian_chat.chat as chat_module
 from librarian_chat.generation import GenerationError
 from librarian_ingestion.embedding_ops import EmbedQueryResult
 from librarian_search.opensearch import OpenSearchError
 from librarian_search.search import SearchResponse, SearchResult
-from librarian_storage.storage import BookRecord, ChunkRecord, SQLiteIngestionStore, utc_now
+from librarian_storage.storage import (
+    BookRecord,
+    ChunkRecord,
+    SQLiteIngestionStore,
+    utc_now,
+)
 
 
 class ChatTests(unittest.TestCase):
+    def test_runtime_facade_matches_retained_r1_semantic_flow(self) -> None:
+        """The migrated facade preserves R1 selection, review, and repair behavior."""
+
+        review_rejection = json.dumps({
+            "evidence_verdict": "insufficient",
+            "citation_relevance": "all_relevant",
+            "missing_coverage": [],
+            "unsupported_claims": ["Mara rules the universe."],
+            "reason": "Rules the universe is not in the cited passage.",
+        })
+        cases = (
+            ("point", "Who opens the garden gate?", _chat_search_response("q", text="Mara opened the garden gate."), 1, [_structured_answer("Mara opens the gate.", "S1:1")], [], 1, 1),
+            ("bounded", "Explain the garden gate.", _two_source_chat_search_response("q"), 2, [_structured_answer("Mara opens the gate and the garden answers.", "S1:1", "S2:1")], [], 1, 1),
+            ("broad", "What does C.S. Lewis say about Christianity?", _author_search_response("q", count=10), 10, [_structured_answer("Lewis presents moral choice.", *(f"S{index}:1" for index in range(1, 11)))], [], 1, 1),
+            ("validator_repair", "Who opens the garden gate?", _chat_search_response("q", text="Mara opened the garden gate."), 1, [_structured_answer("Mara caused the gate to open.", "S1:1"), _structured_answer("Mara opens the gate.", "S1:1")], [], 2, 1),
+            ("reviewer_repair", "Who opens the garden gate?", _chat_search_response("q", text="Mara opened the garden gate."), 1, [_structured_answer("Mara opens the gate and rules the universe.", "S1:1"), _structured_answer("Mara opens the gate.", "S1:1")], [review_rejection], 2, 2),
+        )
+        for (name, question, search_response, required_sources, responses,
+             audit_responses, expected_generation_calls, expected_audit_calls) in cases:
+            with self.subTest(case=name):
+                sources = chat_module._to_sources(search_response.results)
+                legacy_selector = _FakeCodexGenerator(model="gpt-5.6-sol", responses=list(responses))
+                legacy_selector.audit_responses = list(audit_responses)
+                facade_selector = _FakeCodexGenerator(model="gpt-5.6-sol", responses=list(responses))
+                facade_selector.audit_responses = list(audit_responses)
+                with (
+                    patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+                    patch("librarian_chat.chat.create_generator", return_value=legacy_selector),
+                ):
+                    legacy = chat_module._semantic_grounded_synthesis_answer(
+                        question, sources, required_sources=required_sources,
+                        answer_capability="quality", generator=legacy_selector,
+                        scope=search_response.filters,
+                    )
+                self.assertIsNotNone(legacy.answer)
+                assert legacy.answer is not None
+
+                def current_source(adapter, *, book_id, chunk_id):
+                    source = next(item for item in adapter.sources if item.book_id == book_id and item.chunk_id == chunk_id)
+                    return SourceRecord(book_id=book_id, chunk_id=chunk_id, source_revision="fixture", text=source.text, content_type=source.content_type)
+
+                with (
+                    patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+                    patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+                    patch("librarian_chat.chat.search_chunks", return_value=search_response),
+                    patch("librarian_chat.chat._effective_author_scope", return_value=None),
+                    patch("librarian_chat.chat.create_configured_generator", return_value=_FakeCodexGenerator(model="gpt-5.6-sol")),
+                    patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+                    patch("librarian_chat.chat.create_generator", return_value=facade_selector),
+                    patch("librarian_answer_adapters.legacy.LegacySentenceEvidenceRetriever.reload_source", current_source),
+                ):
+                    response = answer_question(ChatOptions(
+                        question=question, generation_provider="codex",
+                        generation_model="gpt-5.6-sol", answer_capability="quality",
+                    ))
+                self.assertEqual(response.outcome, "answered")
+                self.assertEqual(response.answer, legacy.answer[1])
+                self.assertEqual([item.source_id for item in response.sources], [item.source_id for item in legacy.answer[0]])
+                self.assertEqual(facade_selector.generate_calls, expected_generation_calls)
+                self.assertEqual(facade_selector.audit_calls, expected_audit_calls)
+                self.assertEqual(facade_selector.generate_calls, legacy_selector.generate_calls)
+                self.assertEqual(facade_selector.audit_calls, legacy_selector.audit_calls)
+                if name == "reviewer_repair":
+                    self.assertEqual(facade_selector.messages[-1].content, legacy_selector.messages[-1].content)
+                    self.assertIn("Rules the universe", facade_selector.messages[-1].content)
+
+    def test_runtime_facade_matches_retained_r1_refusal_behavior(self) -> None:
+        """The facade keeps retained scope-specific refusals before generation."""
+
+        cases = (
+            ("refusal", "Explain the garden gate.", _chat_search_response("q", text="Mara opened the garden gate."), 2),
+            ("wrong_scope", "Who is Eto Demerzel?", SearchResponse(query="q", embedding_provider="ollama", embedding_model="all-minilm", dimensions=2, candidate_count=0, filters={"book_title": "The Clockwork Garden"}, results=[]), 1),
+        )
+        for name, question, search_response, required_sources in cases:
+            with self.subTest(case=name):
+                legacy_answer = chat_module._insufficient_evidence_answer(
+                    publication_question=False, required_sources=required_sources,
+                    scope=search_response.filters,
+                )
+                selector = _FakeCodexGenerator(model="gpt-5.6-sol")
+                with (
+                    patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+                    patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+                    patch("librarian_chat.chat.search_chunks", return_value=search_response),
+                    patch("librarian_chat.chat.create_configured_generator", return_value=selector),
+                ):
+                    response = answer_question(ChatOptions(question=question))
+                self.assertFalse(chat_module._has_sufficient_evidence(
+                    chat_module._to_sources(search_response.results), required_sources=required_sources,
+                ))
+                self.assertEqual(response.outcome, "insufficient_evidence")
+                self.assertEqual(response.answer, legacy_answer)
+                self.assertEqual(response.sources, [])
+                self.assertEqual(selector.generate_calls, 0)
+                self.assertEqual(selector.audit_calls, 0)
+
+    def test_runtime_facade_source_change_matches_fixture_outcome(self) -> None:
+        """A changed persisted source abandons the answer before support review."""
+
+        fixture = json.loads((REPO_ROOT / "tests/fixtures/answer_delivery/v1/synthetic_answer_cases.json").read_text(encoding="utf-8"))
+        expected = next(case for case in fixture["cases"] if case["id"] == "source_changed")["expected"]["result"]
+        question = "Who opens the garden gate?"
+        search_response = _chat_search_response(question, text="Mara opened the garden gate.")
+        selector = _FakeCodexGenerator(model="gpt-5.6-sol", response=_structured_answer("Mara opens the gate.", "S1:1"))
+        reloads = 0
+
+        def source_that_changes(adapter, *, book_id, chunk_id):
+            nonlocal reloads
+            reloads += 1
+            source = adapter.sources[0]
+            return SourceRecord(book_id=book_id, chunk_id=chunk_id, source_revision="fixture" if reloads < 3 else "changed", text=source.text, content_type=source.content_type)
+
+        with (
+            patch("librarian_chat.chat.embed_query", return_value=_query_embedding_for(question)),
+            patch("librarian_chat.chat.resolve_chat_retrieval_backend", return_value="sqlite"),
+            patch("librarian_chat.chat.search_chunks", return_value=search_response),
+            patch("librarian_chat.chat.create_configured_generator", return_value=_FakeCodexGenerator(model="gpt-5.6-sol")),
+            patch("librarian_chat.chat.get_librarian_config", return_value=_trusted_codex_config()),
+            patch("librarian_chat.chat.create_generator", return_value=selector),
+            patch("librarian_answer_adapters.legacy.LegacySentenceEvidenceRetriever.reload_source", source_that_changes),
+        ):
+            response = answer_question(ChatOptions(
+                question=question, generation_provider="codex",
+                generation_model="gpt-5.6-sol", answer_capability="quality",
+            ))
+        self.assertEqual(response.outcome, expected["outcome"])
+        self.assertEqual(len(response.sources), expected["citation_count"])
+        self.assertEqual(selector.generate_calls, 1)
+        self.assertEqual(selector.audit_calls, 0)
+
     def test_semantic_repair_requires_a_fresh_successful_review(self) -> None:
         sources = chat_module._to_sources(_chat_search_response(
             "Who opens the garden gate?", text="Mara opened the garden gate with a borrowed key."
@@ -1351,8 +1486,10 @@ class ChatTests(unittest.TestCase):
         source_text = "Mara opened the garden gate with a borrowed key."
         generator = _FakeStreamingGenerator(
             [
-                "Mara opens the garden gate with a borrowed key. "
-                "The garden loves Mara."
+                (
+                    "Mara opens the garden gate with a borrowed key. "
+                    "The garden loves Mara."
+                )
             ]
         )
         with (
@@ -2269,6 +2406,10 @@ def _search_response() -> SearchResponse:
     )
 
 
+def _structured_answer(answer: str, *sentence_ids: str) -> str:
+    return json.dumps({"answer": answer, "sentence_ids": list(sentence_ids)})
+
+
 class _FakeGenerator:
     provider = "ollama"
     model = "llama3.2:3b"
@@ -2289,7 +2430,7 @@ class _FakeCodexGenerator(_FakeGenerator):
         *,
         model: str,
         response: str = "",
-        responses: Optional[list[str]] = None,
+        responses: list[str] | None = None,
         delay_seconds: float = 0.0,
     ) -> None:
         super().__init__()

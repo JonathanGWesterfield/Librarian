@@ -99,6 +99,9 @@ class AnswerRuntime:
             return
 
         repair_hint: str | None = None
+        repair_answer: str | None = None
+        repair_citation_ids: tuple[str, ...] = ()
+        review_feedback: Mapping[str, object] = {}
         for attempt in range(1, _MAX_REPAIR_ATTEMPTS + 2):
             if context.is_cancelled():
                 yield event("cancelled")
@@ -113,6 +116,9 @@ class AnswerRuntime:
                         ),
                         response_format="grounded_chat_synthesis",
                         repair_hint=repair_hint,
+                        repair_answer=repair_answer,
+                        repair_citation_ids=repair_citation_ids,
+                        review_feedback=review_feedback,
                     ),
                     context,
                 )
@@ -134,6 +140,9 @@ class AnswerRuntime:
             )
             if candidate is None:
                 repair_hint = generated.repair_hint
+                repair_answer = None
+                repair_citation_ids = ()
+                review_feedback = {}
                 if generated.repairable and attempt <= _MAX_REPAIR_ATTEMPTS:
                     continue
                 result = _result(
@@ -170,6 +179,9 @@ class AnswerRuntime:
                 review = None
             if review is None or not review.supported:
                 repair_hint = review.reason if review is not None else None
+                repair_answer = answer
+                repair_citation_ids = tuple(item.candidate_id for item in citations)
+                review_feedback = review.feedback if review is not None else {}
                 if attempt <= _MAX_REPAIR_ATTEMPTS:
                     continue
                 result = _result(
