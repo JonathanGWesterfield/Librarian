@@ -1,8 +1,8 @@
 """Authenticated gRPC control-plane foundation for the Codex broker.
 
 This module intentionally coexists with the R0 HTTP application while M03 is
-being built.  It exposes only Health and GetCapabilities here; provider
-execution is added behind the same service in the next slice.
+being built. Its generated-stub service exposes Health, GetCapabilities, and
+the bounded unary Generate path without changing existing HTTP callers.
 """
 
 from __future__ import annotations
@@ -100,6 +100,13 @@ class GenerationBrokerService(delivery_grpc.GenerationBrokerServicer):
                 delivery_pb2.CALLER_DENIED,
                 request_id,
             )
+        if not request_id:
+            await _abort(
+                context,
+                grpc.StatusCode.INVALID_ARGUMENT,
+                delivery_pb2.REQUEST_LIMIT_EXCEEDED,
+                request_id,
+            )
         if not _has_exact_value(metadata, _STACK_RELEASE_HEADER, request.stack_release_sha):
             await _abort(
                 context,
@@ -140,6 +147,13 @@ class GenerationBrokerService(delivery_grpc.GenerationBrokerServicer):
                 context,
                 grpc.StatusCode.UNAUTHENTICATED,
                 delivery_pb2.CALLER_DENIED,
+                request_id,
+            )
+        if not _has_exact_value(metadata, _REQUEST_ID_HEADER, request.request_id):
+            await _abort(
+                context,
+                grpc.StatusCode.INVALID_ARGUMENT,
+                delivery_pb2.REQUEST_LIMIT_EXCEEDED,
                 request_id,
             )
         if not _has_exact_value(

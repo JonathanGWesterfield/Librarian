@@ -63,10 +63,16 @@ class GrpcBrokerServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.channel.close()
         await self.server.stop(0)
 
-    def _metadata(self, token: str, *, release: str | None = None):
+    def _metadata(
+        self,
+        token: str,
+        *,
+        release: str | None = None,
+        request_id: str = "10000000-0000-4000-8000-000000000001",
+    ):
         return (
             ("authorization", f"Bearer {token}"),
-            ("x-librarian-request-id", "10000000-0000-4000-8000-000000000001"),
+            ("x-librarian-request-id", request_id),
             ("x-librarian-stack-release", release or self.contract.stack_release_sha),
         )
 
@@ -129,6 +135,13 @@ class GrpcBrokerServiceTests(unittest.IsolatedAsyncioTestCase):
                 grpc.StatusCode.FAILED_PRECONDITION,
                 delivery_pb2.CONTRACT_MISMATCH,
             ),
+            (
+                "invalid request metadata",
+                self._metadata("api-token", request_id="not-a-uuid"),
+                self._request(),
+                grpc.StatusCode.INVALID_ARGUMENT,
+                delivery_pb2.REQUEST_LIMIT_EXCEEDED,
+            ),
         )
         for name, metadata, request, expected_status, expected_code in cases:
             with self.subTest(name=name):
@@ -171,6 +184,7 @@ class GrpcBrokerServiceTests(unittest.IsolatedAsyncioTestCase):
             operation=delivery_pb2.TAG_GENERATION,
             output_contract=delivery_pb2.TAGS_JSON_V1,
         )
+        mismatched_metadata = self._generate_request()
         for request, expected_status, expected_code in (
             (
                 invalid,
@@ -194,6 +208,15 @@ class GrpcBrokerServiceTests(unittest.IsolatedAsyncioTestCase):
                 detail = delivery_pb2.ErrorDetail()
                 self.assertTrue(status.details[0].Unpack(detail))
                 self.assertEqual(detail.code, expected_code)
+        with self.assertRaises(grpc.aio.AioRpcError) as raised:
+            await self.stub.Generate(
+                mismatched_metadata,
+                metadata=self._metadata(
+                    "api-token",
+                    request_id="10000000-0000-4000-8000-000000000099",
+                ),
+            )
+        self.assertEqual(raised.exception.code(), grpc.StatusCode.INVALID_ARGUMENT)
         self.assertEqual(self.provider.calls, 1)
 
 

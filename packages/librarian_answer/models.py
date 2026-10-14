@@ -177,6 +177,8 @@ class GenerationMessage:
 class GenerationRequest:
     operation: str
     messages: tuple[GenerationMessage, ...]
+    request_id: str = ""
+    evidence_snapshot: tuple[EvidenceSnapshot, ...] = ()
     response_format: str | None = None
     repair_hint: str | None = None
     repair_answer: str | None = None
@@ -185,6 +187,7 @@ class GenerationRequest:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))
+        object.__setattr__(self, "evidence_snapshot", tuple(self.evidence_snapshot))
         object.__setattr__(self, "repair_citation_ids", tuple(self.repair_citation_ids))
         object.__setattr__(self, "review_feedback", _immutable_object_mapping(self.review_feedback))
 

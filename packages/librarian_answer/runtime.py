@@ -114,6 +114,8 @@ class AnswerRuntime:
                         messages=_synthesis_messages(
                             request.question, eligible, repair=attempt > 1
                         ),
+                        request_id=request.request_id,
+                        evidence_snapshot=tuple(eligible),
                         response_format="grounded_chat_synthesis",
                         repair_hint=repair_hint,
                         repair_answer=repair_answer,
