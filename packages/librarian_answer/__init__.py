@@ -1,9 +1,4 @@
-"""In-process domain contracts for Librarian answer delivery.
-
-The runtime is deliberately independent of HTTP, FastAPI, storage, search, and
-provider implementations.  M02 adapters translate those implementation types
-at the composition boundary.
-"""
+"""In-process domain contracts for Librarian answer delivery."""
 
 from librarian_answer.models import (
     ANSWER_EVENT_SCHEMA_VERSION,
@@ -29,6 +24,7 @@ from librarian_answer.ports import (
     RequestContext,
     SupportReviewer,
 )
+from librarian_answer.runtime import AnswerRuntime
 from librarian_answer.snapshots import (
     SourceFreshness,
     SourceReloadResult,
@@ -45,6 +41,7 @@ __all__ = [
     "AnswerEvent",
     "AnswerRequest",
     "AnswerResult",
+    "AnswerRuntime",
     "AnswerScope",
     "EvidenceRetriever",
     "EvidenceSnapshot",

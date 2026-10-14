@@ -106,12 +106,15 @@ class AnswerRequest:
     question: str
     scope: AnswerScope = field(default_factory=AnswerScope)
     evidence_snapshot: tuple[EvidenceSnapshot, ...] = ()
+    minimum_citation_count: int = 1
 
     def __post_init__(self) -> None:
         if not self.request_id:
             raise ValueError("answer request requires a request ID")
         if not self.question.strip():
             raise ValueError("answer request question must not be empty")
+        if self.minimum_citation_count < 1 or self.minimum_citation_count > MAX_EVIDENCE_CANDIDATES:
+            raise ValueError("answer request minimum citation count must be between 1 and 32")
         snapshots = tuple(self.evidence_snapshot)
         if len(snapshots) > MAX_EVIDENCE_CANDIDATES:
             raise ValueError("answer request exceeds the 32-candidate evidence limit")
