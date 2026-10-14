@@ -84,6 +84,7 @@ class StoredChunkRecord:
     token_estimate: int
     chapter_title: Optional[str]
     content_type: str
+    source_revision: str
 
 
 @dataclass(frozen=True)
@@ -427,6 +428,11 @@ class IngestionStore(Protocol):
     def list_chunks(
         self, *, limit: int = 500, offset: int = 0, chunk_ids: list[str] | None = None
     ) -> list[StoredChunkRecord]:
+        ...
+
+    def get_source_chunk(
+        self, *, book_id: str, chunk_id: str
+    ) -> StoredChunkRecord | None:
         ...
 
     def list_embeddings(
@@ -947,15 +953,17 @@ class SQLiteIngestionStore:
         if chunk_ids == []:
             return []
         where = "" if chunk_ids is None else (
-            "WHERE id IN (" + ",".join("?" for _ in chunk_ids) + ")"
+            "WHERE chunks.id IN (" + ",".join("?" for _ in chunk_ids) + ")"
         )
         limit = max(1, min(limit, 1000))
         offset = max(0, offset)
         rows = self._connection.execute(
             f"""
-            SELECT id, book_id, chunk_index, text, character_count,
-                   token_estimate, chapter_title, content_type
+            SELECT chunks.id, chunks.book_id, chunks.chunk_index, chunks.text,
+                   chunks.character_count, chunks.token_estimate,
+                   chunks.chapter_title, chunks.content_type, books.file_hash
             FROM chunks
+            JOIN books ON books.id = chunks.book_id
             {where}
             ORDER BY book_id ASC, chunk_index ASC
             LIMIT ? OFFSET ?
@@ -972,9 +980,38 @@ class SQLiteIngestionStore:
                 token_estimate=row[5],
                 chapter_title=row[6],
                 content_type=row[7],
+                source_revision=row[8],
             )
             for row in rows
         ]
+
+    def get_source_chunk(
+        self, *, book_id: str, chunk_id: str
+    ) -> StoredChunkRecord | None:
+        row = self._connection.execute(
+            """
+            SELECT chunks.id, chunks.book_id, chunks.chunk_index, chunks.text,
+                   chunks.character_count, chunks.token_estimate,
+                   chunks.chapter_title, chunks.content_type, books.file_hash
+            FROM chunks
+            JOIN books ON books.id = chunks.book_id
+            WHERE chunks.book_id = ? AND chunks.id = ?
+            """,
+            (book_id, chunk_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return StoredChunkRecord(
+            id=row[0],
+            book_id=row[1],
+            chunk_index=row[2],
+            text=row[3],
+            character_count=row[4],
+            token_estimate=row[5],
+            chapter_title=row[6],
+            content_type=row[7],
+            source_revision=row[8],
+        )
 
     def list_embeddings(
         self,

@@ -26,6 +26,12 @@ from librarian_answer.ports import (
     RequestContext,
     SupportReviewer,
 )
+from librarian_answer.snapshots import (
+    SourceFreshness,
+    SourceReloadResult,
+    reload_citation_sources,
+    reload_snapshot_source,
+)
 
 __all__ = [
     "ANSWER_EVENT_SCHEMA_VERSION",
@@ -45,4 +51,8 @@ __all__ = [
     "SupportReviewer",
     "SupportReviewRequest",
     "SupportReviewResult",
+    "SourceFreshness",
+    "SourceReloadResult",
+    "reload_citation_sources",
+    "reload_snapshot_source",
 ]

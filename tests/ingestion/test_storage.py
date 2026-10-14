@@ -165,6 +165,34 @@ class SQLiteIngestionStoreTests(unittest.TestCase):
         self.assertEqual(chunk_duration_seconds, 1.25)
         self.assertIn("The clockwork garden woke at dawn.", first_chunk)
 
+    def test_source_chunk_reload_includes_the_book_source_revision(self) -> None:
+        book = BookRecord(
+            id="book-1",
+            source_path="/books/book.epub",
+            relative_path="book.epub",
+            file_hash="source-revision-1",
+            size_bytes=100,
+            title="A Book",
+            authors=["An Author"],
+            status="ingested",
+        )
+        chunk = ChunkRecord(
+            id="chunk-1",
+            book_id=book.id,
+            chunk_index=0,
+            text="Authoritative body text.",
+            character_count=24,
+            token_estimate=4,
+        )
+        with SQLiteIngestionStore(self.database_path) as store:
+            store.save_book_with_chunks(book, [chunk])
+            loaded = store.get_source_chunk(book_id=book.id, chunk_id=chunk.id)
+
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded.source_revision, "source-revision-1")
+        self.assertEqual(loaded.text, "Authoritative body text.")
+
     def test_summary_and_book_listing_support_read_clients(self) -> None:
         """Verify desktop/API clients can inspect stored ingestion state.
         The summary and listing helpers provide read models without requiring

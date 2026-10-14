@@ -12,6 +12,9 @@ from librarian_answer import (  # noqa: E402
     AnswerScope,
     EvidenceSnapshot,
     SourceRecord,
+    SourceFreshness,
+    reload_citation_sources,
+    reload_snapshot_source,
 )
 
 
@@ -90,3 +93,40 @@ class AnswerRuntimeModelTests(unittest.TestCase):
                 sequence=0,
                 event="started",
             )
+
+    def test_source_reload_requires_exact_revision_and_content_sha(self) -> None:
+        original = SourceRecord(
+            book_id="book-1",
+            chunk_id="chunk-1",
+            source_revision="revision-1",
+            text="Original body text.",
+        )
+        snapshot = EvidenceSnapshot.from_source_record(
+            candidate_id="candidate-1", source=original, body_text_eligible=True
+        )
+
+        current = reload_snapshot_source(
+            snapshot, lambda _book_id, _chunk_id: original
+        )
+        changed_content = reload_snapshot_source(
+            snapshot,
+            lambda _book_id, _chunk_id: SourceRecord(
+                book_id="book-1",
+                chunk_id="chunk-1",
+                source_revision="revision-1",
+                text="Replacement body text.",
+            ),
+        )
+        changed_revision = reload_citation_sources(
+            (snapshot,),
+            lambda _book_id, _chunk_id: SourceRecord(
+                book_id="book-1",
+                chunk_id="chunk-1",
+                source_revision="revision-2",
+                text="Original body text.",
+            ),
+        )
+
+        self.assertTrue(current.is_current)
+        self.assertEqual(changed_content.status, SourceFreshness.SOURCE_CHANGED)
+        self.assertEqual(changed_revision, SourceFreshness.SOURCE_CHANGED)
