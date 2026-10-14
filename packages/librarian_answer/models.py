@@ -17,6 +17,12 @@ def _immutable_mapping(values: Mapping[str, str] | None) -> Mapping[str, str]:
     return MappingProxyType(dict(values or {}))
 
 
+def _immutable_object_mapping(
+    values: Mapping[str, object] | None,
+) -> Mapping[str, object]:
+    return MappingProxyType(dict(values or {}))
+
+
 @dataclass(frozen=True)
 class AnswerScope:
     """The effective retrieval scope used for an answer request."""
@@ -173,9 +179,14 @@ class GenerationRequest:
     messages: tuple[GenerationMessage, ...]
     response_format: str | None = None
     repair_hint: str | None = None
+    repair_answer: str | None = None
+    repair_citation_ids: tuple[str, ...] = ()
+    review_feedback: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))
+        object.__setattr__(self, "repair_citation_ids", tuple(self.repair_citation_ids))
+        object.__setattr__(self, "review_feedback", _immutable_object_mapping(self.review_feedback))
 
 
 @dataclass(frozen=True)
@@ -203,3 +214,7 @@ class SupportReviewRequest:
 class SupportReviewResult:
     supported: bool
     reason: str = ""
+    feedback: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "feedback", _immutable_object_mapping(self.feedback))
