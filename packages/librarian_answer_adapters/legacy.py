@@ -264,12 +264,13 @@ class LegacySentenceEvidenceRetriever:
             return None
 
     def can_snapshot_all_sources(self) -> bool:
-        """Require persisted source records before choosing the runtime path."""
+        """Require the retrieved source and persisted record to agree exactly."""
 
-        return all(
-            self.reload_source(book_id=source.book_id, chunk_id=source.chunk_id) is not None
-            for source in self.sources
-        )
+        for source in self.sources:
+            record = self.reload_source(book_id=source.book_id, chunk_id=source.chunk_id)
+            if record is None or record.text != source.text or record.content_type != source.content_type:
+                return False
+        return True
 
     def source_for_candidate(self, candidate_id: str) -> ChatSource | None:
         for candidate in self.candidates():
