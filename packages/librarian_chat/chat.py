@@ -1022,7 +1022,7 @@ class _SemanticSynthesisValidation:
 
 
 @dataclass(frozen=True)
-class _SynthesisSupportJudge:
+class SynthesisSupportJudge:
     """Use the already-authorized quality selector for a fresh evidence review."""
 
     generator: Generator
@@ -1071,7 +1071,7 @@ def _review_synthesis_support(
                          relative_path=source.relative_path)
             for source in sources
         ])},
-        judge=_SynthesisSupportJudge(selector),
+        judge=SynthesisSupportJudge(selector),
     )
     verdict = report.cases[0]
     supported = (
