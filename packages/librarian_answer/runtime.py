@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
+from inspect import isawaitable
 
 from librarian_answer.models import (
     ANSWER_EVENT_SCHEMA_VERSION,
@@ -124,6 +125,8 @@ class AnswerRuntime:
                     ),
                     context,
                 )
+                if isawaitable(generated):
+                    generated = await generated
             except Exception:  # noqa: BLE001 - provider failures must not leak a draft.
                 result = _result(
                     request, "generation_unavailable", _SAFE_GENERATION_FAILURE

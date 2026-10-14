@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from typing import Protocol
 
 from librarian_answer.models import (
@@ -42,8 +43,8 @@ class GenerationBroker(Protocol):
 
     def generate(
         self, request: GenerationRequest, context: RequestContext
-    ) -> GenerationResult:
-        """Return the provider's bounded response body and identity."""
+    ) -> GenerationResult | Awaitable[GenerationResult]:
+        """Return or await the provider's bounded response and identity."""
 
 
 class SupportReviewer(Protocol):
