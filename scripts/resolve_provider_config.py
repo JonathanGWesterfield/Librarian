@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 from pathlib import Path
 
 from librarian_config.config import (
@@ -24,11 +26,19 @@ from librarian_config.config import (
     LibrarianConfigError,
     get_librarian_config,
 )
+from librarian_contracts.broker_server_config import (
+    build_broker_server_runtime_config,
+    serialize_broker_server_runtime_config,
+)
+from librarian_contracts.compose_security import BROKER_SECRET_NAMES
 from librarian_contracts.runtime_config import (
     CLIENT_CREDENTIAL_ROLES,
     build_broker_client_runtime_config,
     serialize_broker_client_runtime_config,
 )
+
+R2_BROKER_SERVICE = "codex-broker"
+R2_BROKER_SECRET_ROLES = tuple(BROKER_SECRET_NAMES)
 
 
 def render_compose_override(
@@ -125,6 +135,45 @@ def write_broker_client_runtime_configs(output_directory: Path, config: Libraria
     return written_paths
 
 
+def render_r2_runtime_configs(config: LibrarianConfig) -> dict[str, str]:
+    """Render the one strict non-secret runtime document for every R2 role.
+
+    The caller documents remain owned by ``runtime_config`` and retain its
+    fixed target, protocol, and credential-role validation.  The broker has a
+    narrower server document with no client role, target, credential path, or
+    legacy provider key reference.
+    """
+
+    rendered = render_broker_client_runtime_configs(config)
+    if not rendered:
+        return {}
+    rendered[R2_BROKER_SERVICE] = serialize_broker_server_runtime_config(
+        build_broker_server_runtime_config(
+            model=config.generation.model,
+            answer_capability=config.generation.answer_capability or "quality",
+        )
+    )
+    return rendered
+
+
+def write_r2_runtime_configs(output_directory: Path, config: LibrarianConfig) -> list[Path]:
+    """Synchronize all R2 broker/caller files after validating secret sources."""
+
+    _validate_r2_broker_secret_sources(config)
+    rendered = render_r2_runtime_configs(config)
+    written_paths: list[Path] = []
+    for service in (*sorted(CLIENT_CREDENTIAL_ROLES), R2_BROKER_SERVICE):
+        path = output_directory / service / "librarian.json"
+        content = rendered.get(service)
+        if content is None:
+            _remove_stale_broker_client_runtime_config(path)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        written_paths.append(path)
+    return written_paths
+
+
 def write_json(path: Path, payload: dict[str, object]) -> None:
     """Write deterministic JSON used by the launcher and Compose override."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,6 +202,14 @@ def main() -> int:
             "Files are produced only when docker_codex_broker is selected."
         ),
     )
+    parser.add_argument(
+        "--r2",
+        action="store_true",
+        help=(
+            "Validate all role-specific broker secrets and emit the separate "
+            "atomic R2 broker/caller runtime files."
+        ),
+    )
     args = parser.parse_args()
     try:
         config = get_librarian_config(args.config)
@@ -161,7 +218,12 @@ def main() -> int:
             render_compose_override(config, publish_host_ports=not args.no_host_ports),
         )
         write_json(args.state_output, render_state(config))
-        if args.broker_runtime_output_dir is not None:
+        if args.r2 and args.broker_runtime_output_dir is None:
+            raise LibrarianConfigError("--r2 requires --broker-runtime-output-dir")
+        if args.r2:
+            assert args.broker_runtime_output_dir is not None
+            write_r2_runtime_configs(args.broker_runtime_output_dir, config)
+        elif args.broker_runtime_output_dir is not None:
             write_broker_client_runtime_configs(args.broker_runtime_output_dir, config)
     except LibrarianConfigError as exc:
         parser.error(str(exc))
@@ -192,6 +254,42 @@ def _remove_stale_broker_client_runtime_config(path: Path) -> None:
         raise LibrarianConfigError(
             f"broker runtime config path must be a file when present: {path}"
         )
+
+
+def _validate_r2_broker_secret_sources(config: LibrarianConfig) -> None:
+    """Reject a partial R2 secret set before it can replace an R0 stack."""
+
+    if not config.uses_docker_codex_broker:
+        raise LibrarianConfigError("--r2 requires generation.mode docker_codex_broker")
+    secret_directory = config.path.parent / "secrets"
+    credential_values: set[str] = set()
+    for role in R2_BROKER_SECRET_ROLES:
+        credential = _validate_r2_secret_source(secret_directory / BROKER_SECRET_NAMES[role])
+        if credential in credential_values:
+            raise LibrarianConfigError("R2 broker credential sources must be distinct")
+        credential_values.add(credential)
+
+
+def _validate_r2_secret_source(path: Path) -> str:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as error:
+        raise LibrarianConfigError("R2 broker credential sources are incomplete") from error
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise LibrarianConfigError("R2 broker credential sources must be regular files")
+        with os.fdopen(descriptor, "r", encoding="utf-8") as file:
+            descriptor = -1
+            credential = file.read().strip()
+            if not credential:
+                raise LibrarianConfigError("R2 broker credential sources must not be empty")
+    except (OSError, UnicodeError) as error:
+        raise LibrarianConfigError("R2 broker credential sources are unreadable") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    return credential
 
 
 if __name__ == "__main__":

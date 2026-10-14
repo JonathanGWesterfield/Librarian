@@ -1,0 +1,232 @@
+# Atomic R2 gRPC broker composition.  This file is deliberately separate from
+# docker-compose.yml so ordinary R0 startup stays unchanged until every caller
+# has migrated.  Invoke it only with the resolver output and a clean release
+# SHA supplied by the deployment workflow:
+#
+#   LIBRARIAN_STACK_RELEASE_SHA=<40-char-sha> \
+#     docker compose \
+#       --profile codex-broker \
+#       --profile workers \
+#       --profile metadata-workers \
+#       --profile evaluation \
+#       -f docker-compose.yml -f docker-compose.r2.yml config --format json
+#
+# The current callers are not wired to generated gRPC adapters yet, so this
+# validates topology and startup gates rather than replacing the normal
+# launcher. The caller migration slice will add resolver output when it brings
+# this composition online atomically.
+
+services:
+  config-resolver:
+    command:
+      - --config
+      - /config/librarian.json
+      - --compose-output
+      - /output/librarian.compose.json
+      - --state-output
+      - /output/librarian.state.json
+      - --broker-runtime-output-dir
+      - /output/config
+      - --r2
+    networks: [application]
+
+  opensearch:
+    networks: [application]
+
+  ollama:
+    networks: [application]
+
+  ollama-init:
+    networks: [application]
+
+  codex-broker:
+    build:
+      context: .
+      dockerfile: apps/codex_broker/Dockerfile
+      target: r2-runtime
+      args:
+        STACK_RELEASE_SHA: ${LIBRARIAN_STACK_RELEASE_SHA:?LIBRARIAN_STACK_RELEASE_SHA must name the clean 40-character release SHA}
+    volumes: !override
+      - ./.runtime/config/codex-broker/librarian.json:/config/librarian.json:ro
+      - codex-broker-session:/root/.codex
+    networks:
+      - broker-api
+      - broker-summary-worker
+      - broker-metadata-worker
+      - broker-evaluator
+      - broker-egress
+    secrets:
+      - source: codex-broker-api
+        target: codex-broker-api
+        mode: 0400
+      - source: codex-broker-summary-worker
+        target: codex-broker-summary-worker
+        mode: 0400
+      - source: codex-broker-metadata-worker
+        target: codex-broker-metadata-worker
+        mode: 0400
+      - source: codex-broker-evaluator
+        target: codex-broker-evaluator
+        mode: 0400
+      - source: codex-broker-health
+        target: codex-broker-health
+        mode: 0400
+    expose: ["50051"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "librarian_broker.r2_healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: r2-runtime
+      args:
+        STACK_RELEASE_SHA: ${LIBRARIAN_STACK_RELEASE_SHA:?LIBRARIAN_STACK_RELEASE_SHA must name the clean 40-character release SHA}
+    entrypoint:
+      - python
+      - -m
+      - librarian_answer_adapters.r2_startup
+      - --principal
+      - api
+      - --
+    volumes: !override
+      - ./.runtime/config/api/librarian.json:/config/librarian.json:ro
+      - ./data:/data
+    networks: [application, broker-api]
+    secrets:
+      - source: codex-broker-api
+        target: codex-broker-api
+        mode: 0400
+    environment:
+      LIBRARIAN_EXECUTION_PRINCIPAL: api
+      LIBRARIAN_BROKER_CREDENTIAL_FILE: /run/secrets/codex-broker-api
+
+  summary-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: r2-runtime
+      args:
+        STACK_RELEASE_SHA: ${LIBRARIAN_STACK_RELEASE_SHA:?LIBRARIAN_STACK_RELEASE_SHA must name the clean 40-character release SHA}
+    entrypoint:
+      - python
+      - -m
+      - librarian_answer_adapters.r2_startup
+      - --principal
+      - summary-worker
+      - --
+    volumes: !override
+      - ./.runtime/config/summary-worker/librarian.json:/config/librarian.json:ro
+      - ./data:/data
+    networks: [application, broker-summary-worker]
+    secrets:
+      - source: codex-broker-summary-worker
+        target: codex-broker-summary-worker
+        mode: 0400
+    environment:
+      LIBRARIAN_EXECUTION_PRINCIPAL: summary-worker
+      LIBRARIAN_BROKER_CREDENTIAL_FILE: /run/secrets/codex-broker-summary-worker
+
+  metadata-worker:
+    profiles: [metadata-workers]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: r2-runtime
+      args:
+        STACK_RELEASE_SHA: ${LIBRARIAN_STACK_RELEASE_SHA:?LIBRARIAN_STACK_RELEASE_SHA must name the clean 40-character release SHA}
+    entrypoint:
+      - python
+      - -m
+      - librarian_answer_adapters.r2_startup
+      - --principal
+      - metadata-worker
+      - --
+      - python
+      - scripts/process_metadata_jobs.py
+      - --watch
+      - --limit
+      - "1"
+      - --poll-interval-seconds
+      - "10"
+    volumes:
+      - ./.runtime/config/metadata-worker/librarian.json:/config/librarian.json:ro
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      codex-broker:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [application, broker-metadata-worker]
+    secrets:
+      - source: codex-broker-metadata-worker
+        target: codex-broker-metadata-worker
+        mode: 0400
+    environment:
+      LIBRARIAN_EXECUTION_PRINCIPAL: metadata-worker
+      LIBRARIAN_BROKER_CREDENTIAL_FILE: /run/secrets/codex-broker-metadata-worker
+
+  evaluator:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: r2-evaluator
+      args:
+        STACK_RELEASE_SHA: ${LIBRARIAN_STACK_RELEASE_SHA:?LIBRARIAN_STACK_RELEASE_SHA must name the clean 40-character release SHA}
+    entrypoint:
+      - python
+      - -m
+      - librarian_answer_adapters.r2_startup
+      - --principal
+      - evaluator
+      - --
+      - python
+      - scripts/evaluate_retrieval.py
+      - --output
+      - /tmp/librarian-evaluation-report.json
+      - --markdown-output
+      - /tmp/librarian-evaluation-report.md
+    command: []
+    volumes: !override
+      - ./.runtime/config/evaluator/librarian.json:/config/librarian.json:ro
+    networks: [application, broker-evaluator]
+    secrets:
+      - source: codex-broker-evaluator
+        target: codex-broker-evaluator
+        mode: 0400
+    environment:
+      LIBRARIAN_EXECUTION_PRINCIPAL: evaluator
+      LIBRARIAN_BROKER_CREDENTIAL_FILE: /run/secrets/codex-broker-evaluator
+
+  web:
+    networks: [application]
+
+secrets:
+  codex-broker-api:
+    file: ./config/secrets/codex-broker-api
+  codex-broker-summary-worker:
+    file: ./config/secrets/codex-broker-summary-worker
+  codex-broker-metadata-worker:
+    file: ./config/secrets/codex-broker-metadata-worker
+  codex-broker-evaluator:
+    file: ./config/secrets/codex-broker-evaluator
+  codex-broker-health:
+    file: ./config/secrets/codex-broker-health
+
+networks:
+  application: {}
+  broker-api:
+    internal: true
+  broker-summary-worker:
+    internal: true
+  broker-metadata-worker:
+    internal: true
+  broker-evaluator:
+    internal: true
+  broker-egress: {}
