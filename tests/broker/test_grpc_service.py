@@ -14,10 +14,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "codex_broker"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
+from librarian_broker.execution import BrokerScheduler, ProviderExecutor
 from librarian_broker.grpc_service import (
     BrokerCredentials,
     add_services_to_server,
 )
+from librarian_contracts.broker_limits import build_broker_execution_limits
 from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2 as delivery_pb2,
 )
@@ -39,11 +41,17 @@ class GrpcBrokerServiceTests(unittest.IsolatedAsyncioTestCase):
             "api": "api-token",
             "compose-health": "health-token",
         })
+        self.provider = _FakeProvider()
+        self.scheduler = BrokerScheduler(
+            self.provider,
+            limits=build_broker_execution_limits(),
+        )
         self.server = grpc.aio.server()
         add_services_to_server(
             self.server,
             contract=self.contract,
             credentials=self.credentials,
+            scheduler=self.scheduler,
         )
         port = self.server.add_insecure_port("127.0.0.1:0")
         await self.server.start()
@@ -71,6 +79,20 @@ class GrpcBrokerServiceTests(unittest.IsolatedAsyncioTestCase):
         }
         payload.update(overrides)
         return delivery_pb2.CapabilitiesRequest(**payload)
+
+    def _generate_request(self, **overrides) -> delivery_pb2.GenerateRequest:
+        payload = {
+            "request_id": "10000000-0000-4000-8000-000000000001",
+            "correlation_id": "grpc-service-test",
+            "operation": delivery_pb2.CHAPTER_SUMMARIZATION,
+            "model_id": "gpt-5.6-sol",
+            "messages": [
+                delivery_pb2.ChatMessage(role=delivery_pb2.USER, content="Summarize.")
+            ],
+            "output_contract": delivery_pb2.PLAIN_TEXT_V1,
+        }
+        payload.update(overrides)
+        return delivery_pb2.GenerateRequest(**payload)
 
     async def test_authenticated_capabilities_returns_the_immutable_manifest(self) -> None:
         response = await self.stub.GetCapabilities(
@@ -135,3 +157,50 @@ class GrpcBrokerServiceTests(unittest.IsolatedAsyncioTestCase):
                 metadata=self._metadata("api-token"),
             )
         self.assertEqual(raised.exception.code(), grpc.StatusCode.UNAUTHENTICATED)
+
+    async def test_generate_validates_and_authorizes_before_scheduler_admission(self) -> None:
+        result = await self.stub.Generate(
+            self._generate_request(), metadata=self._metadata("api-token")
+        )
+        self.assertEqual(result.success.content, "Fixture provider output.")
+        self.assertEqual(result.provider_model_id, "fixture-model")
+        self.assertEqual(self.provider.calls, 1)
+
+        invalid = self._generate_request(correlation_id="")
+        denied = self._generate_request(
+            operation=delivery_pb2.TAG_GENERATION,
+            output_contract=delivery_pb2.TAGS_JSON_V1,
+        )
+        for request, expected_status, expected_code in (
+            (
+                invalid,
+                grpc.StatusCode.INVALID_ARGUMENT,
+                delivery_pb2.REQUEST_LIMIT_EXCEEDED,
+            ),
+            (
+                denied,
+                grpc.StatusCode.PERMISSION_DENIED,
+                delivery_pb2.OPERATION_DENIED,
+            ),
+        ):
+            with self.subTest(request=request.operation):
+                with self.assertRaises(grpc.aio.AioRpcError) as raised:
+                    await self.stub.Generate(
+                        request, metadata=self._metadata("api-token")
+                    )
+                self.assertEqual(raised.exception.code(), expected_status)
+                status = rpc_status.from_call(raised.exception)
+                assert status is not None
+                detail = delivery_pb2.ErrorDetail()
+                self.assertTrue(status.details[0].Unpack(detail))
+                self.assertEqual(detail.code, expected_code)
+        self.assertEqual(self.provider.calls, 1)
+
+
+class _FakeProvider(ProviderExecutor):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, request, *, timeout_seconds):
+        self.calls += 1
+        return "Fixture provider output.", "fixture-model"

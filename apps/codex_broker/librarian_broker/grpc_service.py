@@ -15,7 +15,15 @@ from dataclasses import dataclass
 import grpc
 from grpc_health.v1 import health_pb2, health_pb2_grpc
 from grpc_status import rpc_status
-from librarian_contracts.admission import OPERATION_POLICIES, build_failure_status
+from librarian_contracts.admission import (
+    OPERATION_POLICIES,
+    ContractViolation,
+    GeneratedResultViolation,
+    build_failure_status,
+    is_operation_allowed,
+    validate_generate_request,
+    validate_generate_result,
+)
 from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2 as delivery_pb2,
 )
@@ -23,6 +31,13 @@ from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2_grpc as delivery_grpc,
 )
 from librarian_contracts.stack_contract import StackContract
+
+from librarian_broker.execution import (
+    BrokerAdmissionFull,
+    BrokerDeadlineExceeded,
+    BrokerExecutionFailed,
+    BrokerScheduler,
+)
 
 _AUTHORIZATION_HEADER = "authorization"
 _REQUEST_ID_HEADER = "x-librarian-request-id"
@@ -57,9 +72,16 @@ class BrokerCredentials:
 class GenerationBrokerService(delivery_grpc.GenerationBrokerServicer):
     """v1 authenticated compatibility endpoint backed by an immutable manifest."""
 
-    def __init__(self, *, contract: StackContract, credentials: BrokerCredentials) -> None:
+    def __init__(
+        self,
+        *,
+        contract: StackContract,
+        credentials: BrokerCredentials,
+        scheduler: BrokerScheduler | None = None,
+    ) -> None:
         self._contract = contract
         self._credentials = credentials
+        self._scheduler = scheduler
 
     async def GetCapabilities(
         self,
@@ -101,6 +123,97 @@ class GenerationBrokerService(delivery_grpc.GenerationBrokerServicer):
             operations=sorted(OPERATION_POLICIES),
         )
 
+    async def Generate(
+        self,
+        request: delivery_pb2.GenerateRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> delivery_pb2.GenerateResult:
+        """Validate, authorize, and schedule exactly one provider execution."""
+
+        metadata = _metadata(context)
+        request_id = (
+            request.request_id if _REQUEST_ID_PATTERN.fullmatch(request.request_id) else ""
+        )
+        principal = self._credentials.authenticate(metadata)
+        if principal is None:
+            await _abort(
+                context,
+                grpc.StatusCode.UNAUTHENTICATED,
+                delivery_pb2.CALLER_DENIED,
+                request_id,
+            )
+        if not _has_exact_value(
+            metadata, _STACK_RELEASE_HEADER, self._contract.stack_release_sha
+        ):
+            await _abort(
+                context,
+                grpc.StatusCode.FAILED_PRECONDITION,
+                delivery_pb2.CONTRACT_MISMATCH,
+                request_id,
+            )
+        try:
+            validate_generate_request(request)
+        except ContractViolation as error:
+            await _abort(
+                context,
+                error.grpc_status,
+                error.error_code,
+                error.request_id,
+            )
+        if not is_operation_allowed(principal=principal, operation=request.operation):
+            await _abort(
+                context,
+                grpc.StatusCode.PERMISSION_DENIED,
+                delivery_pb2.OPERATION_DENIED,
+                request_id,
+            )
+        if self._scheduler is None:
+            await _abort(
+                context,
+                grpc.StatusCode.FAILED_PRECONDITION,
+                delivery_pb2.BROKER_NOT_READY,
+                request_id,
+            )
+        try:
+            execution = await self._scheduler.execute(
+                request, deadline_seconds=context.time_remaining()
+            )
+        except BrokerAdmissionFull:
+            await _abort(
+                context,
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                delivery_pb2.ADMISSION_FULL,
+                request_id,
+            )
+        except BrokerDeadlineExceeded:
+            await _abort(
+                context,
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+                delivery_pb2.EXECUTION_TIMEOUT,
+                request_id,
+            )
+        except BrokerExecutionFailed:
+            await _abort(
+                context,
+                grpc.StatusCode.INTERNAL,
+                delivery_pb2.EXECUTION_FAILED,
+                request_id,
+            )
+
+        result = delivery_pb2.GenerateResult(
+            request_id=request.request_id,
+            provider_model_id=execution.provider_model_id,
+            queue_wait_ms=execution.queue_wait_ms,
+            execution_ms=execution.execution_ms,
+            success=delivery_pb2.GenerationSuccess(content=execution.content),
+        )
+        try:
+            validate_generate_result(result)
+        except GeneratedResultViolation as error:
+            result.ClearField("success")
+            result.invalid_structured_output.violation = error.output_violation
+        return result
+
 
 class AuthenticatedHealthService(health_pb2_grpc.HealthServicer):
     """Expose standard gRPC Health only to the dedicated health identity."""
@@ -136,12 +249,18 @@ def add_services_to_server(
     *,
     contract: StackContract,
     credentials: BrokerCredentials,
+    scheduler: BrokerScheduler | None = None,
     serving: bool = True,
 ) -> None:
     """Register the authenticated v1 and standard Health services on one server."""
 
     delivery_grpc.add_GenerationBrokerServicer_to_server(
-        GenerationBrokerService(contract=contract, credentials=credentials), server
+        GenerationBrokerService(
+            contract=contract,
+            credentials=credentials,
+            scheduler=scheduler,
+        ),
+        server,
     )
     health_pb2_grpc.add_HealthServicer_to_server(
         AuthenticatedHealthService(credentials, serving=serving), server
