@@ -29,7 +29,7 @@ from librarian_contracts.generated.librarian.answer.v1 import (
 from librarian_contracts.stack_contract import build_stack_contract
 
 
-class GrpcRuntimeGenerationBrokerTests(unittest.TestCase):
+class GrpcRuntimeGenerationBrokerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.client = _FakeClient()
         self.request = GenerationRequest(
@@ -39,7 +39,7 @@ class GrpcRuntimeGenerationBrokerTests(unittest.TestCase):
             evidence_snapshot=(_snapshot(),),
         )
 
-    def test_grounded_synthesis_selection_and_review_use_v1_generated_requests(self) -> None:
+    async def test_grounded_synthesis_selection_and_review_use_v1_generated_requests(self) -> None:
         cases = (
             (delivery_pb2.GROUNDED_SYNTHESIS, delivery_pb2.GROUNDED_ANSWER_JSON_V1),
             (delivery_pb2.SEMANTIC_SOURCE_SELECTION, delivery_pb2.SOURCE_SELECTION_JSON_V1),
@@ -53,7 +53,7 @@ class GrpcRuntimeGenerationBrokerTests(unittest.TestCase):
                     output_contract=output_contract,
                     model_id="gpt-5.6-sol",
                 )
-                result = adapter.generate(self.request, _Context())
+                result = await adapter.generate(self.request, _Context())
 
                 self.assertEqual(result.body, "Fixture generated output.")
                 proto = self.client.requests[-1]
@@ -67,7 +67,7 @@ class GrpcRuntimeGenerationBrokerTests(unittest.TestCase):
                 )
                 self.assertEqual(len(proto.evidence_snapshot.snapshot_sha256), 32)
 
-    def test_invalid_structured_output_consumes_the_runtime_repair_budget(self) -> None:
+    async def test_invalid_structured_output_consumes_the_runtime_repair_budget(self) -> None:
         self.client.result = delivery_pb2.GenerateResult(
             request_id=self.request.request_id,
             provider_model_id="fixture-model",
@@ -82,19 +82,19 @@ class GrpcRuntimeGenerationBrokerTests(unittest.TestCase):
             model_id="gpt-5.6-sol",
         )
 
-        result = adapter.generate(self.request, _Context())
+        result = await adapter.generate(self.request, _Context())
 
         self.assertEqual(result.body, "{}")
         self.assertTrue(result.repairable)
         self.assertEqual(result.repair_hint, "invalid_structured_output")
 
-    def test_generated_client_never_executes_before_a_capability_handshake(self) -> None:
+    async def test_generated_client_never_executes_before_a_capability_handshake(self) -> None:
         contract = build_stack_contract(
             stack_release_sha="a" * 40,
             descriptor=b"adapter fixture descriptor",
         )
-        channel = grpc.insecure_channel("dns:///codex-broker:50051")
-        self.addCleanup(channel.close)
+        channel = grpc.aio.insecure_channel("dns:///codex-broker:50051")
+        self.addAsyncCleanup(channel.close)
         client = GeneratedGrpcBrokerClient(
             channel=channel,
             contract=contract,
@@ -103,7 +103,7 @@ class GrpcRuntimeGenerationBrokerTests(unittest.TestCase):
         )
 
         with self.assertRaises(GrpcBrokerClientError) as raised:
-            client.generate(delivery_pb2.GenerateRequest())
+            await client.generate(delivery_pb2.GenerateRequest())
 
         self.assertEqual(raised.exception.status, grpc.StatusCode.FAILED_PRECONDITION)
         self.assertEqual(raised.exception.error_code, delivery_pb2.CONTRACT_MISMATCH)
@@ -123,7 +123,7 @@ class _FakeClient:
                 success=delivery_pb2.GenerationSuccess(content="Fixture generated output."),
             )
 
-    def generate(self, request, *, timeout):
+    async def generate(self, request, *, timeout):
         assert self.requests is not None
         assert self.result is not None
         self.requests.append(request)

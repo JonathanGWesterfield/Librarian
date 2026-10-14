@@ -32,6 +32,11 @@ from librarian_contracts.generated.librarian.answer.v1 import (
 )
 from librarian_contracts.stack_contract import StackContract
 
+_GRPC_MESSAGE_LIMIT_BYTES = 512 * 1024
+_GRPC_MESSAGE_LIMIT_OPTIONS = (
+    ("grpc.max_receive_message_length", _GRPC_MESSAGE_LIMIT_BYTES),
+    ("grpc.max_send_message_length", _GRPC_MESSAGE_LIMIT_BYTES),
+)
 _REQUEST_ID_HEADER = "x-librarian-request-id"
 _STACK_RELEASE_HEADER = "x-librarian-stack-release"
 _ROLE_BY_NAME = {
@@ -54,7 +59,7 @@ class GrpcBrokerClientError(RuntimeError):
 class GeneratedGrpcBrokerClient:
     """One shared generated stub with an authenticated compatibility handshake."""
 
-    channel: grpc.Channel
+    channel: grpc.aio.Channel
     contract: StackContract
     principal: str
     bearer_token: str
@@ -66,12 +71,32 @@ class GeneratedGrpcBrokerClient:
             raise ValueError("gRPC broker clients require a bearer credential")
         self._stub = delivery_grpc.GenerationBrokerStub(self.channel)
 
-    def ensure_ready(self, *, timeout: float | None = None) -> None:
+    @classmethod
+    def connect(
+        cls,
+        *,
+        target: str,
+        contract: StackContract,
+        principal: str,
+        bearer_token: str,
+    ) -> GeneratedGrpcBrokerClient:
+        """Create the process-shared aio channel used by one broker caller."""
+
+        return cls(
+            channel=grpc.aio.insecure_channel(
+                target, options=_GRPC_MESSAGE_LIMIT_OPTIONS
+            ),
+            contract=contract,
+            principal=principal,
+            bearer_token=bearer_token,
+        )
+
+    async def ensure_ready(self, *, timeout: float | None = None) -> None:
         """Perform the release-bound, authenticated GetCapabilities handshake."""
 
         request = build_capabilities_request(self.contract)
         try:
-            response = self._stub.GetCapabilities(
+            response = await self._stub.GetCapabilities(
                 request,
                 metadata=self._metadata(request_id="00000000-0000-4000-8000-000000000000"),
                 timeout=timeout,
@@ -91,7 +116,7 @@ class GeneratedGrpcBrokerClient:
             ) from error
         self._ready = True
 
-    def generate(
+    async def generate(
         self,
         request: delivery_pb2.GenerateRequest,
         *,
@@ -105,7 +130,7 @@ class GeneratedGrpcBrokerClient:
                 error_code=delivery_pb2.CONTRACT_MISMATCH,
             )
         try:
-            return self._stub.Generate(
+            return await self._stub.Generate(
                 request,
                 metadata=self._metadata(request_id=request.request_id),
                 timeout=timeout,
@@ -143,14 +168,14 @@ class GrpcRuntimeGenerationBroker:
         if not self.model_id:
             raise ValueError("answer-runtime gRPC adapter requires a model ID")
 
-    def generate(
+    async def generate(
         self, request: GenerationRequest, context: RequestContext
     ) -> GenerationResult:
         """Convert immutable runtime values to the generated v1 request type."""
 
         if context.is_cancelled():
             raise RuntimeError("answer request was cancelled before generation")
-        result = self.client.generate(
+        result = await self.client.generate(
             _to_proto_request(
                 request,
                 operation=self.operation,
