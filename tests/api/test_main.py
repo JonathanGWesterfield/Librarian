@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import unittest
@@ -5,11 +6,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import HTTPException
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from librarian_chat.chat import ChatResponse, ChatSource, ChatStreamEvent
+from librarian_answer_adapters.grpc_generation import R2GenerationDeadlineExceeded
 from librarian_metadata.genres import BookGenreGenerationResult, GeneratedBookGenre
 from librarian_recommendations.recommendations import (
     BookRecommendation,
@@ -574,15 +578,181 @@ class IngestionApiTests(unittest.TestCase):
         self.assertIn("time_to_first_event_seconds", parsed[0][1]["timings"])
         self.assertIn("time_to_first_token_seconds", parsed[-1][1]["timings"])
 
-    def test_r2_unmigrated_generation_paths_fail_closed_before_http_generation(self) -> None:
-        runtime_config = type("RuntimeConfig", (), {"uses_r2_api_runtime": True})()
-        with patch.object(main_module, "get_librarian_config", return_value=runtime_config):
+    def test_r2_generation_routes_use_the_lifecycle_caller_without_legacy_http_facades(self) -> None:
+        recommendation = RecommendationResponse(
+            query="What is similar?",
+            answer="Try this book.",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="grpc",
+            generation_model="gpt-5.6-sol",
+            retrieval_limit=1,
+            candidate_count=1,
+            filters={},
+            recommendations=[],
+        )
+        summary = BookSummary(
+            book_id="book-1",
+            title="Book",
+            authors=[],
+            provider="grpc",
+            model="gpt-5.6-sol",
+            detail="medium",
+            summary="A summary.",
+            source_hash="hash",
+            chapter_summary_count=0,
+            cached_chapter_summaries=0,
+            generated_chapter_summaries=0,
+            deleted_summaries=0,
+            chapter_summaries=[],
+        )
+        genres = BookGenreGenerationResult(
+            book_id="book-1",
+            title="Book",
+            authors=[],
+            source_summary_provider="grpc",
+            source_summary_model="gpt-5.6-sol",
+            source_summary_detail="medium",
+            generation_provider="grpc",
+            generation_model="gpt-5.6-sol",
+            deleted_genres=0,
+            generated_genres=0,
+            cached_genres=0,
+            genres=[],
+        )
+        caller = type(
+            "Caller",
+            (),
+            {
+                "recommend_books": AsyncMock(return_value=recommendation),
+                "summarize_book": AsyncMock(return_value=summary),
+                "generate_book_genres": AsyncMock(return_value=genres),
+            },
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            with (
+                patch(
+                    "librarian_api.main.recommend_books",
+                    side_effect=AssertionError("R2 must not use the legacy HTTP generator"),
+                ),
+                patch(
+                    "librarian_api.main.summarize_book",
+                    side_effect=AssertionError("R2 must not use the legacy HTTP generator"),
+                ),
+                patch(
+                    "librarian_api.main.generate_book_genres",
+                    side_effect=AssertionError("R2 must not use the legacy HTTP generator"),
+                ),
+            ):
+                recommendation_response = self.client.post(
+                    "/recommendations", json={"query": recommendation.query}
+                )
+                summary_response = self.client.post(
+                    "/books/book-1/summary", json={}
+                )
+                genres_response = self.client.post("/books/book-1/genres", json={})
+        finally:
+            del app.state.r2_api_chat_caller
+
+        self.assertEqual(recommendation_response.status_code, 200)
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertEqual(genres_response.status_code, 200)
+        caller.recommend_books.assert_awaited_once()
+        caller.summarize_book.assert_awaited_once()
+        caller.generate_book_genres.assert_awaited_once()
+
+    def test_r2_generation_routes_reject_per_request_generator_overrides(self) -> None:
+        caller = type(
+            "Caller",
+            (),
+            {
+                "recommend_books": AsyncMock(
+                    side_effect=ValueError("R2 generation does not allow per-request generation overrides")
+                ),
+                "summarize_book": AsyncMock(
+                    side_effect=ValueError("R2 generation does not allow per-request generation overrides")
+                ),
+                "generate_book_genres": AsyncMock(
+                    side_effect=ValueError("R2 generation does not allow per-request generation overrides")
+                ),
+            },
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            responses = [
+                self.client.post(
+                    "/recommendations",
+                    json={"query": "What is similar?", "generation_model": "spoofed"},
+                ),
+                self.client.post(
+                    "/books/book-1/summary", json={"generation_provider": "codex"}
+                ),
+                self.client.post(
+                    "/books/book-1/genres", json={"ollama_base_url": "http://elsewhere"}
+                ),
+            ]
+        finally:
+            del app.state.r2_api_chat_caller
+
+        for response in responses:
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("per-request generation overrides", response.json()["detail"])
+
+    def test_r2_generation_disconnect_is_a_quiet_terminal_response(self) -> None:
+        class _DisconnectingRequest:
+            async def is_disconnected(self) -> bool:
+                return True
+
+        async def cancelled(_options, *, context):
+            await asyncio.sleep(0.06)
+            self.assertTrue(context.was_disconnected)
+            raise asyncio.CancelledError()
+
+        async def run():
+            with self.assertRaises(HTTPException) as raised:
+                await main_module._run_r2_generation(
+                    cancelled,
+                    object(),
+                    _DisconnectingRequest(),
+                )
+            self.assertEqual(raised.exception.status_code, 499)
+
+        asyncio.run(run())
+
+    def test_r2_summary_deadline_caps_the_complete_request_at_broker_limit(self) -> None:
+        with patch(
+            "librarian_api.main.resolve_chunk_summary_timeout_seconds",
+            return_value=240.0,
+        ):
+            self.assertEqual(main_module._r2_summary_deadline(None), 30.0)
+
+        with patch(
+            "librarian_api.main.resolve_chunk_summary_timeout_seconds",
+            return_value=12.0,
+        ):
+            self.assertEqual(main_module._r2_summary_deadline(12.0), 12.0)
+
+    def test_r2_generation_broker_deadline_returns_gateway_timeout(self) -> None:
+        caller = type(
+            "Caller",
+            (),
+            {
+                "recommend_books": AsyncMock(
+                    side_effect=R2GenerationDeadlineExceeded("gRPC generation deadline elapsed")
+                )
+            },
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
             response = self.client.post(
                 "/recommendations", json={"query": "What is similar?"}
             )
+        finally:
+            del app.state.r2_api_chat_caller
 
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("will not fall back", response.json()["detail"])
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(response.json(), {"detail": "generation deadline elapsed"})
 
     def test_chat_stream_endpoint_serializes_ordered_sse_events(self) -> None:
         """The streaming route advertises evidence before answer text and completion."""

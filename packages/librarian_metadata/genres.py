@@ -94,9 +94,11 @@ class BookGenreGenerationResult:
 
 def generate_book_genres(
     options: GenerateBookGenresOptions,
+    *,
+    generator=None,
 ) -> BookGenreGenerationResult:
     database_url = resolve_database_url(options.database_url)
-    generator = create_configured_generator(
+    generator = generator or create_configured_generator(
         provider=options.generation_provider,
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,

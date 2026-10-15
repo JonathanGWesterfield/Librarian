@@ -149,10 +149,12 @@ class _SectionGenerationResult:
     summary: str
 
 
-def summarize_book(options: SummarizeBookOptions) -> BookSummary:
+def summarize_book(
+    options: SummarizeBookOptions, *, generator=None
+) -> BookSummary:
     detail = _normalize_detail(options.detail)
     database_url = resolve_database_url(options.database_url)
-    generator = create_configured_generator(
+    generator = generator or create_configured_generator(
         provider=options.generation_provider,
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,
@@ -287,6 +289,7 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
             summaries=visible_chapter_summary_inputs,
             detail=detail,
             max_reduce_inputs=max(2, options.max_reduce_inputs),
+            timeout_seconds=chunk_summary_timeout_seconds,
             progress_callback=options.progress_callback,
         )
         book_source_hash = _book_source_hash(final_inputs)
@@ -311,8 +314,10 @@ def summarize_book(options: SummarizeBookOptions) -> BookSummary:
                 total=1,
                 message=f"Synthesizing final book summary from {len(final_inputs)} input summaries.",
             )
-            book_summary_text = generator.generate(
-                _book_summary_messages(book=book, summaries=final_inputs, detail=detail)
+            book_summary_text = _generate_book_summary(
+                generator,
+                _book_summary_messages(book=book, summaries=final_inputs, detail=detail),
+                timeout_seconds=chunk_summary_timeout_seconds,
             )
             store.save_book_summary(
                 BookSummaryRecord(
@@ -388,8 +393,39 @@ def _generate_chunk_summary(
     *,
     timeout_seconds: float,
 ) -> str:
+    generate_for_operation = getattr(generator, "generate_for_operation", None)
+    if callable(generate_for_operation):
+        from librarian_contracts.generated.librarian.answer.v1 import (
+            answer_delivery_pb2 as delivery_pb2,
+        )
+
+        return generate_for_operation(
+            messages,
+            operation=delivery_pb2.CHAPTER_SUMMARIZATION,
+            timeout_seconds=timeout_seconds,
+        )
     if isinstance(generator, CodexGenerator):
         return generator.generate(messages, timeout_seconds=timeout_seconds)
+    return generator.generate(messages)
+
+
+def _generate_book_summary(
+    generator,
+    messages: list[ChatMessage],
+    *,
+    timeout_seconds: float,
+) -> str:
+    generate_for_operation = getattr(generator, "generate_for_operation", None)
+    if callable(generate_for_operation):
+        from librarian_contracts.generated.librarian.answer.v1 import (
+            answer_delivery_pb2 as delivery_pb2,
+        )
+
+        return generate_for_operation(
+            messages,
+            operation=delivery_pb2.BOOK_SUMMARIZATION,
+            timeout_seconds=timeout_seconds,
+        )
     return generator.generate(messages)
 
 
@@ -712,6 +748,7 @@ def _condense_until_fits(
     summaries: list[ChapterSummary],
     detail: str,
     max_reduce_inputs: int,
+    timeout_seconds: float,
     progress_callback: Callable[[SummaryProgress], None] | None,
 ) -> list[ChapterSummary]:
     current = summaries
@@ -731,8 +768,10 @@ def _condense_until_fits(
                     f"for reduce round {round_number}."
                 ),
             )
-            summary_text = generator.generate(
-                _book_summary_messages(book=book, summaries=group, detail=detail)
+            summary_text = _generate_book_summary(
+                generator,
+                _book_summary_messages(book=book, summaries=group, detail=detail),
+                timeout_seconds=timeout_seconds,
             )
             condensed.append(
                 ChapterSummary(

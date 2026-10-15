@@ -104,7 +104,7 @@ class _BookCandidate:
     genres: list[str]
 
 
-def recommend_books(options: RecommendationOptions) -> RecommendationResponse:
+def recommend_books(options: RecommendationOptions, *, generator=None) -> RecommendationResponse:
     query = options.query.strip()
     if not query:
         raise ValueError("recommendation query must not be empty")
@@ -133,7 +133,7 @@ def recommend_books(options: RecommendationOptions) -> RecommendationResponse:
     candidates = _filter_candidates(candidates, genre=options.genre, tag=options.tag)
     ranked = _rank_candidates(candidates, query=query, limit=limit)
 
-    generator = create_configured_generator(
+    generator = generator or create_configured_generator(
         provider=options.generation_provider,
         model=options.generation_model,
         ollama_base_url=options.ollama_base_url,

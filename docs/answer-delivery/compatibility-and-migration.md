@@ -114,9 +114,13 @@ normal API configuration parser validates the rest of the same fixed-path file.
 This activates R2 API chat at FastAPI lifespan: a failed capability handshake
 prevents browser admission, one generated client/stub serves the process, and
 shutdown closes it. R0 keeps its original configuration and startup path.
-Until summary, genre, and recommendation operations move to their generated
-RPCs, an R2 API returns an explicit unavailable response for those generation
-routes. It never recreates the retired HTTP request as a temporary fallback.
+R2 API summary, genre, and recommendation routes reuse that ready generated
+client. They run local retrieval, caching, and storage work in the API process,
+then issue only `CHAPTER_SUMMARIZATION`, `BOOK_SUMMARIZATION`,
+`GENRE_GENERATION`, or `RECOMMENDATION_SYNTHESIS` over authenticated gRPC.
+R2 rejects every request-level generation provider, model, or Ollama URL
+override so response identity remains the configured broker model. These routes
+never recreate the retired HTTP request as a temporary fallback.
 The R2 overlay still remains outside the normal launcher until all caller roles
 are migrated and cut over together.
 

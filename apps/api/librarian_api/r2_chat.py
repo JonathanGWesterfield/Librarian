@@ -11,6 +11,7 @@ from uuid import uuid4
 from librarian_answer import AnswerRequest, AnswerRuntime, AnswerScope, EvidenceSnapshot
 from librarian_answer_adapters.grpc_broker import GeneratedGrpcBrokerClient
 from librarian_answer_adapters.grpc_chat import GrpcChatOperations
+from librarian_answer_adapters.grpc_generation import GrpcGenerationGenerator
 from librarian_answer_adapters.legacy import LegacySentenceEvidenceRetriever
 from librarian_answer_adapters.r2_startup import open_r2_client
 from librarian_chat import chat as chat_module
@@ -23,7 +24,13 @@ from librarian_chat.chat import (
     retrieve_chat_evidence,
 )
 from librarian_config.config import resolve_database_url
+from librarian_contracts.generated.librarian.answer.v1 import (
+    answer_delivery_pb2 as delivery_pb2,
+)
+from librarian_metadata.genres import GenerateBookGenresOptions, generate_book_genres
+from librarian_recommendations.recommendations import RecommendationOptions, recommend_books
 from librarian_storage.storage import create_ingestion_store
+from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
 
 _R2_ANSWER_DEADLINE_SECONDS = 30.0
 _R2_SELECTOR_DEADLINE_SECONDS = 10.0
@@ -61,6 +68,95 @@ class R2ApiChatCaller:
             or options.answer_capability_is_override
         ):
             raise ValueError("R2 chat does not allow per-request generation overrides")
+
+    def validate_generation_options(
+        self,
+        *,
+        generation_provider: str | None,
+        generation_model: str | None,
+        ollama_base_url: str | None,
+    ) -> None:
+        """Keep the R2 API's actual broker identity authoritative."""
+
+        if any(
+            value is not None
+            for value in (generation_provider, generation_model, ollama_base_url)
+        ):
+            raise ValueError("R2 generation does not allow per-request generation overrides")
+
+    async def summarize_book(
+        self,
+        options: SummarizeBookOptions,
+        *,
+        context: _RequestContext,
+    ):
+        """Run local summary caching with chapter/book provider work over gRPC."""
+
+        self.validate_generation_options(
+            generation_provider=options.generation_provider,
+            generation_model=options.generation_model,
+            ollama_base_url=options.ollama_base_url,
+        )
+        return await asyncio.to_thread(
+            summarize_book,
+            options,
+            generator=self._generation_generator(
+                context, default_operation=delivery_pb2.BOOK_SUMMARIZATION
+            ),
+        )
+
+    async def generate_book_genres(
+        self,
+        options: GenerateBookGenresOptions,
+        *,
+        context: _RequestContext,
+    ):
+        """Run local genre storage with its JSON generation through gRPC."""
+
+        self.validate_generation_options(
+            generation_provider=options.generation_provider,
+            generation_model=options.generation_model,
+            ollama_base_url=options.ollama_base_url,
+        )
+        return await asyncio.to_thread(
+            generate_book_genres,
+            options,
+            generator=self._generation_generator(
+                context, default_operation=delivery_pb2.GENRE_GENERATION
+            ),
+        )
+
+    async def recommend_books(
+        self,
+        options: RecommendationOptions,
+        *,
+        context: _RequestContext,
+    ):
+        """Run local ranking with recommendation prose through gRPC."""
+
+        self.validate_generation_options(
+            generation_provider=options.generation_provider,
+            generation_model=options.generation_model,
+            ollama_base_url=options.ollama_base_url,
+        )
+        return await asyncio.to_thread(
+            recommend_books,
+            options,
+            generator=self._generation_generator(
+                context, default_operation=delivery_pb2.RECOMMENDATION_SYNTHESIS
+            ),
+        )
+
+    def _generation_generator(
+        self, context: _RequestContext, *, default_operation: int
+    ) -> GrpcGenerationGenerator:
+        return GrpcGenerationGenerator(
+            client=self.client,
+            model=self.operations.model_id,
+            event_loop=asyncio.get_running_loop(),
+            context=context,
+            default_operation=default_operation,
+        )
 
     async def answer(
         self,
@@ -298,6 +394,7 @@ class _RequestContext:
     ) -> None:
         self._deadline_at = monotonic() + deadline_seconds
         self._cancelled = asyncio.Event()
+        self._disconnected = False
         self._is_disconnected = is_disconnected
         self._watcher: asyncio.Task[None] | None = None
 
@@ -322,12 +419,19 @@ class _RequestContext:
         assert self._is_disconnected is not None
         while not self.is_cancelled():
             if await self._is_disconnected():
+                self._disconnected = True
                 self._cancelled.set()
                 return
             await asyncio.sleep(0.05)
 
     def is_cancelled(self) -> bool:
         return self._cancelled.is_set() or monotonic() >= self._deadline_at
+
+    @property
+    def was_disconnected(self) -> bool:
+        """Whether the browser, rather than a server deadline, ended this request."""
+
+        return self._disconnected
 
     def remaining_seconds(self) -> float | None:
         if self._cancelled.is_set():
