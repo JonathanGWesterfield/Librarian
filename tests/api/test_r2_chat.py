@@ -79,6 +79,7 @@ class R2ApiChatCallerTests(unittest.IsolatedAsyncioTestCase):
             await observed.wait()
             await asyncio.sleep(0)
             self.assertTrue(context.is_cancelled())
+            self.assertTrue(context.was_disconnected)
             self.assertEqual(context.remaining_seconds(), 0.0)
         finally:
             await context.close()
@@ -94,6 +95,17 @@ class R2ApiChatCallerTests(unittest.IsolatedAsyncioTestCase):
                     answer_capability_is_override=True,
                 )
             )
+
+    async def test_r2_rejects_generation_identity_overrides(self) -> None:
+        caller = R2ApiChatCaller(client=_Client(), operations=MagicMock())
+
+        for overrides in (
+            {"generation_provider": "codex", "generation_model": None, "ollama_base_url": None},
+            {"generation_provider": None, "generation_model": "spoofed", "ollama_base_url": None},
+            {"generation_provider": None, "generation_model": None, "ollama_base_url": "http://elsewhere"},
+        ):
+            with self.assertRaisesRegex(ValueError, "per-request generation overrides"):
+                caller.validate_generation_options(**overrides)
 
     async def test_disconnect_cancels_while_blocking_retrieval_runs_off_loop(self) -> None:
         started = asyncio.Event()

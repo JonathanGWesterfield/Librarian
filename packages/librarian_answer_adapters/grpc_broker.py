@@ -1,8 +1,8 @@
 """Generated-stub gRPC adapters for the in-process answer runtime.
 
-They are intentionally composition-root building blocks. M03 wires them into
-R2 API chat only; unmigrated R2 generation paths fail closed until the atomic
-caller cutover can replace the legacy HTTP broker.
+They are intentionally composition-root building blocks. M03 wires the shared
+client into R2 API chat and API-owned generation; remaining worker and
+evaluator callers stay unavailable until their own generated-client migrations.
 """
 
 from __future__ import annotations

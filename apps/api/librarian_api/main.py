@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -16,10 +17,12 @@ from librarian_chat.chat import (
 )
 from librarian_config.config import (
     get_librarian_config,
+    resolve_chunk_summary_timeout_seconds,
     resolve_embedding_model,
     resolve_embedding_provider,
     resolve_generation_answer_capability,
 )
+from librarian_contracts.broker_limits import DEFAULT_OUTER_DEADLINE_SECONDS
 from librarian_ingestion.embedding_ops import (
     EmbedQueryOptions,
     RebuildEmbeddingsOptions,
@@ -50,6 +53,7 @@ from pydantic import BaseModel, Field
 
 from librarian_api.config import get_settings
 from librarian_api.r2_chat import R2ApiChatCaller, _RequestContext
+from librarian_answer_adapters.grpc_generation import R2GenerationDeadlineExceeded
 
 configure_logging(file_enabled=False)
 
@@ -604,100 +608,152 @@ def _chat_options(request: ChatRequest) -> ChatOptions:
     )
 
 
-def _reject_unmigrated_r2_generation_path(operation: str) -> None:
-    """Keep R2 from silently recreating the retired HTTP generator path."""
-
-    if get_librarian_config().uses_r2_api_runtime:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"R2 {operation} migration is not available yet; "
-                "the API will not fall back to the legacy HTTP broker."
-            ),
-        )
-
-
 @app.post("/recommendations")
-def recommendations_endpoint(request: RecommendationRequest) -> dict[str, object]:
-    _reject_unmigrated_r2_generation_path("recommendations")
+async def recommendations_endpoint(request: RecommendationRequest, http_request: Request) -> dict[str, object]:
     try:
-        result = recommend_books(
-            RecommendationOptions(
-                query=request.query,
-                database_url=request.database_url or get_settings().database_url,
-                embedding_provider=request.embedding_provider,
-                embedding_model=request.embedding_model,
-                generation_provider=request.generation_provider,
-                generation_model=request.generation_model,
-                ollama_base_url=request.ollama_base_url,
-                limit=request.limit,
-                retrieval_limit=request.retrieval_limit,
-                book_id=request.book_id,
-                book_title=request.book_title,
-                author=request.author,
-                genre=request.genre,
-                tag=request.tag,
-            )
+        options = RecommendationOptions(
+            query=request.query,
+            database_url=request.database_url or get_settings().database_url,
+            embedding_provider=request.embedding_provider,
+            embedding_model=request.embedding_model,
+            generation_provider=request.generation_provider,
+            generation_model=request.generation_model,
+            ollama_base_url=request.ollama_base_url,
+            limit=request.limit,
+            retrieval_limit=request.retrieval_limit,
+            book_id=request.book_id,
+            book_title=request.book_title,
+            author=request.author,
+            genre=request.genre,
+            tag=request.tag,
         )
+        caller = getattr(app.state, "r2_api_chat_caller", None)
+        if caller is None:
+            result = recommend_books(options)
+        else:
+            result = await _run_r2_generation(
+                caller.recommend_books,
+                options,
+                http_request,
+            )
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return result.to_dict()
 
 
 @app.post("/books/{book_id}/summary")
-def summarize_book_endpoint(
-    book_id: str, request: BookSummaryRequest
+async def summarize_book_endpoint(
+    book_id: str, request: BookSummaryRequest, http_request: Request
 ) -> dict[str, object]:
-    _reject_unmigrated_r2_generation_path("book summary")
     try:
-        result = summarize_book(
-            SummarizeBookOptions(
-                database_url=request.database_url or get_settings().database_url,
-                book_id=book_id,
-                book_title=request.book_title,
-                author=request.author,
-                generation_provider=request.generation_provider,
-                generation_model=request.generation_model,
-                ollama_base_url=request.ollama_base_url,
-                detail=request.detail,
-                chunks_per_section=request.chunks_per_section,
-                max_section_chars=request.max_section_chars,
-                force_refresh=request.force_refresh,
-                reset=request.reset,
-                include_chapter_summaries=request.include_chapter_summaries,
-                chunk_summary_timeout_seconds=request.chunk_summary_timeout_seconds,
-                max_parallel_chunk_summaries=request.max_parallel_chunk_summaries,
-            )
+        options = SummarizeBookOptions(
+            database_url=request.database_url or get_settings().database_url,
+            book_id=book_id,
+            book_title=request.book_title,
+            author=request.author,
+            generation_provider=request.generation_provider,
+            generation_model=request.generation_model,
+            ollama_base_url=request.ollama_base_url,
+            detail=request.detail,
+            chunks_per_section=request.chunks_per_section,
+            max_section_chars=request.max_section_chars,
+            force_refresh=request.force_refresh,
+            reset=request.reset,
+            include_chapter_summaries=request.include_chapter_summaries,
+            chunk_summary_timeout_seconds=request.chunk_summary_timeout_seconds,
+            max_parallel_chunk_summaries=request.max_parallel_chunk_summaries,
         )
+        caller = getattr(app.state, "r2_api_chat_caller", None)
+        if caller is None:
+            result = summarize_book(options)
+        else:
+            result = await _run_r2_generation(
+                caller.summarize_book,
+                options,
+                http_request,
+                deadline_seconds=_r2_summary_deadline(
+                    request.chunk_summary_timeout_seconds
+                ),
+            )
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return result.to_dict()
 
 
 @app.post("/books/{book_id}/genres")
-def generate_book_genres_endpoint(
-    book_id: str, request: BookGenresRequest
+async def generate_book_genres_endpoint(
+    book_id: str, request: BookGenresRequest, http_request: Request
 ) -> dict[str, object]:
-    _reject_unmigrated_r2_generation_path("genre generation")
     try:
-        result = generate_book_genres(
-            GenerateBookGenresOptions(
-                database_url=request.database_url or get_settings().database_url,
-                book_id=book_id,
-                source_summary_provider=request.source_summary_provider,
-                source_summary_model=request.source_summary_model,
-                source_summary_detail=request.source_summary_detail,
-                generation_provider=request.generation_provider,
-                generation_model=request.generation_model,
-                ollama_base_url=request.ollama_base_url,
-                max_secondary_genres=request.max_secondary_genres,
-                force_refresh=request.force_refresh,
-                reset=request.reset,
-            )
+        options = GenerateBookGenresOptions(
+            database_url=request.database_url or get_settings().database_url,
+            book_id=book_id,
+            source_summary_provider=request.source_summary_provider,
+            source_summary_model=request.source_summary_model,
+            source_summary_detail=request.source_summary_detail,
+            generation_provider=request.generation_provider,
+            generation_model=request.generation_model,
+            ollama_base_url=request.ollama_base_url,
+            max_secondary_genres=request.max_secondary_genres,
+            force_refresh=request.force_refresh,
+            reset=request.reset,
         )
+        caller = getattr(app.state, "r2_api_chat_caller", None)
+        if caller is None:
+            result = generate_book_genres(options)
+        else:
+            result = await _run_r2_generation(
+                caller.generate_book_genres,
+                options,
+                http_request,
+            )
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return result.to_dict()
+
+
+async def _run_r2_generation(
+    operation,
+    options,
+    http_request: Request,
+    *,
+    deadline_seconds: float = 30.0,
+):
+    """Run one R2 API operation without treating a browser abort as an error.
+
+    The generated-client adapter cancels the in-flight RPC when this context is
+    cancelled.  A disconnected browser has no response to receive, so expose a
+    quiet 499 terminal response instead of letting ``CancelledError`` escape
+    FastAPI and create an ASGI error traceback.  Server task cancellation is
+    still propagated normally.
+    """
+
+    context = _RequestContext(
+        deadline_seconds=deadline_seconds,
+        is_disconnected=http_request.is_disconnected,
+    )
+    context.start()
+    try:
+        return await operation(options, context=context)
+    except R2GenerationDeadlineExceeded as error:
+        raise HTTPException(status_code=504, detail="generation deadline elapsed") from error
+    except asyncio.CancelledError as error:
+        if context.was_disconnected:
+            raise HTTPException(status_code=499, detail="client disconnected") from error
+        if context.is_cancelled():
+            raise HTTPException(status_code=504, detail="generation deadline elapsed") from error
+        raise
+    finally:
+        await context.close()
+
+
+def _r2_summary_deadline(configured_timeout: float | None) -> float:
+    """Cap the complete R2 summary request at the broker's outer deadline."""
+
+    return min(
+        resolve_chunk_summary_timeout_seconds(configured_timeout),
+        DEFAULT_OUTER_DEADLINE_SECONDS,
+    )
 
 
 @app.get("/books/{book_id}/genres")
