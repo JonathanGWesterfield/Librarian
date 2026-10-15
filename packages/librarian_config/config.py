@@ -184,6 +184,12 @@ class LibrarianConfig:
 
         return self.runtime_mode == "r2_api"
 
+    @property
+    def uses_r2_worker_runtime(self) -> bool:
+        """Whether this is a resolver-owned R2 worker application document."""
+
+        return self.runtime_mode in {"r2_summary_worker", "r2_metadata_worker"}
+
 
 def default_config_path(*, cwd: Path | None = None) -> Path:
     """Return the documented local or mounted JSON configuration location."""
@@ -249,7 +255,7 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
     if version == 1 and ("runtime" in root or "answer_delivery" in root):
         raise LibrarianConfigError("version 1 configuration cannot contain R2 runtime fields")
     if version == 2:
-        _validate_r2_api_document(root, runtime_mode=runtime_mode)
+        _validate_r2_application_document(root, runtime_mode=runtime_mode)
 
     config_root = path.parent.resolve()
     generation = _parse_provider(
@@ -285,13 +291,14 @@ def _parse_runtime_mode(value: object, *, version: object) -> str:
         return "r0"
     runtime = _require_mapping(value, "runtime")
     _reject_unknown_keys(runtime, {"mode"}, "runtime")
-    if runtime.get("mode") != "r2_api":
-        raise LibrarianConfigError("runtime.mode must be r2_api for version 2 configuration")
-    return "r2_api"
+    mode = runtime.get("mode")
+    if mode not in {"r2_api", "r2_summary_worker", "r2_metadata_worker"}:
+        raise LibrarianConfigError("runtime.mode must name an R2 application role")
+    return mode
 
 
-def _validate_r2_api_document(root: dict[str, Any], *, runtime_mode: str) -> None:
-    """Reject credential-bearing or legacy-provider fields in generated R2 API JSON.
+def _validate_r2_application_document(root: dict[str, Any], *, runtime_mode: str) -> None:
+    """Reject credential-bearing or legacy-provider fields in generated R2 app JSON.
 
     Version 2 is a resolver-owned application document, not a relaxed variant
     of user configuration.  The generated client receives its credential only
@@ -299,11 +306,11 @@ def _validate_r2_api_document(root: dict[str, Any], *, runtime_mode: str) -> Non
     the non-secret ``answer_delivery`` section.
     """
 
-    if runtime_mode != "r2_api":  # Defensive; callers currently establish this above.
-        raise LibrarianConfigError("version 2 configuration requires runtime.mode r2_api")
+    if runtime_mode not in {"r2_api", "r2_summary_worker", "r2_metadata_worker"}:
+        raise LibrarianConfigError("version 2 configuration requires an R2 application role")
     if "codex_executable" in root or "evaluation" in root:
         raise LibrarianConfigError(
-            "version 2 R2 API configuration must not contain legacy execution settings"
+            "version 2 R2 application configuration must not contain legacy execution settings"
         )
     generation = _require_mapping(root.get("generation"), "generation")
     if generation.get("mode") != "r2_grpc":
@@ -314,7 +321,7 @@ def _validate_r2_api_document(root: dict[str, Any], *, runtime_mode: str) -> Non
     embedding = _require_mapping(root.get("embedding"), "embedding")
     if embedding.get("mode") == "openai_compatible":
         raise LibrarianConfigError(
-            "version 2 R2 API configuration does not support credential-bearing embeddings"
+            "version 2 R2 application configuration does not support credential-bearing embeddings"
         )
     _reject_present(
         embedding, {"api_key_file", "headers", "header_files"}, "embedding"
