@@ -1,12 +1,13 @@
 """Generated-stub gRPC adapters for the in-process answer runtime.
 
-They are intentionally composition-root building blocks: M03 does not wire
-them into chat or replace the legacy HTTP broker until every R2 caller can
-switch atomically.
+They are intentionally composition-root building blocks. M03 wires them into
+R2 API chat only; unmigrated R2 generation paths fail closed until the atomic
+caller cutover can replace the legacy HTTP broker.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 import grpc
@@ -180,14 +181,17 @@ class GrpcRuntimeGenerationBroker:
 
         if context.is_cancelled():
             raise RuntimeError("answer request was cancelled before generation")
-        result = await self.client.generate(
-            _to_proto_request(
-                request,
-                operation=self.operation,
-                output_contract=self.output_contract,
-                model_id=self.model_id,
+        result = await _await_generation_with_context(
+            self.client.generate(
+                _to_proto_request(
+                    request,
+                    operation=self.operation,
+                    output_contract=self.output_contract,
+                    model_id=self.model_id,
+                ),
+                timeout=context.remaining_seconds(),
             ),
-            timeout=context.remaining_seconds(),
+            context,
         )
         if result.WhichOneof("outcome") == "invalid_structured_output":
             return GenerationResult(
@@ -204,6 +208,37 @@ class GrpcRuntimeGenerationBroker:
             provider="grpc",
             model=result.provider_model_id,
         )
+
+
+async def _await_generation_with_context(awaitable, context: RequestContext):
+    """Cancel an in-flight generated RPC when its request scope ends.
+
+    The gRPC timeout bounds broker work, but the API must also react promptly
+    to a browser abort. Cancelling the task awaiting ``grpc.aio`` propagates
+    RPC cancellation to the broker rather than waiting for its deadline.
+    """
+
+    task = asyncio.ensure_future(awaitable)
+    try:
+        while not task.done():
+            if context.is_cancelled():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise asyncio.CancelledError("answer request was cancelled during generation")
+            remaining = context.remaining_seconds()
+            if remaining is not None and remaining <= 0:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise asyncio.CancelledError("answer request deadline elapsed during generation")
+            await asyncio.wait(
+                {task},
+                timeout=min(0.05, remaining) if remaining is not None else 0.05,
+            )
+        return task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 def _to_proto_request(

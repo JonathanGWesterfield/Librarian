@@ -100,13 +100,25 @@ Until the atomic caller migration makes R2 the normal launcher, validate the
 R2 overlay with every required profile enabled. This does not alter ordinary R0
 startup, which continues to use `docker-compose.yml` alone:
 
-The API chat migration first exposes a composition seam that owns one ready
-generated client and its synthesis, source-selection, and support-review
-adapters. It remains deliberately inactive while the API's existing retrieval
-settings still require the legacy application configuration and R2 mounts only
-the strict broker-client document at `/config/librarian.json`. Enabling that
-seam is part of the later atomic configuration/caller cutover; this interim
-seam must not be presented as an R2-launchable API path or as HTTP fallback.
+The API chat migration owns one ready generated client and its source-selection,
+synthesis, and support-review adapters for the process lifetime. The API role's
+single `/config/librarian.json` is now a resolver-owned **version 2 R2 API
+runtime document**. It carries only the storage, retrieval, safe embedding,
+and API service settings the process needs, plus a strict nested
+`answer_delivery.codex_broker` gRPC handshake section. Its `generation.mode` is
+`r2_grpc`; it contains no `api_key_file`, token, secret path, legacy execution
+setting, recursive config reference, or HTTP broker URL. The preflight projects
+and validates that nested broker section before it opens a channel, while the
+normal API configuration parser validates the rest of the same fixed-path file.
+
+This activates R2 API chat at FastAPI lifespan: a failed capability handshake
+prevents browser admission, one generated client/stub serves the process, and
+shutdown closes it. R0 keeps its original configuration and startup path.
+Until summary, genre, and recommendation operations move to their generated
+RPCs, an R2 API returns an explicit unavailable response for those generation
+routes. It never recreates the retired HTTP request as a temporary fallback.
+The R2 overlay still remains outside the normal launcher until all caller roles
+are migrated and cut over together.
 
 ```sh
 LIBRARIAN_STACK_RELEASE_SHA=<clean-40-character-sha> \

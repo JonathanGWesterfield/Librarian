@@ -33,6 +33,7 @@ from librarian_contracts.broker_server_config import (
 from librarian_contracts.compose_security import BROKER_SECRET_NAMES
 from librarian_contracts.runtime_config import (
     CLIENT_CREDENTIAL_ROLES,
+    BrokerClientRuntimeConfig,
     build_broker_client_runtime_config,
     serialize_broker_client_runtime_config,
 )
@@ -147,6 +148,12 @@ def render_r2_runtime_configs(config: LibrarianConfig) -> dict[str, str]:
     rendered = render_broker_client_runtime_configs(config)
     if not rendered:
         return {}
+    api_client = build_broker_client_runtime_config(
+        model=config.generation.model,
+        answer_capability=config.generation.answer_capability or "quality",
+        credential_role="api",
+    )
+    rendered["api"] = _serialize_r2_api_runtime_config(config, api_client)
     rendered[R2_BROKER_SERVICE] = serialize_broker_server_runtime_config(
         build_broker_server_runtime_config(
             model=config.generation.model,
@@ -154,6 +161,83 @@ def render_r2_runtime_configs(config: LibrarianConfig) -> dict[str, str]:
         )
     )
     return rendered
+
+
+def _serialize_r2_api_runtime_config(
+    config: LibrarianConfig, client_config: BrokerClientRuntimeConfig
+) -> str:
+    """Render the API's one non-secret R2 application configuration document.
+
+    Unlike worker callers, API needs local storage, embedding, and retrieval
+    settings as well as the gRPC handshake.  Keep those safe settings and the
+    broker section in one versioned file; never copy a provider credential or
+    a host-relative credential path across the resolver boundary.
+    """
+
+    if config.embedding.mode == "openai_compatible":
+        raise LibrarianConfigError(
+            "R2 API requires docker_ollama or native_ollama embeddings; "
+            "credential-bearing embeddings cannot enter the runtime file"
+        )
+    broker = client_config
+    payload = {
+        "version": 2,
+        "runtime": {"mode": "r2_api"},
+        "paths": {
+            "books_dir": config.paths.books_dir,
+            "host_books_dir": config.paths.host_books_dir,
+            "database_url": config.paths.database_url,
+            "log_file": config.paths.log_file,
+        },
+        "embedding": _serialize_safe_embedding(config),
+        "generation": {
+            "mode": "r2_grpc",
+            "model": config.generation.model,
+            "answer_capability": config.generation.answer_capability or "quality",
+        },
+        "search": {
+            "opensearch_url": config.search.opensearch_url,
+            "opensearch_index": config.search.opensearch_index,
+            "retrieval_backend": config.search.retrieval_backend,
+        },
+        "summaries": {
+            "chunk_timeout_seconds": config.summaries.chunk_timeout_seconds,
+            "max_parallel_chunks": config.summaries.max_parallel_chunks,
+        },
+        "semantic_source_selector": {
+            "enabled": False,
+            "provider": "codex",
+            "model": config.generation.model,
+        },
+        "services": {
+            "api_port": config.services.api_port,
+            "web_port": config.services.web_port,
+            "opensearch_port": config.services.opensearch_port,
+            "opensearch_java_opts": config.services.opensearch_java_opts,
+            "ollama_host": config.services.ollama_host,
+            "summary_worker_limit": config.services.summary_worker_limit,
+            "summary_worker_poll_interval_seconds": config.services.summary_worker_poll_interval_seconds,
+        },
+        "answer_delivery": {
+            "codex_broker": {
+                "transport": "grpc",
+                "target": broker.target,
+                "contract_major": broker.contract_major,
+                "contract_minor": broker.contract_minor,
+                "credential_role": broker.credential_role,
+            }
+        },
+    }
+    return json.dumps(payload, indent=2) + "\n"
+
+
+def _serialize_safe_embedding(config: LibrarianConfig) -> dict[str, str]:
+    embedding = {"mode": config.embedding.mode, "model": config.embedding.model}
+    if config.embedding.mode == "native_ollama":
+        if not config.embedding.base_url:
+            raise LibrarianConfigError("native_ollama embedding configuration is incomplete")
+        embedding["base_url"] = config.embedding.base_url
+    return embedding
 
 
 def write_r2_runtime_configs(output_directory: Path, config: LibrarianConfig) -> list[Path]:

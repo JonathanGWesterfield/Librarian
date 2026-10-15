@@ -30,6 +30,7 @@ _ALLOWED_PROVIDER_MODES = {
     "native_ollama",
     "openai_compatible",
     "codex",
+    "r2_grpc",
 }
 _ALLOWED_ANSWER_CAPABILITIES = {"quality", "lightweight"}
 _ALLOWED_SEMANTIC_SELECTOR_PROVIDERS = {"codex", "docker_codex_broker"}
@@ -166,6 +167,7 @@ class LibrarianConfig:
     evaluation: EvaluationSettings | None
     services: ServiceSettings
     codex_executable: str
+    runtime_mode: str = "r0"
 
     @property
     def uses_docker_ollama(self) -> bool:
@@ -175,6 +177,12 @@ class LibrarianConfig:
     def uses_docker_codex_broker(self) -> bool:
         """Whether Compose must start the internal Codex CLI broker."""
         return self.generation.uses_docker_codex_broker
+
+    @property
+    def uses_r2_api_runtime(self) -> bool:
+        """Whether this is the resolver-owned, non-secret R2 API document."""
+
+        return self.runtime_mode == "r2_api"
 
 
 def default_config_path(*, cwd: Path | None = None) -> Path:
@@ -229,11 +237,19 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
             "evaluation",
             "services",
             "codex_executable",
+            "runtime",
+            "answer_delivery",
         },
         "Librarian configuration",
     )
-    if root.get("version") != 1:
-        raise LibrarianConfigError("Librarian configuration version must be the number 1.")
+    version = root.get("version")
+    if version not in {1, 2}:
+        raise LibrarianConfigError("Librarian configuration version must be the number 1 or 2.")
+    runtime_mode = _parse_runtime_mode(root.get("runtime"), version=version)
+    if version == 1 and ("runtime" in root or "answer_delivery" in root):
+        raise LibrarianConfigError("version 1 configuration cannot contain R2 runtime fields")
+    if version == 2:
+        _validate_r2_api_document(root, runtime_mode=runtime_mode)
 
     config_root = path.parent.resolve()
     generation = _parse_provider(
@@ -253,8 +269,58 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
         ),
         evaluation=_parse_evaluation(root.get("evaluation"), generation=generation),
         services=_parse_services(root.get("services")),
-        codex_executable=_require_string(root.get("codex_executable"), "codex_executable"),
+        codex_executable=(
+            _require_string(root.get("codex_executable"), "codex_executable")
+            if version == 1
+            else ""
+        ),
+        runtime_mode=runtime_mode,
     )
+
+
+def _parse_runtime_mode(value: object, *, version: object) -> str:
+    """Accept the R2 document only through its explicit versioned marker."""
+
+    if version == 1:
+        return "r0"
+    runtime = _require_mapping(value, "runtime")
+    _reject_unknown_keys(runtime, {"mode"}, "runtime")
+    if runtime.get("mode") != "r2_api":
+        raise LibrarianConfigError("runtime.mode must be r2_api for version 2 configuration")
+    return "r2_api"
+
+
+def _validate_r2_api_document(root: dict[str, Any], *, runtime_mode: str) -> None:
+    """Reject credential-bearing or legacy-provider fields in generated R2 API JSON.
+
+    Version 2 is a resolver-owned application document, not a relaxed variant
+    of user configuration.  The generated client receives its credential only
+    through the role-specific Docker secret, and every broker field lives in
+    the non-secret ``answer_delivery`` section.
+    """
+
+    if runtime_mode != "r2_api":  # Defensive; callers currently establish this above.
+        raise LibrarianConfigError("version 2 configuration requires runtime.mode r2_api")
+    if "codex_executable" in root or "evaluation" in root:
+        raise LibrarianConfigError(
+            "version 2 R2 API configuration must not contain legacy execution settings"
+        )
+    generation = _require_mapping(root.get("generation"), "generation")
+    if generation.get("mode") != "r2_grpc":
+        raise LibrarianConfigError("version 2 generation.mode must be r2_grpc")
+    _reject_present(
+        generation, {"base_url", "api_key_file", "headers", "header_files"}, "generation"
+    )
+    embedding = _require_mapping(root.get("embedding"), "embedding")
+    if embedding.get("mode") == "openai_compatible":
+        raise LibrarianConfigError(
+            "version 2 R2 API configuration does not support credential-bearing embeddings"
+        )
+    _reject_present(
+        embedding, {"api_key_file", "headers", "header_files"}, "embedding"
+    )
+    answer_delivery = _require_mapping(root.get("answer_delivery"), "answer_delivery")
+    _reject_unknown_keys(answer_delivery, {"codex_broker"}, "answer_delivery")
 
 
 def resolve_books_dir(books_dir: str | Path | None = None) -> Path:
@@ -485,11 +551,11 @@ def _parse_provider(value: object, *, role: str, config_root: Path) -> ProviderS
     )
     mode = _require_string(provider.get("mode"), f"{role}.mode").casefold()
     if mode not in _ALLOWED_PROVIDER_MODES or (
-        mode in {"codex", "docker_codex_broker"} and role != "generation"
+        mode in {"codex", "docker_codex_broker", "r2_grpc"} and role != "generation"
     ):
         allowed = "docker_ollama, native_ollama, openai_compatible"
         if role == "generation":
-            allowed += ", docker_codex_broker, codex"
+            allowed += ", docker_codex_broker, codex, r2_grpc"
         raise LibrarianConfigError(f"{role}.mode must be one of: {allowed}")
     model = _require_string(provider.get("model"), f"{role}.model")
     if role != "generation" and "answer_capability" in provider:
@@ -500,7 +566,7 @@ def _parse_provider(value: object, *, role: str, config_root: Path) -> ProviderS
         else None
     )
 
-    if mode in {"docker_ollama", "codex"}:
+    if mode in {"docker_ollama", "codex", "r2_grpc"}:
         _reject_present(provider, {"base_url", "api_key_file", "headers", "header_files"}, role)
         return ProviderSettings(
             role=role,

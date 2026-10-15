@@ -11,10 +11,9 @@
 #       --profile evaluation \
 #       -f docker-compose.yml -f docker-compose.r2.yml config --format json
 #
-# The current callers are not wired to generated gRPC adapters yet, so this
-# validates topology and startup gates rather than replacing the normal
-# launcher. The caller migration slice will add resolver output when it brings
-# this composition online atomically.
+# The API chat caller uses generated gRPC in this overlay. Other API generation
+# callers deliberately fail closed until their matching R2 operations migrate,
+# so this remains outside the normal R0 launcher until the atomic cutover.
 
 services:
   config-resolver:
@@ -92,6 +91,18 @@ services:
       - --principal
       - api
       - --
+    # Compose does not append the image CMD when this overlay replaces the
+    # entrypoint, so keep the ordinary API server command explicit for the
+    # R2 startup wrapper to execute.
+    command:
+      - uvicorn
+      - librarian_api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --app-dir
+      - apps/api
     volumes: !override
       - ./.runtime/config/api/librarian.json:/config/librarian.json:ro
       - ./data:/data

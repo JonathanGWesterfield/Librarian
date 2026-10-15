@@ -20,6 +20,7 @@ from librarian_config.config import (
     resolve_evaluation_judge,
     resolve_generation_answer_capability,
 )
+from librarian_contracts.runtime_config import parse_broker_client_runtime_config
 
 RESOLVER_PATH = REPO_ROOT / "scripts" / "resolve_provider_config.py"
 SPEC = importlib.util.spec_from_file_location("librarian_compose_resolver", RESOLVER_PATH)
@@ -556,6 +557,37 @@ class LibrarianConfigTests(unittest.TestCase):
                 self.assertNotIn("generation-secret", runtime_json)
                 self.assertNotIn("api_key_file", runtime_json)
                 self.assertNotIn("/run/secrets", runtime_json)
+
+        api_runtime = json.loads(rendered["api"])
+        self.assertEqual(api_runtime["version"], 2)
+        self.assertEqual(api_runtime["runtime"], {"mode": "r2_api"})
+        self.assertEqual(api_runtime["generation"]["mode"], "r2_grpc")
+        self.assertEqual(
+            parse_broker_client_runtime_config(rendered["api"]).credential_role,
+            "api",
+        )
+        with tempfile.TemporaryDirectory() as api_directory:
+            api_path = Path(api_directory) / "librarian.json"
+            api_path.write_text(rendered["api"], encoding="utf-8")
+            parsed_api = get_librarian_config(api_path)
+        self.assertTrue(parsed_api.uses_r2_api_runtime)
+        self.assertEqual(parsed_api.paths.database_url, "sqlite:////data/librarian.db")
+
+    def test_r2_api_runtime_rejects_credential_bearing_embedding_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "librarian.json"
+            _write_config(
+                path,
+                embedding=_selection("openai_compatible", "embedding"),
+                generation=_selection("docker_codex_broker", "generation"),
+            )
+            _write_secret_files(root, "openai_compatible", "docker_codex_broker")
+            _write_r2_broker_secret_files(root)
+            config = get_librarian_config(path)
+
+            with self.assertRaisesRegex(LibrarianConfigError, "credential-bearing embeddings"):
+                resolver.render_r2_runtime_configs(config)
 
     def test_resolver_does_not_generate_broker_files_for_non_broker_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
