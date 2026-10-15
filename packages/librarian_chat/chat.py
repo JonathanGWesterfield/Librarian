@@ -182,6 +182,10 @@ class ChatOptions:
     book_title: str | None = None
     author: str | None = None
     include_non_content: bool = False
+    # Keep raw request intent distinct from the resolved default capability.
+    # It is appended to preserve callers that construct this public value
+    # positionally.
+    answer_capability_is_override: bool = False
 
 
 @dataclass(frozen=True)
@@ -333,8 +337,27 @@ class _SourceSentenceCandidate:
     sentence: str
 
 
-def prepare_answer_question(options: ChatOptions) -> PreparedChat:
-    """Retrieve and validate evidence once before choosing a delivery mode."""
+@dataclass(frozen=True)
+class RetrievedChatEvidence:
+    """Shared retrieval/evidence gate for R0 and the R2 API composition."""
+
+    total_started: float
+    question: str
+    answer_capability: str
+    required_sources: int
+    retrieval_limit: int
+    search_response: SearchResponse
+    retrieval_backend: str
+    sources: list[ChatSource]
+    evidence_sufficient: bool
+    publication_question: bool
+    query_embedding_seconds: float
+    retrieval_seconds: float
+
+
+def retrieve_chat_evidence(options: ChatOptions) -> RetrievedChatEvidence:
+    """Retrieve once and apply the unchanged scope and evidence-floor policy."""
+
     total_started = perf_counter()
     question = options.question.strip()
     if not question:
@@ -345,13 +368,8 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         generation_provider=options.generation_provider,
         generation_model=options.generation_model,
     )
-
     effective_author = _effective_author_scope(options, question)
     required_sources = _required_source_count(question, effective_author)
-    # A client may ask for a small retrieval window to keep a local model
-    # prompt short, but that must not make the evidence policy impossible to
-    # satisfy. Broad questions need one distinct passage per required source,
-    # so the server is the final authority on the minimum retrieval depth.
     retrieval_limit = max(1, options.retrieval_limit, required_sources)
     include_non_content = options.include_non_content or _asks_for_publication_metadata(
         question
@@ -366,7 +384,6 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
         )
     )
     query_embedding_seconds = perf_counter() - embedding_started
-
     retrieval_started = perf_counter()
     search_response, retrieval_backend = _retrieve_sources(
         options,
@@ -385,26 +402,62 @@ def prepare_answer_question(options: ChatOptions) -> PreparedChat:
             if _is_publication_evidence(question, result.content_type, result.text)
         ]
     if not include_non_content:
-        retrieval_results = [result for result in retrieval_results
-            if result.content_type == "body" and classify_chunk_content(
-                text=result.text, chunk_index=result.chunk_index
-            ) == "body"]
+        retrieval_results = [
+            result
+            for result in retrieval_results
+            if result.content_type == "body"
+            and classify_chunk_content(text=result.text, chunk_index=result.chunk_index) == "body"
+        ]
     sources = _to_sources(retrieval_results)
     evidence_sufficient = _has_sufficient_evidence(
-        sources,
-        required_sources=required_sources,
+        sources, required_sources=required_sources
     )
-    requested_years = set(re.findall(
-        r"\b[12]\d{3}\b(?![\s-]+(?:words?|characters?|pages?)\b)", question.casefold()
-    ))
-    evidence_years = set(re.findall(r"\b[12]\d{3}\b", " ".join(f"{source.title or ''} {source.text}" for source in sources)))
+    requested_years = set(
+        re.findall(
+            r"\b[12]\d{3}\b(?![\s-]+(?:words?|characters?|pages?)\b)",
+            question.casefold(),
+        )
+    )
+    evidence_years = set(
+        re.findall(r"\b[12]\d{3}\b", " ".join(
+            f"{source.title or ''} {source.text}" for source in sources
+        ))
+    )
     if requested_years - evidence_years:
         evidence_sufficient = False
     if not evidence_sufficient:
-        # Results that fail the guard are diagnostics, not answer evidence.
-        # Preserve candidate_count and timings, but never display misleading
-        # citations alongside an insufficiency response.
         sources = []
+    return RetrievedChatEvidence(
+        total_started=total_started,
+        question=question,
+        answer_capability=answer_capability,
+        required_sources=required_sources,
+        retrieval_limit=retrieval_limit,
+        search_response=search_response,
+        retrieval_backend=retrieval_backend,
+        sources=sources,
+        evidence_sufficient=evidence_sufficient,
+        publication_question=publication_question,
+        query_embedding_seconds=query_embedding_seconds,
+        retrieval_seconds=retrieval_seconds,
+    )
+
+
+def prepare_answer_question(options: ChatOptions) -> PreparedChat:
+    """Retrieve and validate evidence once before choosing a delivery mode."""
+    retrieved = retrieve_chat_evidence(options)
+    total_started = retrieved.total_started
+    question = retrieved.question
+    answer_capability = retrieved.answer_capability
+    required_sources = retrieved.required_sources
+    retrieval_limit = retrieved.retrieval_limit
+    search_response = retrieved.search_response
+    retrieval_backend = retrieved.retrieval_backend
+    sources = retrieved.sources
+    evidence_sufficient = retrieved.evidence_sufficient
+    publication_question = retrieved.publication_question
+    query_embedding_seconds = retrieved.query_embedding_seconds
+    retrieval_seconds = retrieved.retrieval_seconds
 
     # Preserve the timing field for existing API clients. Deterministic and
     # lightweight paths remain extractive; the explicitly configured Codex

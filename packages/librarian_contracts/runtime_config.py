@@ -17,6 +17,7 @@ from typing import Any
 from librarian_contracts.stack_contract import CONTRACT_MAJOR, DEFAULT_CONTRACT_MINOR
 
 RUNTIME_CONFIG_VERSION = 1
+R2_API_RUNTIME_CONFIG_VERSION = 2
 BROKER_TRANSPORT = "grpc"
 DOCKER_BROKER_TARGET = "dns:///codex-broker:50051"
 CLIENT_CREDENTIAL_ROLES = frozenset(
@@ -34,6 +35,20 @@ _BROKER_FIELDS = frozenset(
         "contract_major",
         "contract_minor",
         "credential_role",
+    }
+)
+_R2_API_TOP_LEVEL_REQUIRED_FIELDS = frozenset(
+    {
+        "version",
+        "runtime",
+        "paths",
+        "embedding",
+        "generation",
+        "search",
+        "summaries",
+        "semantic_source_selector",
+        "services",
+        "answer_delivery",
     }
 )
 
@@ -90,6 +105,8 @@ def parse_broker_client_runtime_config(raw: str | bytes) -> BrokerClientRuntimeC
         raise RuntimeConfigError("broker runtime configuration must be valid JSON") from error
 
     root = _require_object(decoded, "broker runtime configuration")
+    if root.get("version") == R2_API_RUNTIME_CONFIG_VERSION:
+        return _parse_r2_api_runtime_config(root)
     _require_exact_fields(root, _TOP_LEVEL_FIELDS, "broker runtime configuration")
     if (
         not isinstance(root["version"], int)
@@ -116,6 +133,45 @@ def parse_broker_client_runtime_config(raw: str | bytes) -> BrokerClientRuntimeC
     _validate(config)
     if broker["transport"] != BROKER_TRANSPORT:
         raise RuntimeConfigError(f"services.codex_broker.transport must be {BROKER_TRANSPORT}")
+    return config
+
+
+def _parse_r2_api_runtime_config(root: dict[str, Any]) -> BrokerClientRuntimeConfig:
+    """Project the strict broker portion from the one R2 API runtime file.
+
+    The API needs safe retrieval settings beside its generated-client settings.
+    This keeps the single fixed-path mount while retaining exact validation of
+    the broker configuration consumed before a channel is opened.
+    """
+
+    _require_exact_fields(
+        root, _R2_API_TOP_LEVEL_REQUIRED_FIELDS, "R2 API runtime configuration"
+    )
+    runtime = _require_object(root["runtime"], "runtime")
+    _require_exact_fields(runtime, frozenset({"mode"}), "runtime")
+    if runtime["mode"] != "r2_api":
+        raise RuntimeConfigError("runtime.mode must be r2_api")
+    generation = _require_object(root["generation"], "generation")
+    _require_exact_fields(generation, _GENERATION_FIELDS | frozenset({"mode"}), "generation")
+    if generation["mode"] != "r2_grpc":
+        raise RuntimeConfigError("generation.mode must be r2_grpc")
+    answer_delivery = _require_object(root["answer_delivery"], "answer_delivery")
+    _require_exact_fields(answer_delivery, frozenset({"codex_broker"}), "answer_delivery")
+    broker = _require_object(answer_delivery["codex_broker"], "answer_delivery.codex_broker")
+    _require_exact_fields(broker, _BROKER_FIELDS, "answer_delivery.codex_broker")
+    config = BrokerClientRuntimeConfig(
+        model=generation["model"],
+        answer_capability=generation["answer_capability"],
+        target=broker["target"],
+        contract_major=broker["contract_major"],
+        contract_minor=broker["contract_minor"],
+        credential_role=broker["credential_role"],
+    )
+    _validate(config)
+    if broker["transport"] != BROKER_TRANSPORT:
+        raise RuntimeConfigError(
+            f"answer_delivery.codex_broker.transport must be {BROKER_TRANSPORT}"
+        )
     return config
 
 

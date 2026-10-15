@@ -3,8 +3,8 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch
-
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
@@ -12,13 +12,13 @@ sys.path.insert(0, str(REPO_ROOT / "packages"))
 
 from librarian_storage.storage import (
     SQLITE_SCHEMA_MIGRATIONS,
-    SQLiteIngestionStore,
     SchemaMigrationError,
+    SQLiteIngestionStore,
 )
 
 try:
-    from fastapi.testclient import TestClient
     import librarian_api.main as main_module
+    from fastapi.testclient import TestClient
     from librarian_api.config import Settings
 except (ModuleNotFoundError, RuntimeError) as error:
     TestClient = None
@@ -132,6 +132,53 @@ class ApiStartupMigrationTests(unittest.TestCase):
         create_store.assert_called_once_with(self.database_url)
         failing_store.initialize.assert_called_once_with()
         failing_store.close.assert_called_once_with()
+
+    def test_r2_lifespan_opens_one_ready_caller_and_closes_it_at_shutdown(self) -> None:
+        startup_store = Mock()
+        caller = Mock()
+        caller.close = AsyncMock()
+        runtime_config = SimpleNamespace(
+            uses_r2_api_runtime=True,
+            generation=SimpleNamespace(model="gpt-5.6-sol"),
+        )
+        with (
+            patch.object(main_module, "get_settings", return_value=self._settings()),
+            patch.object(main_module, "get_librarian_config", return_value=runtime_config),
+            patch.object(main_module, "create_ingestion_store", return_value=startup_store),
+            patch.object(
+                main_module.R2ApiChatCaller,
+                "open",
+                AsyncMock(return_value=caller),
+            ) as open_caller,
+        ):
+            with TestClient(main_module.app):
+                self.assertIs(main_module.app.state.r2_api_chat_caller, caller)
+
+        open_caller.assert_awaited_once_with(model_id="gpt-5.6-sol")
+        caller.close.assert_awaited_once_with()
+        self.assertFalse(hasattr(main_module.app.state, "r2_api_chat_caller"))
+
+    def test_r2_lifespan_fails_before_admission_when_capability_handshake_fails(self) -> None:
+        startup_store = Mock()
+        runtime_config = SimpleNamespace(
+            uses_r2_api_runtime=True,
+            generation=SimpleNamespace(model="gpt-5.6-sol"),
+        )
+        with (
+            patch.object(main_module, "get_settings", return_value=self._settings()),
+            patch.object(main_module, "get_librarian_config", return_value=runtime_config),
+            patch.object(main_module, "create_ingestion_store", return_value=startup_store),
+            patch.object(
+                main_module.R2ApiChatCaller,
+                "open",
+                AsyncMock(side_effect=RuntimeError("capability mismatch")),
+            ),
+            self.assertRaisesRegex(RuntimeError, "capability mismatch"),
+        ):
+            with TestClient(main_module.app):
+                pass
+
+        startup_store.initialize.assert_not_called()
 
     def _snapshot(self) -> tuple[list[tuple[object, ...]], list[str]]:
         with sqlite3.connect(self.database_path) as connection:

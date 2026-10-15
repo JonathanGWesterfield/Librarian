@@ -28,6 +28,16 @@ R2_REQUIRED_SERVICES = {
     "metadata-worker",
     "evaluator",
 }
+R2_API_SERVER_COMMAND = [
+    "uvicorn",
+    "librarian_api.main:app",
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "8000",
+    "--app-dir",
+    "apps/api",
+]
 
 
 @unittest.skipUnless(shutil.which("docker"), "Docker Compose is required for overlay rendering")
@@ -66,6 +76,14 @@ class R2ComposeOverlayTests(unittest.TestCase):
         self.assertEqual(rendered.returncode, 0, rendered.stderr)
         compose = json.loads(rendered.stdout)
         self.assertTrue(R2_REQUIRED_SERVICES.issubset(compose["services"]))
+        self.assertEqual(
+            compose["services"]["api"]["entrypoint"][-1],
+            "--",
+        )
+        self.assertEqual(
+            compose["services"]["api"]["command"],
+            R2_API_SERVER_COMMAND,
+        )
         validate_r2_compose_security(compose)
 
 

@@ -81,6 +81,8 @@ class AnswerRuntime:
 
         try:
             evidence = self.evidence_retriever.retrieve(request, context)
+            if isawaitable(evidence):
+                evidence = await evidence
         except Exception:  # noqa: BLE001 - port failures are intentionally made safe.
             yield event("failed", {"error": "evidence retrieval failed"})
             return

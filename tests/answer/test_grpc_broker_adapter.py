@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 from dataclasses import dataclass
@@ -108,6 +109,24 @@ class GrpcRuntimeGenerationBrokerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status, grpc.StatusCode.FAILED_PRECONDITION)
         self.assertEqual(raised.exception.error_code, delivery_pb2.CONTRACT_MISMATCH)
 
+    async def test_cancellation_context_cancels_an_in_flight_generated_rpc(self) -> None:
+        client = _BlockingClient()
+        context = _CancellableContext()
+        adapter = GrpcRuntimeGenerationBroker(
+            client=client,
+            operation=delivery_pb2.GROUNDED_SYNTHESIS,
+            output_contract=delivery_pb2.GROUNDED_ANSWER_JSON_V1,
+            model_id="gpt-5.6-sol",
+        )
+        generation = asyncio.create_task(adapter.generate(self.request, context))
+        await client.started.wait()
+        context.cancelled = True
+
+        with self.assertRaises(asyncio.CancelledError):
+            await generation
+
+        self.assertTrue(client.cancelled)
+
 
 @dataclass
 class _FakeClient:
@@ -136,6 +155,28 @@ class _Context:
 
     def remaining_seconds(self) -> float:
         return 10
+
+
+class _CancellableContext(_Context):
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def is_cancelled(self) -> bool:
+        return self.cancelled
+
+
+class _BlockingClient:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = False
+
+    async def generate(self, request, *, timeout):
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
 
 
 def _snapshot() -> EvidenceSnapshot:

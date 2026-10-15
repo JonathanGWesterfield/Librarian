@@ -1,16 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-import json
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-
-from librarian_api.config import get_settings
 from librarian_chat.chat import (
     ChatOptions,
     answer_question,
@@ -18,6 +15,7 @@ from librarian_chat.chat import (
     stream_answer_question,
 )
 from librarian_config.config import (
+    get_librarian_config,
     resolve_embedding_model,
     resolve_embedding_provider,
     resolve_generation_answer_capability,
@@ -48,6 +46,10 @@ from librarian_search.opensearch import OpenSearchIndexOptions, index_chunks
 from librarian_search.search import SearchOptions, search_chunks
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
+from pydantic import BaseModel, Field
+
+from librarian_api.config import get_settings
+from librarian_api.r2_chat import R2ApiChatCaller, _RequestContext
 
 configure_logging(file_enabled=False)
 
@@ -56,12 +58,25 @@ configure_logging(file_enabled=False)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(log_file=settings.log_file)
+    r2_caller: R2ApiChatCaller | None = None
+    config = get_librarian_config()
+    if config.uses_r2_api_runtime:
+        # The authenticated capability handshake completes before FastAPI
+        # accepts browser traffic.  The caller owns this one channel/stub for
+        # the complete process lifetime; it never falls back to broker HTTP.
+        r2_caller = await R2ApiChatCaller.open(model_id=config.generation.model)
+        _app.state.r2_api_chat_caller = r2_caller
     store = create_ingestion_store(settings.database_url)
     try:
-        store.initialize()
+        try:
+            store.initialize()
+        finally:
+            store.close()
+        yield
     finally:
-        store.close()
-    yield
+        if r2_caller is not None:
+            await r2_caller.close()
+            del _app.state.r2_api_chat_caller
 
 
 app = FastAPI(title="Librarian API", version="0.1.0", lifespan=lifespan)
@@ -489,9 +504,20 @@ def index_search_endpoint(request: SearchIndexRequest) -> dict[str, object]:
     response_description="Source-faithful answer and the local source chunks cited as evidence.",
     responses={400: _CHAT_BAD_REQUEST_RESPONSE},
 )
-def chat_endpoint(request: ChatRequest) -> dict[str, object]:
+async def chat_endpoint(payload: ChatRequest, request: Request) -> dict[str, object]:
     try:
-        result = answer_question(_chat_options(request))
+        caller = getattr(app.state, "r2_api_chat_caller", None)
+        options = _chat_options(payload)
+        if caller is None:
+            result = answer_question(options)
+        else:
+            caller.validate_options(options)
+            context = _RequestContext(is_disconnected=request.is_disconnected)
+            context.start()
+            try:
+                result = await caller.answer(options, context=context)
+            finally:
+                await context.close()
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return result.to_dict()
@@ -512,10 +538,33 @@ def chat_endpoint(request: ChatRequest) -> dict[str, object]:
         400: _CHAT_BAD_REQUEST_RESPONSE,
     },
 )
-def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
+async def chat_stream_endpoint(payload: ChatRequest, request: Request) -> StreamingResponse:
     """Stream exact cited source sentences without changing the JSON API."""
+    caller = getattr(app.state, "r2_api_chat_caller", None)
+    if caller is not None:
+        try:
+            options = _chat_options(payload)
+            caller.validate_options(options)
+        except (ValueError, NotImplementedError, RuntimeError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        async def r2_event_bytes():
+            context = _RequestContext(is_disconnected=request.is_disconnected)
+            context.start()
+            try:
+                async for event in caller.stream(options, context=context):
+                    encoded = json.dumps(event.data, separators=(",", ":"))
+                    yield f"event: {event.event}\ndata: {encoded}\n\n".encode("utf-8")
+            finally:
+                await context.close()
+
+        return StreamingResponse(
+            r2_event_bytes(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     try:
-        preparation = prepare_answer_question(_chat_options(request))
+        preparation = prepare_answer_question(_chat_options(payload))
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -545,6 +594,7 @@ def _chat_options(request: ChatRequest) -> ChatOptions:
             generation_provider=request.generation_provider,
             generation_model=request.generation_model,
         ),
+        answer_capability_is_override=request.answer_capability is not None,
         ollama_base_url=request.ollama_base_url,
         retrieval_limit=request.retrieval_limit,
         book_id=request.book_id,
@@ -554,8 +604,22 @@ def _chat_options(request: ChatRequest) -> ChatOptions:
     )
 
 
+def _reject_unmigrated_r2_generation_path(operation: str) -> None:
+    """Keep R2 from silently recreating the retired HTTP generator path."""
+
+    if get_librarian_config().uses_r2_api_runtime:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"R2 {operation} migration is not available yet; "
+                "the API will not fall back to the legacy HTTP broker."
+            ),
+        )
+
+
 @app.post("/recommendations")
 def recommendations_endpoint(request: RecommendationRequest) -> dict[str, object]:
+    _reject_unmigrated_r2_generation_path("recommendations")
     try:
         result = recommend_books(
             RecommendationOptions(
@@ -584,6 +648,7 @@ def recommendations_endpoint(request: RecommendationRequest) -> dict[str, object
 def summarize_book_endpoint(
     book_id: str, request: BookSummaryRequest
 ) -> dict[str, object]:
+    _reject_unmigrated_r2_generation_path("book summary")
     try:
         result = summarize_book(
             SummarizeBookOptions(
@@ -613,6 +678,7 @@ def summarize_book_endpoint(
 def generate_book_genres_endpoint(
     book_id: str, request: BookGenresRequest
 ) -> dict[str, object]:
+    _reject_unmigrated_r2_generation_path("genre generation")
     try:
         result = generate_book_genres(
             GenerateBookGenresOptions(

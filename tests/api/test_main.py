@@ -1,9 +1,9 @@
+import json
 import sys
 import unittest
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
@@ -16,8 +16,8 @@ from librarian_recommendations.recommendations import (
     RecommendationEvidence,
     RecommendationResponse,
 )
-from librarian_search.search import SearchResponse, SearchResult
 from librarian_search.opensearch import OpenSearchIndexResult
+from librarian_search.search import SearchResponse, SearchResult
 from librarian_storage.storage import (
     BookGenreRecord,
     BookRecord,
@@ -33,11 +33,13 @@ from librarian_storage.storage import (
 from librarian_summarization.summarize import BookSummary
 
 try:
+    import librarian_api.main as main_module
     from fastapi.testclient import TestClient
     from librarian_api.main import app
 except (ModuleNotFoundError, RuntimeError) as error:
     TestClient = None
     app = None
+    main_module = None
     API_IMPORT_ERROR = error
 else:
     API_IMPORT_ERROR = None
@@ -415,6 +417,172 @@ class IngestionApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(payload["sources"][0]["source_id"], "S1")
+
+    def test_r2_chat_endpoint_uses_lifecycle_caller_without_legacy_http_facade(self) -> None:
+        r2_response = ChatResponse(
+            question="Who opens the gate?",
+            answer="Mara opens the gate. [S1]",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="grpc",
+            generation_model="gpt-5.6-sol",
+            retrieval_limit=1,
+            candidate_count=1,
+            filters={},
+            sources=[
+                ChatSource(
+                    source_id="S1",
+                    score=1.0,
+                    chunk_id="chunk-1",
+                    book_id="book-1",
+                    relative_path="book.epub",
+                    title="Book",
+                    authors=[],
+                    chunk_index=0,
+                    text="Mara opens the gate.",
+                )
+            ],
+        )
+        caller = type(
+            "Caller",
+            (),
+            {
+                "answer": AsyncMock(return_value=r2_response),
+                "validate_options": MagicMock(),
+            },
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            with (
+                patch("librarian_api.main._chat_options", return_value=object()),
+                patch(
+                    "librarian_api.main.answer_question",
+                    side_effect=AssertionError("R2 must not use the legacy HTTP facade"),
+                ),
+            ):
+                response = self.client.post("/chat", json={"question": r2_response.question})
+        finally:
+            del app.state.r2_api_chat_caller
+
+        self.assertEqual(response.status_code, 200)
+        caller.answer.assert_awaited_once()
+        caller.validate_options.assert_called_once()
+        self.assertEqual(response.json()["generation_provider"], "grpc")
+
+    def test_r2_chat_endpoint_rejects_answer_capability_override_before_generation(self) -> None:
+        caller = type(
+            "Caller",
+            (),
+            {
+                "answer": AsyncMock(),
+                "validate_options": MagicMock(
+                    side_effect=ValueError("R2 chat does not allow per-request generation overrides")
+                ),
+            },
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            response = self.client.post(
+                "/chat",
+                json={"question": "Who opens the gate?", "answer_capability": "quality"},
+            )
+        finally:
+            del app.state.r2_api_chat_caller
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("per-request generation overrides", response.json()["detail"])
+        caller.answer.assert_not_awaited()
+
+    def test_r2_chat_endpoint_allows_the_resolved_default_capability(self) -> None:
+        r2_response = ChatResponse(
+            question="Who opens the gate?",
+            answer="Mara opens the gate. [S1]",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="grpc",
+            generation_model="gpt-5.6-sol",
+            retrieval_limit=1,
+            candidate_count=1,
+            filters={},
+            sources=[],
+        )
+        caller = type(
+            "Caller",
+            (),
+            {
+                "answer": AsyncMock(return_value=r2_response),
+                "validate_options": MagicMock(),
+            },
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            response = self.client.post("/chat", json={"question": r2_response.question})
+        finally:
+            del app.state.r2_api_chat_caller
+
+        self.assertEqual(response.status_code, 200)
+        options = caller.answer.await_args.args[0]
+        self.assertIn(options.answer_capability, {"quality", "lightweight"})
+        self.assertFalse(options.answer_capability_is_override)
+
+    def test_r2_stream_endpoint_serializes_the_established_sse_frame_contract(self) -> None:
+        async def events(_options, *, context):
+            self.assertFalse(context.is_cancelled())
+            yield ChatStreamEvent(
+                "retrieval",
+                {
+                    "question": "Who opens the gate?",
+                    "sources": [{"source_id": "S1"}],
+                    "timings": {
+                        "query_embedding_seconds": 0.01,
+                        "retrieval_seconds": 0.02,
+                        "prompt_construction_seconds": 0.0,
+                        "time_to_first_event_seconds": 0.03,
+                    },
+                },
+            )
+            yield ChatStreamEvent("token", {"text": "Mara opens the gate. [S1]"})
+            yield ChatStreamEvent(
+                "complete",
+                {
+                    "answer": "Mara opens the gate. [S1]",
+                    "timings": {
+                        "query_embedding_seconds": 0.01,
+                        "retrieval_seconds": 0.02,
+                        "prompt_construction_seconds": 0.0,
+                        "generation_seconds": 0.04,
+                        "total_seconds": 0.07,
+                        "time_to_first_event_seconds": 0.03,
+                        "time_to_first_token_seconds": 0.04,
+                    },
+                },
+            )
+
+        caller = type(
+            "Caller", (), {"stream": staticmethod(events), "validate_options": MagicMock()}
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            response = self.client.post("/chat/stream", json={"question": "Who opens the gate?"})
+        finally:
+            del app.state.r2_api_chat_caller
+
+        self.assertEqual(response.status_code, 200)
+        parsed = _parse_sse_events(response.text)
+        self.assertEqual([event for event, _ in parsed], ["retrieval", "token", "complete"])
+        self.assertEqual(parsed[1][1], {"text": "Mara opens the gate. [S1]"})
+        self.assertIn("time_to_first_event_seconds", parsed[0][1]["timings"])
+        self.assertIn("time_to_first_token_seconds", parsed[-1][1]["timings"])
+
+    def test_r2_unmigrated_generation_paths_fail_closed_before_http_generation(self) -> None:
+        runtime_config = type("RuntimeConfig", (), {"uses_r2_api_runtime": True})()
+        with patch.object(main_module, "get_librarian_config", return_value=runtime_config):
+            response = self.client.post(
+                "/recommendations", json={"query": "What is similar?"}
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("will not fall back", response.json()["detail"])
 
     def test_chat_stream_endpoint_serializes_ordered_sse_events(self) -> None:
         """The streaming route advertises evidence before answer text and completion."""
