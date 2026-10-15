@@ -45,6 +45,7 @@ Emit machine-readable JSON for automation:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -56,7 +57,18 @@ if str(PACKAGES_DIR) not in sys.path:
 
 from librarian_config.config import (
     enforce_docker_broker_host_guard,
+    get_librarian_config,
     resolve_database_url,
+)
+from librarian_answer_adapters.grpc_generation import GrpcGenerationGenerator
+from librarian_answer_adapters.r2_startup import open_r2_client
+from librarian_answer_adapters.worker_lifecycle import (
+    WorkerGenerationContext,
+    WorkerShutdown,
+    WorkerShutdownRequested,
+)
+from librarian_contracts.generated.librarian.answer.v1 import (
+    answer_delivery_pb2 as delivery_pb2,
 )
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_metadata.jobs import (
@@ -158,33 +170,17 @@ def main(argv: list[str] | None = None) -> int:
                 logger.info("Requeued: %s", requeued)
             return 0
 
-        enforce_docker_broker_host_guard(
-            entrypoint="scripts/process_metadata_jobs.py",
-        )
-
-        if args.watch:
-            result = run_metadata_job_worker(
-                MetadataJobWorkerOptions(
-                    database_url=args.database_url,
-                    limit=args.limit,
-                    poll_interval_seconds=args.poll_interval_seconds,
-                    max_cycles=args.max_cycles,
-                    idle_exit_after=args.idle_exit_after,
-                    job_type=args.job_type,
-                    max_tags=args.max_tags,
-                    max_secondary_genres=args.max_secondary_genres,
-                )
-            )
+        config = get_librarian_config()
+        if config.runtime_mode == "r2_metadata_worker":
+            result = asyncio.run(_run_r2_metadata_worker(args, model=config.generation.model))
         else:
-            result = process_metadata_jobs(
-                ProcessMetadataJobsOptions(
-                    database_url=args.database_url,
-                    limit=args.limit,
-                    job_type=args.job_type,
-                    max_tags=args.max_tags,
-                    max_secondary_genres=args.max_secondary_genres,
-                )
+            enforce_docker_broker_host_guard(
+                entrypoint="scripts/process_metadata_jobs.py",
             )
+            result = _run_legacy_metadata_worker(args)
+    except WorkerShutdownRequested:
+        logger.info("Metadata worker shutdown cancelled active R2 generation")
+        return 0
     except (ValueError, NotImplementedError, RuntimeError) as error:
         logger.error("Error: %s", error)
         return 2
@@ -216,6 +212,98 @@ def main(argv: list[str] | None = None) -> int:
             message,
         )
     return 0
+
+
+def _run_legacy_metadata_worker(args):
+    if args.watch:
+        result = run_metadata_job_worker(
+            MetadataJobWorkerOptions(
+                database_url=args.database_url,
+                limit=args.limit,
+                poll_interval_seconds=args.poll_interval_seconds,
+                max_cycles=args.max_cycles,
+                idle_exit_after=args.idle_exit_after,
+                job_type=args.job_type,
+                max_tags=args.max_tags,
+                max_secondary_genres=args.max_secondary_genres,
+            )
+        )
+    else:
+        result = process_metadata_jobs(
+            ProcessMetadataJobsOptions(
+                database_url=args.database_url,
+                limit=args.limit,
+                job_type=args.job_type,
+                max_tags=args.max_tags,
+                max_secondary_genres=args.max_secondary_genres,
+            )
+        )
+    return result
+
+
+async def _run_r2_metadata_worker(args, *, model: str):
+    loop = asyncio.get_running_loop()
+    shutdown = WorkerShutdown(loop)
+    client = None
+    try:
+        client = await open_r2_client(expected_principal="metadata-worker")
+
+        def generator_factory(job_type: str):
+            operation = (
+                delivery_pb2.TAG_GENERATION
+                if job_type == METADATA_JOB_TYPE_TAGS
+                else delivery_pb2.GENRE_GENERATION
+            )
+            return GrpcGenerationGenerator(
+                client=client,
+                model=model,
+                event_loop=loop,
+                context=WorkerGenerationContext(shutdown_requested=shutdown.requested),
+                default_operation=operation,
+            )
+
+        if args.watch:
+            try:
+                return await asyncio.to_thread(
+                    run_metadata_job_worker,
+                    MetadataJobWorkerOptions(
+                        database_url=args.database_url,
+                        limit=args.limit,
+                        poll_interval_seconds=args.poll_interval_seconds,
+                        max_cycles=args.max_cycles,
+                        idle_exit_after=args.idle_exit_after,
+                        job_type=args.job_type,
+                        max_tags=args.max_tags,
+                        max_secondary_genres=args.max_secondary_genres,
+                        generator_factory=generator_factory,
+                        should_stop=shutdown.requested.is_set,
+                    ),
+                    sleep=shutdown.requested.wait,
+                )
+            except asyncio.CancelledError:
+                if shutdown.requested.is_set():
+                    raise WorkerShutdownRequested() from None
+                raise
+        try:
+            return await asyncio.to_thread(
+                process_metadata_jobs,
+                ProcessMetadataJobsOptions(
+                    database_url=args.database_url,
+                    limit=args.limit,
+                    job_type=args.job_type,
+                    max_tags=args.max_tags,
+                    max_secondary_genres=args.max_secondary_genres,
+                    generator_factory=generator_factory,
+                ),
+            )
+        except asyncio.CancelledError:
+            if shutdown.requested.is_set():
+                raise WorkerShutdownRequested() from None
+            raise
+    finally:
+        if client is not None:
+            await client.close()
+        shutdown.close()
 
 
 def _requeue_failed_jobs(
