@@ -44,6 +44,7 @@ Emit machine-readable JSON for automation:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -55,7 +56,18 @@ if str(PACKAGES_DIR) not in sys.path:
 
 from librarian_config.config import (
     enforce_docker_broker_host_guard,
+    get_librarian_config,
     resolve_database_url,
+)
+from librarian_answer_adapters.grpc_generation import GrpcGenerationGenerator
+from librarian_answer_adapters.r2_startup import open_r2_client
+from librarian_answer_adapters.worker_lifecycle import (
+    WorkerGenerationContext,
+    WorkerShutdown,
+    WorkerShutdownRequested,
+)
+from librarian_contracts.generated.librarian.answer.v1 import (
+    answer_delivery_pb2 as delivery_pb2,
 )
 from librarian_logging import configure_cli_logging, emit_json
 from librarian_storage.storage import create_ingestion_store
@@ -159,35 +171,17 @@ def main(argv: list[str] | None = None) -> int:
                 logger.info("Requeued: %s", requeued)
             return 0
 
-        enforce_docker_broker_host_guard(
-            entrypoint="scripts/process_summary_jobs.py",
-        )
-
-        if args.watch:
-            result = run_summary_job_worker(
-                SummaryJobWorkerOptions(
-                    database_url=args.database_url,
-                    limit=args.limit,
-                    poll_interval_seconds=args.poll_interval_seconds,
-                    max_cycles=args.max_cycles,
-                    idle_exit_after=args.idle_exit_after,
-                    include_chapter_summaries=args.include_chapter_summaries,
-                    chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
-                    max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
-                    enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
-                )
-            )
+        config = get_librarian_config()
+        if config.runtime_mode == "r2_summary_worker":
+            result = asyncio.run(_run_r2_summary_worker(args, model=config.generation.model))
         else:
-            result = process_summary_jobs(
-                ProcessSummaryJobsOptions(
-                    database_url=args.database_url,
-                    limit=args.limit,
-                    include_chapter_summaries=args.include_chapter_summaries,
-                    chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
-                    max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
-                    enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
-                )
+            enforce_docker_broker_host_guard(
+                entrypoint="scripts/process_summary_jobs.py",
             )
+            result = _run_legacy_summary_worker(args)
+    except WorkerShutdownRequested:
+        logger.info("Summary worker shutdown cancelled active R2 generation")
+        return 0
     except (ValueError, NotImplementedError, RuntimeError) as error:
         logger.error("Error: %s", error)
         return 2
@@ -219,6 +213,97 @@ def main(argv: list[str] | None = None) -> int:
             message,
         )
     return 0
+
+
+def _run_legacy_summary_worker(args):
+    if args.watch:
+        result = run_summary_job_worker(
+            SummaryJobWorkerOptions(
+                database_url=args.database_url,
+                limit=args.limit,
+                poll_interval_seconds=args.poll_interval_seconds,
+                max_cycles=args.max_cycles,
+                idle_exit_after=args.idle_exit_after,
+                include_chapter_summaries=args.include_chapter_summaries,
+                chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
+            )
+        )
+    else:
+        result = process_summary_jobs(
+            ProcessSummaryJobsOptions(
+                database_url=args.database_url,
+                limit=args.limit,
+                include_chapter_summaries=args.include_chapter_summaries,
+                chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
+            )
+        )
+    return result
+
+
+async def _run_r2_summary_worker(args, *, model: str):
+    loop = asyncio.get_running_loop()
+    shutdown = WorkerShutdown(loop)
+    client = None
+    try:
+        client = await open_r2_client(expected_principal="summary-worker")
+
+        def generator_factory():
+            return GrpcGenerationGenerator(
+                client=client,
+                model=model,
+                event_loop=loop,
+                context=WorkerGenerationContext(shutdown_requested=shutdown.requested),
+                default_operation=delivery_pb2.BOOK_SUMMARIZATION,
+            )
+
+        if args.watch:
+            try:
+                return await asyncio.to_thread(
+                    run_summary_job_worker,
+                    SummaryJobWorkerOptions(
+                        database_url=args.database_url,
+                        limit=args.limit,
+                        poll_interval_seconds=args.poll_interval_seconds,
+                        max_cycles=args.max_cycles,
+                        idle_exit_after=args.idle_exit_after,
+                        include_chapter_summaries=args.include_chapter_summaries,
+                        chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                        max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                        enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
+                        generator_factory=generator_factory,
+                        should_stop=shutdown.requested.is_set,
+                    ),
+                    sleep=shutdown.requested.wait,
+                )
+            except asyncio.CancelledError:
+                if shutdown.requested.is_set():
+                    raise WorkerShutdownRequested() from None
+                raise
+        try:
+            return await asyncio.to_thread(
+                process_summary_jobs,
+                ProcessSummaryJobsOptions(
+                    database_url=args.database_url,
+                    limit=args.limit,
+                    include_chapter_summaries=args.include_chapter_summaries,
+                    chunk_summary_timeout_seconds=args.chunk_summary_timeout_seconds,
+                    max_parallel_chunk_summaries=args.max_parallel_chunk_summaries,
+                    enqueue_metadata_jobs=not args.no_enqueue_metadata_jobs,
+                    generator_factory=generator_factory,
+                ),
+            )
+        except asyncio.CancelledError:
+            if shutdown.requested.is_set():
+                raise WorkerShutdownRequested() from None
+            raise
+    finally:
+        if client is not None:
+            await client.close()
+        shutdown.close()
 
 
 def _requeue_failed_jobs(database_url_override: str | None) -> int:

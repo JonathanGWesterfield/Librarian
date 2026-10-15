@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +16,7 @@ from librarian_answer_adapters.grpc_generation import (
     GrpcGenerationGenerator,
     R2GenerationDeadlineExceeded,
 )
+from librarian_answer_adapters.worker_lifecycle import WorkerGenerationContext
 from librarian_chat.generation import ChatMessage
 from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2 as delivery_pb2,
@@ -132,6 +134,62 @@ class GrpcGenerationGeneratorTests(unittest.IsolatedAsyncioTestCase):
                 [ChatMessage(role="user", content="Recommend.")],
             )
 
+    async def test_rejects_an_elapsed_local_deadline_before_broker_admission(self) -> None:
+        client = _Client()
+        generator = GrpcGenerationGenerator(
+            client=client,
+            model="gpt-5.6-sol",
+            event_loop=asyncio.get_running_loop(),
+            context=_Context(remaining=0.0),
+            default_operation=delivery_pb2.TAG_GENERATION,
+        )
+
+        with self.assertRaises(R2GenerationDeadlineExceeded):
+            await asyncio.to_thread(
+                generator.generate,
+                [ChatMessage(role="user", content="Classify.")],
+            )
+
+        self.assertEqual(client.requests, [])
+
+    def test_worker_context_distinguishes_shutdown_from_its_job_deadline(self) -> None:
+        shutdown_requested = threading.Event()
+        context = WorkerGenerationContext(
+            shutdown_requested=shutdown_requested,
+            deadline_seconds=30.0,
+        )
+
+        self.assertFalse(context.is_cancelled())
+        self.assertGreater(context.remaining_seconds(), 0.0)
+        shutdown_requested.set()
+        self.assertTrue(context.is_cancelled())
+
+    async def test_worker_shutdown_cancels_the_inflight_broker_call(self) -> None:
+        client = _BlockingClient()
+        shutdown_requested = threading.Event()
+        generator = GrpcGenerationGenerator(
+            client=client,
+            model="gpt-5.6-sol",
+            event_loop=asyncio.get_running_loop(),
+            context=WorkerGenerationContext(
+                shutdown_requested=shutdown_requested,
+                deadline_seconds=30.0,
+            ),
+            default_operation=delivery_pb2.TAG_GENERATION,
+        )
+
+        generation = asyncio.create_task(
+            asyncio.to_thread(
+                generator.generate,
+                [ChatMessage(role="user", content="Classify.")],
+            )
+        )
+        await client.started.wait()
+        shutdown_requested.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await generation
+        self.assertTrue(client.cancelled)
+
     def test_summary_helpers_select_chapter_and_book_operations(self) -> None:
         generator = _SummaryGenerator()
         messages = [ChatMessage(role="user", content="Summarize.")]
@@ -181,6 +239,21 @@ class _Context:
 
     def remaining_seconds(self) -> float:
         return self.remaining
+
+
+class _BlockingClient:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = False
+
+    async def generate(self, _request, *, timeout):
+        del timeout
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
 
 
 class _SummaryGenerator:

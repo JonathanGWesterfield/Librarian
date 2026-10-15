@@ -315,6 +315,26 @@ class SummarizeBookTests(unittest.TestCase):
         self.assertIsNotNone(stored_summary)
         self.assertEqual(len(generator.calls), 2)
 
+    def test_process_summary_jobs_uses_the_injected_worker_generator(self) -> None:
+        """The R2 worker supplies its generated gRPC facade to all summary stages."""
+        self._seed_summary_job()
+        generator = _FakeGenerator()
+
+        with patch(
+            "librarian_summarization.summarize.create_configured_generator",
+            side_effect=AssertionError("the R2 worker must not construct a legacy generator"),
+        ):
+            result = process_summary_jobs(
+                ProcessSummaryJobsOptions(
+                    database_url=self.database_url,
+                    limit=1,
+                    generator_factory=lambda: generator,
+                )
+            )
+
+        self.assertEqual(result.completed, 1)
+        self.assertEqual(len(generator.calls), 2)
+
     def test_process_summary_jobs_marks_failed_job_without_stopping_worker(self) -> None:
         """Verify worker failures are persisted as job state.
         A bad provider or generation failure should not crash the queue; it

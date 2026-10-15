@@ -148,12 +148,17 @@ def render_r2_runtime_configs(config: LibrarianConfig) -> dict[str, str]:
     rendered = render_broker_client_runtime_configs(config)
     if not rendered:
         return {}
-    api_client = build_broker_client_runtime_config(
-        model=config.generation.model,
-        answer_capability=config.generation.answer_capability or "quality",
-        credential_role="api",
-    )
-    rendered["api"] = _serialize_r2_api_runtime_config(config, api_client)
+    for role in ("api", "summary-worker", "metadata-worker"):
+        client = build_broker_client_runtime_config(
+            model=config.generation.model,
+            answer_capability=config.generation.answer_capability or "quality",
+            credential_role=role,
+        )
+        rendered[role] = _serialize_r2_application_runtime_config(
+            config,
+            client,
+            runtime_mode="r2_" + role.replace("-", "_"),
+        )
     rendered[R2_BROKER_SERVICE] = serialize_broker_server_runtime_config(
         build_broker_server_runtime_config(
             model=config.generation.model,
@@ -163,26 +168,29 @@ def render_r2_runtime_configs(config: LibrarianConfig) -> dict[str, str]:
     return rendered
 
 
-def _serialize_r2_api_runtime_config(
-    config: LibrarianConfig, client_config: BrokerClientRuntimeConfig
+def _serialize_r2_application_runtime_config(
+    config: LibrarianConfig,
+    client_config: BrokerClientRuntimeConfig,
+    *,
+    runtime_mode: str,
 ) -> str:
-    """Render the API's one non-secret R2 application configuration document.
+    """Render one non-secret R2 application configuration document.
 
-    Unlike worker callers, API needs local storage, embedding, and retrieval
-    settings as well as the gRPC handshake.  Keep those safe settings and the
-    broker section in one versioned file; never copy a provider credential or
-    a host-relative credential path across the resolver boundary.
+    Each caller keeps the safe local storage, embedding, retrieval, and service
+    settings it needs beside the strict broker section. This keeps one versioned
+    file per role without copying a provider credential or host-relative path
+    across the resolver boundary.
     """
 
     if config.embedding.mode == "openai_compatible":
         raise LibrarianConfigError(
-            "R2 API requires docker_ollama or native_ollama embeddings; "
+            "R2 application requires docker_ollama or native_ollama embeddings; "
             "credential-bearing embeddings cannot enter the runtime file"
         )
     broker = client_config
     payload = {
         "version": 2,
-        "runtime": {"mode": "r2_api"},
+        "runtime": {"mode": runtime_mode},
         "paths": {
             "books_dir": config.paths.books_dir,
             "host_books_dir": config.paths.host_books_dir,

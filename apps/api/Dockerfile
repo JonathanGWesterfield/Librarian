@@ -36,7 +36,10 @@ FROM runtime AS test
 COPY tests tests
 COPY scripts/evaluate_retrieval.py scripts/verify_compose.py scripts/
 
-RUN pip install --no-cache-dir -e "apps/api[dev]" -e "packages[dev]"
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y git \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -e "apps/api[dev]" -e "packages[dev]"
 
 
 # The separate R2 composition supplies this build argument from its release

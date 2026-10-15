@@ -37,7 +37,7 @@ _BROKER_FIELDS = frozenset(
         "credential_role",
     }
 )
-_R2_API_TOP_LEVEL_REQUIRED_FIELDS = frozenset(
+_R2_APPLICATION_TOP_LEVEL_REQUIRED_FIELDS = frozenset(
     {
         "version",
         "runtime",
@@ -106,7 +106,7 @@ def parse_broker_client_runtime_config(raw: str | bytes) -> BrokerClientRuntimeC
 
     root = _require_object(decoded, "broker runtime configuration")
     if root.get("version") == R2_API_RUNTIME_CONFIG_VERSION:
-        return _parse_r2_api_runtime_config(root)
+        return _parse_r2_application_runtime_config(root)
     _require_exact_fields(root, _TOP_LEVEL_FIELDS, "broker runtime configuration")
     if (
         not isinstance(root["version"], int)
@@ -136,21 +136,21 @@ def parse_broker_client_runtime_config(raw: str | bytes) -> BrokerClientRuntimeC
     return config
 
 
-def _parse_r2_api_runtime_config(root: dict[str, Any]) -> BrokerClientRuntimeConfig:
-    """Project the strict broker portion from the one R2 API runtime file.
+def _parse_r2_application_runtime_config(root: dict[str, Any]) -> BrokerClientRuntimeConfig:
+    """Project strict broker settings from a resolver-owned R2 app document.
 
-    The API needs safe retrieval settings beside its generated-client settings.
-    This keeps the single fixed-path mount while retaining exact validation of
-    the broker configuration consumed before a channel is opened.
+    An application keeps its safe local settings beside generated-client
+    settings. This retains one fixed-path mount while exactly validating the
+    broker configuration consumed before a channel is opened.
     """
 
     _require_exact_fields(
-        root, _R2_API_TOP_LEVEL_REQUIRED_FIELDS, "R2 API runtime configuration"
+        root, _R2_APPLICATION_TOP_LEVEL_REQUIRED_FIELDS, "R2 application runtime configuration"
     )
     runtime = _require_object(root["runtime"], "runtime")
     _require_exact_fields(runtime, frozenset({"mode"}), "runtime")
-    if runtime["mode"] != "r2_api":
-        raise RuntimeConfigError("runtime.mode must be r2_api")
+    if runtime["mode"] not in {"r2_api", "r2_summary_worker", "r2_metadata_worker"}:
+        raise RuntimeConfigError("runtime.mode must name an R2 application role")
     generation = _require_object(root["generation"], "generation")
     _require_exact_fields(generation, _GENERATION_FIELDS | frozenset({"mode"}), "generation")
     if generation["mode"] != "r2_grpc":

@@ -573,6 +573,22 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertTrue(parsed_api.uses_r2_api_runtime)
         self.assertEqual(parsed_api.paths.database_url, "sqlite:////data/librarian.db")
 
+        for role, mode in (
+            ("summary-worker", "r2_summary_worker"),
+            ("metadata-worker", "r2_metadata_worker"),
+        ):
+            with self.subTest(role=role):
+                worker_runtime = json.loads(rendered[role])
+                self.assertEqual(worker_runtime["runtime"], {"mode": mode})
+                broker = parse_broker_client_runtime_config(rendered[role])
+                self.assertEqual(broker.credential_role, role)
+                with tempfile.TemporaryDirectory() as worker_directory:
+                    worker_path = Path(worker_directory) / "librarian.json"
+                    worker_path.write_text(rendered[role], encoding="utf-8")
+                    parsed_worker = get_librarian_config(worker_path)
+                self.assertTrue(parsed_worker.uses_r2_worker_runtime)
+                self.assertEqual(parsed_worker.paths.database_url, "sqlite:////data/librarian.db")
+
     def test_r2_api_runtime_rejects_credential_bearing_embedding_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

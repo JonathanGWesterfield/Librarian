@@ -25,6 +25,7 @@ class ProcessSummaryJobsOptions:
     chunk_summary_timeout_seconds: float | None = None
     max_parallel_chunk_summaries: int | None = None
     enqueue_metadata_jobs: bool = True
+    generator_factory: Callable[[], object] | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,8 @@ class SummaryJobWorkerOptions:
     chunk_summary_timeout_seconds: float | None = None
     max_parallel_chunk_summaries: int | None = None
     enqueue_metadata_jobs: bool = True
+    generator_factory: Callable[[], object] | None = None
+    should_stop: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -129,7 +132,8 @@ def process_summary_jobs(
                     chunk_summary_timeout_seconds=options.chunk_summary_timeout_seconds,
                     max_parallel_chunk_summaries=options.max_parallel_chunk_summaries,
                     progress_callback=_job_progress_callback(database_url, job),
-                )
+                ),
+                generator=(options.generator_factory() if options.generator_factory else None),
             )
         except Exception as error:
             message = str(error)
@@ -249,7 +253,7 @@ def run_summary_job_worker(
         poll_interval_seconds,
     )
 
-    while True:
+    while not (options.should_stop and options.should_stop()):
         cycles += 1
         run_result = process_summary_jobs(
             ProcessSummaryJobsOptions(
@@ -259,6 +263,7 @@ def run_summary_job_worker(
                 chunk_summary_timeout_seconds=options.chunk_summary_timeout_seconds,
                 max_parallel_chunk_summaries=options.max_parallel_chunk_summaries,
                 enqueue_metadata_jobs=options.enqueue_metadata_jobs,
+                generator_factory=options.generator_factory,
             )
         )
         processed += run_result.processed
@@ -282,6 +287,9 @@ def run_summary_job_worker(
         if max_cycles is not None and cycles >= max_cycles:
             break
         if idle_exit_after is not None and idle_cycles >= idle_exit_after:
+            break
+
+        if options.should_stop and options.should_stop():
             break
 
         if poll_interval_seconds:

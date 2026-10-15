@@ -11,7 +11,10 @@ another channel.
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import TimeoutError as FutureTimeoutError
+from concurrent.futures import (
+    CancelledError as FutureCancelledError,
+    TimeoutError as FutureTimeoutError,
+)
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import uuid4
@@ -103,7 +106,7 @@ class GrpcGenerationGenerator:
         if remaining is not None:
             deadline = min(deadline, remaining)
         if deadline <= 0:
-            raise asyncio.CancelledError("API generation deadline elapsed before broker admission")
+            raise R2GenerationDeadlineExceeded("gRPC generation deadline elapsed")
 
         future = asyncio.run_coroutine_threadsafe(
             self._generate(messages, operation=operation, timeout_seconds=deadline),
@@ -113,6 +116,14 @@ class GrpcGenerationGenerator:
             # The coroutine watches browser cancellation and the gRPC deadline.
             # This margin only lets the worker receive that terminal state.
             return future.result(timeout=deadline + 0.25)
+        except FutureCancelledError as error:
+            # ``run_coroutine_threadsafe`` translates asyncio cancellation to
+            # ``concurrent.futures.CancelledError`` at this synchronous
+            # boundary. Convert it back so a worker shutdown can leave its
+            # claimed job for normal restart recovery.
+            if self.context.is_cancelled():
+                raise asyncio.CancelledError("gRPC generation was cancelled") from error
+            raise RuntimeError("gRPC generation was cancelled unexpectedly") from error
         except FutureTimeoutError as error:
             future.cancel()
             raise RuntimeError("gRPC generation did not finish before its deadline") from error
@@ -138,6 +149,22 @@ class GrpcGenerationGenerator:
             result = await _await_generation_with_context(
                 self.client.generate(request, timeout=timeout_seconds), self.context
             )
+        except asyncio.CancelledError:
+            # Request contexts use cancellation for both a browser abort and a
+            # deadline.  The API still needs the former to be a quiet abort,
+            # while durable workers must persist the latter as a failed job.
+            # ``was_disconnected`` is API-specific and intentionally optional
+            # here so worker contexts remain a small synchronous protocol.
+            remaining = self.context.remaining_seconds()
+            if (
+                not getattr(self.context, "was_disconnected", False)
+                and remaining is not None
+                and remaining <= 0
+            ):
+                raise R2GenerationDeadlineExceeded(
+                    "gRPC generation deadline elapsed"
+                ) from None
+            raise
         except GrpcBrokerClientError as error:
             if error.status is grpc.StatusCode.DEADLINE_EXCEEDED:
                 raise R2GenerationDeadlineExceeded(
