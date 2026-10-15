@@ -41,6 +41,7 @@ class ProcessMetadataJobsOptions:
     job_type: str | None = None
     max_tags: int = 12
     max_secondary_genres: int = 3
+    generator_factory: Callable[[str], object] | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class MetadataJobWorkerOptions:
     job_type: str | None = None
     max_tags: int = 12
     max_secondary_genres: int = 3
+    generator_factory: Callable[[str], object] | None = None
+    should_stop: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,7 @@ def process_metadata_jobs(
                 database_url=database_url,
                 max_tags=options.max_tags,
                 max_secondary_genres=options.max_secondary_genres,
+                generator_factory=options.generator_factory,
             )
         except Exception as error:
             message = str(error)
@@ -227,7 +231,7 @@ def run_metadata_job_worker(
         poll_interval_seconds,
     )
 
-    while True:
+    while not (options.should_stop and options.should_stop()):
         cycles += 1
         run_result = process_metadata_jobs(
             ProcessMetadataJobsOptions(
@@ -236,6 +240,7 @@ def run_metadata_job_worker(
                 job_type=options.job_type,
                 max_tags=options.max_tags,
                 max_secondary_genres=options.max_secondary_genres,
+                generator_factory=options.generator_factory,
             )
         )
         processed += run_result.processed
@@ -261,6 +266,9 @@ def run_metadata_job_worker(
         if idle_exit_after is not None and idle_cycles >= idle_exit_after:
             break
 
+        if options.should_stop and options.should_stop():
+            break
+
         if poll_interval_seconds:
             sleep(poll_interval_seconds)
 
@@ -282,6 +290,7 @@ def _run_job(
     database_url: str,
     max_tags: int,
     max_secondary_genres: int,
+    generator_factory: Callable[[str], object] | None,
 ) -> str:
     if job.job_type == METADATA_JOB_TYPE_TAGS:
         result = generate_book_tags(
@@ -294,7 +303,8 @@ def _run_job(
                 generation_provider=job.generation_provider,
                 generation_model=job.generation_model,
                 max_tags=max_tags,
-            )
+            ),
+            generator=(generator_factory(METADATA_JOB_TYPE_TAGS) if generator_factory else None),
         )
         return f"{result.generated_tags} tags generated, {result.cached_tags} reused"
 
@@ -309,7 +319,8 @@ def _run_job(
                 generation_provider=job.generation_provider,
                 generation_model=job.generation_model,
                 max_secondary_genres=max_secondary_genres,
-            )
+            ),
+            generator=(generator_factory(METADATA_JOB_TYPE_GENRES) if generator_factory else None),
         )
         return (
             f"{result.generated_genres} genres generated, "

@@ -103,6 +103,44 @@ class MetadataJobTests(unittest.TestCase):
         tag_generator.assert_called_once()
         genre_generator.assert_called_once()
 
+    def test_process_metadata_jobs_passes_operation_specific_injected_generators(self) -> None:
+        """The R2 worker chooses a generated facade for each metadata operation."""
+        enqueue_metadata_jobs(
+            EnqueueMetadataJobsOptions(
+                database_url=self.database_url,
+                book_id="book-1",
+                source_summary_provider="codex",
+                source_summary_model="codex",
+                source_summary_detail="medium",
+                generation_provider="codex",
+                generation_model="codex",
+            )
+        )
+        tag_generator_facade = object()
+        genre_generator_facade = object()
+
+        with patch(
+            "librarian_metadata.jobs.generate_book_tags",
+            return_value=_FakeTagResult(generated_tags=2, cached_tags=0),
+        ) as tag_generator, patch(
+            "librarian_metadata.jobs.generate_book_genres",
+            return_value=_FakeGenreResult(generated_genres=1, cached_genres=0),
+        ) as genre_generator:
+            result = process_metadata_jobs(
+                ProcessMetadataJobsOptions(
+                    database_url=self.database_url,
+                    limit=5,
+                    generator_factory=lambda job_type: {
+                        "tags": tag_generator_facade,
+                        "genres": genre_generator_facade,
+                    }[job_type],
+                )
+            )
+
+        self.assertEqual(result.completed, 2)
+        self.assertIs(tag_generator.call_args.kwargs["generator"], tag_generator_facade)
+        self.assertIs(genre_generator.call_args.kwargs["generator"], genre_generator_facade)
+
     def test_process_metadata_jobs_marks_failed_job_without_stopping_worker(self) -> None:
         """Verify metadata generation failures become durable job state.
         A bad model response should not lose the queued job; it should mark the

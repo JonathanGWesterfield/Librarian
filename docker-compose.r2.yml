@@ -11,9 +11,10 @@
 #       --profile evaluation \
 #       -f docker-compose.yml -f docker-compose.r2.yml config --format json
 #
-# The API chat caller uses generated gRPC in this overlay. Other API generation
-# callers deliberately fail closed until their matching R2 operations migrate,
-# so this remains outside the normal R0 launcher until the atomic cutover.
+# API chat and generation routes, plus the summary and metadata workers, use
+# generated gRPC in this overlay. The evaluator deliberately remains outside
+# that cutover until its matching R2 operation migrates, so this composition
+# remains outside the normal R0 launcher.
 
 services:
   config-resolver:
@@ -156,6 +157,7 @@ services:
       - --principal
       - metadata-worker
       - --
+    command:
       - python
       - scripts/process_metadata_jobs.py
       - --watch
