@@ -121,8 +121,6 @@ DEFAULT_GOLDEN_ANSWER_CORPUS_PATH = (
 
 def main() -> int:
     configure_cli_logging()
-    started_at = datetime.now(timezone.utc)
-    started_perf = time.perf_counter()
     parser = argparse.ArgumentParser(
         description="Generate Librarian retrieval evaluation reports."
     )
@@ -286,6 +284,12 @@ def main() -> int:
 
 def _run_evaluation(args: argparse.Namespace, *, judge: LLMJudge | None = None) -> int:
     """Run the synchronous report pipeline with its already-selected judge."""
+
+    # This helper is reached both directly and from the R2 evaluator's worker
+    # thread. Keep run timing in the helper's scope so every report path can
+    # safely add execution metadata for a GitHub summary.
+    started_at = datetime.now(timezone.utc)
+    started_perf = time.perf_counter()
 
     if judge is None:
         try:

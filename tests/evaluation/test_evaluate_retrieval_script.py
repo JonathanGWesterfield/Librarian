@@ -20,6 +20,33 @@ SCRIPT_PATH = REPO_ROOT / "scripts/evaluate_retrieval.py"
 
 
 class EvaluateRetrievalScriptTests(unittest.TestCase):
+    def test_check_mode_writes_github_summary_with_run_metadata(self) -> None:
+        """The CI summary path must not rely on values local to ``main``."""
+        module = _load_script_module()
+        with TemporaryDirectory() as temp_dir:
+            summary_path = Path(temp_dir) / "github-summary.md"
+            with (
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "evaluate_retrieval.py",
+                        "--check",
+                        "--github-summary",
+                        str(summary_path),
+                    ],
+                ),
+                patch.object(module, "configure_cli_logging"),
+                patch.object(module, "_report_is_stale", return_value=False),
+            ):
+                result = module.main()
+
+            summary = summary_path.read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertIn("## Run Metadata", summary)
+        self.assertIn("| Started at |", summary)
+
     def test_optional_judge_uses_the_json_selected_codex_model(self) -> None:
         """Enforcement cannot silently substitute a CLI or Ollama model choice."""
         module = _load_script_module()
