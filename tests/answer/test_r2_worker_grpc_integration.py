@@ -17,6 +17,7 @@ from librarian_broker.execution import BrokerScheduler, ProviderExecutor
 from librarian_broker.grpc_service import BrokerCredentials, create_broker_server
 from librarian_chat.generation import ChatMessage
 from librarian_contracts.broker_limits import build_broker_execution_limits
+from librarian_evaluation.llm_judge import GrpcEvaluatorJudge
 from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2 as delivery_pb2,
 )
@@ -38,6 +39,7 @@ class R2WorkerGrpcIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 {
                     "summary-worker": "summary-token",
                     "metadata-worker": "metadata-token",
+                    "evaluator": "evaluator-token",
                 }
             ),
             scheduler=BrokerScheduler(
@@ -103,6 +105,23 @@ class R2WorkerGrpcIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 delivery_pb2.GENRE_GENERATION,
             ],
         )
+
+    async def test_evaluator_uses_its_generated_client_for_judgement_only(self) -> None:
+        client = self._client("evaluator", "evaluator-token")
+        await client.ensure_ready()
+        try:
+            judge = GrpcEvaluatorJudge(
+                client=client,
+                model="gpt-5.6-sol",
+                event_loop=asyncio.get_running_loop(),
+                shutdown_requested=threading.Event(),
+            )
+            response = await asyncio.to_thread(judge.judge, "Judge the fixture answer.")
+        finally:
+            await client.close()
+
+        self.assertEqual(response, "Fixture provider output.")
+        self.assertEqual(self.provider.operations, [delivery_pb2.EVALUATOR_JUDGEMENT])
 
     def _client(self, principal: str, bearer_token: str) -> GeneratedGrpcBrokerClient:
         return GeneratedGrpcBrokerClient.connect(

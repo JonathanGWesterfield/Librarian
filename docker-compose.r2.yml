@@ -11,10 +11,9 @@
 #       --profile evaluation \
 #       -f docker-compose.yml -f docker-compose.r2.yml config --format json
 #
-# API chat and generation routes, plus the summary and metadata workers, use
-# generated gRPC in this overlay. The evaluator deliberately remains outside
-# that cutover until its matching R2 operation migrates, so this composition
-# remains outside the normal R0 launcher.
+# API chat and generation routes, the summary and metadata workers, and the
+# evaluator use generated gRPC in this overlay. This composition remains
+# outside the normal R0 launcher until the atomic cutover is complete.
 
 services:
   config-resolver:
@@ -205,6 +204,7 @@ services:
       - /tmp/librarian-evaluation-report.json
       - --markdown-output
       - /tmp/librarian-evaluation-report.md
+      - --llm-judge
     command: []
     volumes: !override
       - ./.runtime/config/evaluator/librarian.json:/config/librarian.json:ro

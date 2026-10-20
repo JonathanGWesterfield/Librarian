@@ -149,7 +149,12 @@ def _parse_r2_application_runtime_config(root: dict[str, Any]) -> BrokerClientRu
     )
     runtime = _require_object(root["runtime"], "runtime")
     _require_exact_fields(runtime, frozenset({"mode"}), "runtime")
-    if runtime["mode"] not in {"r2_api", "r2_summary_worker", "r2_metadata_worker"}:
+    if runtime["mode"] not in {
+        "r2_api",
+        "r2_summary_worker",
+        "r2_metadata_worker",
+        "r2_evaluator",
+    }:
         raise RuntimeConfigError("runtime.mode must name an R2 application role")
     generation = _require_object(root["generation"], "generation")
     _require_exact_fields(generation, _GENERATION_FIELDS | frozenset({"mode"}), "generation")

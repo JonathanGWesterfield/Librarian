@@ -1,20 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import subprocess
+import threading
 from dataclasses import asdict, dataclass
-from typing import Literal, Protocol
+from time import monotonic
+from typing import TYPE_CHECKING, Literal, Protocol
 from urllib import error, request
 
+from librarian_chat.generation import ChatMessage
 from librarian_config.config import (
     enforce_docker_broker_host_guard,
     resolve_codex_executable,
 )
 from librarian_config.openai_compatible import build_openai_compatible_endpoint
+from librarian_contracts.generated.librarian.answer.v1 import (
+    answer_delivery_pb2 as delivery_pb2,
+)
 from librarian_logging import safe_provider_stderr_diagnostic
 
 from librarian_evaluation.answer import AnswerCandidate, AnswerEvaluationCase
+
+if TYPE_CHECKING:
+    from librarian_answer_adapters.grpc_broker import GeneratedGrpcBrokerClient
 
 
 class LLMJudgeError(RuntimeError):
@@ -34,6 +44,9 @@ CitationRelevance = Literal[
     "all_relevant", "partially_relevant", "irrelevant", "not_applicable"
 ]
 JudgeMode = Literal["enforcing", "advisory"]
+
+_JUDGE_SYSTEM_PROMPT = "You are a strict RAG answer-quality judge."
+_GRPC_EVALUATOR_DEADLINE_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -180,7 +193,7 @@ class OllamaJudge:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a strict RAG answer-quality judge.",
+                        "content": _JUDGE_SYSTEM_PROMPT,
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -233,7 +246,7 @@ class DockerCodexBrokerJudge:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a strict RAG answer-quality judge.",
+                        "content": _JUDGE_SYSTEM_PROMPT,
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -277,6 +290,74 @@ class DockerCodexBrokerJudge:
         if not isinstance(content, str) or not content.strip():
             raise LLMJudgeError("Docker Codex broker did not include message content")
         return content.strip()
+
+
+class _GrpcEvaluatorGenerationContext:
+    """One evaluator judgement's fixed budget and process cancellation view."""
+
+    def __init__(self, *, shutdown_requested: threading.Event) -> None:
+        self._shutdown_requested = shutdown_requested
+        self._deadline_at = monotonic() + _GRPC_EVALUATOR_DEADLINE_SECONDS
+
+    def is_cancelled(self) -> bool:
+        return self._shutdown_requested.is_set()
+
+    def remaining_seconds(self) -> float:
+        return max(0.0, self._deadline_at - monotonic())
+
+
+@dataclass(frozen=True)
+class GrpcEvaluatorJudge:
+    """Run one evaluator judgement through the process-owned R2 gRPC client.
+
+    This is deliberately constructed only by the evaluator's R2 composition
+    root.  It has no generic operation argument: every invocation maps to the
+    evaluator principal's sole ``EVALUATOR_JUDGEMENT`` operation and its v1
+    structured-output contract.
+    """
+
+    client: GeneratedGrpcBrokerClient
+    model: str
+    event_loop: asyncio.AbstractEventLoop
+    shutdown_requested: threading.Event
+    provider: str = "grpc_codex_broker"
+
+    def judge(self, prompt: str) -> str:
+        # Import only after this module is fully initialized. The legacy
+        # adapters retain their R0 evaluation import path through chat, while
+        # this generated-client adapter is constructed only by the R2 evaluator
+        # composition root.
+        from librarian_answer_adapters.grpc_broker import GrpcBrokerClientError
+        from librarian_answer_adapters.grpc_generation import (
+            GrpcGenerationGenerator,
+            R2GenerationDeadlineExceeded,
+        )
+
+        generator = GrpcGenerationGenerator(
+            client=self.client,
+            model=self.model,
+            event_loop=self.event_loop,
+            context=_GrpcEvaluatorGenerationContext(
+                shutdown_requested=self.shutdown_requested
+            ),
+            default_operation=delivery_pb2.EVALUATOR_JUDGEMENT,
+            default_timeout_seconds=_GRPC_EVALUATOR_DEADLINE_SECONDS,
+        )
+        try:
+            return generator.generate(
+                [
+                    ChatMessage(role="system", content=_JUDGE_SYSTEM_PROMPT),
+                    ChatMessage(role="user", content=prompt),
+                ]
+            )
+        except R2GenerationDeadlineExceeded as error:
+            raise LLMJudgeError(
+                "gRPC Codex broker judge exceeded its 30-second deadline"
+            ) from error
+        except GrpcBrokerClientError as error:
+            raise LLMJudgeError("gRPC Codex broker judge request failed") from error
+        except RuntimeError as error:
+            raise LLMJudgeError("gRPC Codex broker judge returned invalid output") from error
 
 
 def create_judge(
@@ -356,9 +437,13 @@ def evaluate_answers_with_llm_judge(
 def _validate_judge_mode(mode: JudgeMode, judge: LLMJudge) -> None:
     if mode not in {"enforcing", "advisory"}:
         raise ValueError("judge mode must be enforcing or advisory")
-    if mode == "enforcing" and judge.provider not in {"codex", "docker_codex_broker"}:
+    if mode == "enforcing" and judge.provider not in {
+        "codex",
+        "docker_codex_broker",
+        "grpc_codex_broker",
+    }:
         raise LLMJudgeError(
-            "only a Codex judge or Docker Codex broker may enforce semantic "
+            "only a Codex judge or Codex broker may enforce semantic "
             "answer-quality expectations; use advisory mode for Ollama smoke checks"
         )
 

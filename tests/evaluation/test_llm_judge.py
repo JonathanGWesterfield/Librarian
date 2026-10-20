@@ -1,9 +1,12 @@
+import asyncio
 import json
 import subprocess
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from librarian_answer_adapters.grpc_generation import R2GenerationDeadlineExceeded
 from librarian_evaluation.answer import (
     AnswerCandidate,
     AnswerEvaluationCase,
@@ -11,6 +14,7 @@ from librarian_evaluation.answer import (
 )
 from librarian_evaluation.llm_judge import (
     DockerCodexBrokerJudge,
+    GrpcEvaluatorJudge,
     LLMJudgeError,
     CodexJudge,
     StaticJudge,
@@ -170,6 +174,55 @@ class LLMJudgeTests(unittest.TestCase):
         self.assertEqual(payload["model"], "gpt-5.6")
         self.assertFalse(payload["stream"])
         self.assertEqual(payload["messages"][1]["content"], "Judge only cited sources.")
+
+    def test_grpc_evaluator_judge_uses_only_the_evaluator_contract_operation(self) -> None:
+        """The R2 evaluator facade cannot select a broader broker operation."""
+        client = object()
+        shutdown = threading.Event()
+        generator = Mock()
+        generator.generate.return_value = _semantic_response("supported")
+
+        with patch(
+            "librarian_answer_adapters.grpc_generation.GrpcGenerationGenerator",
+            return_value=generator,
+        ) as factory:
+            result = GrpcEvaluatorJudge(
+                client=client,
+                model="gpt-5.6-sol",
+                event_loop=Mock(spec=asyncio.AbstractEventLoop),
+                shutdown_requested=shutdown,
+            ).judge("Judge this answer.")
+
+        self.assertEqual(result, _semantic_response("supported"))
+        self.assertEqual(
+            factory.call_args.kwargs["default_operation"],
+            llm_judge.delivery_pb2.EVALUATOR_JUDGEMENT,
+        )
+        self.assertEqual(factory.call_args.kwargs["default_timeout_seconds"], 30.0)
+        messages = generator.generate.call_args.args[0]
+        self.assertEqual(
+            [(message.role, message.content) for message in messages],
+            [
+                ("system", "You are a strict RAG answer-quality judge."),
+                ("user", "Judge this answer."),
+            ],
+        )
+
+    def test_grpc_evaluator_judge_reports_its_fixed_deadline_safely(self) -> None:
+        """Deadline failures must not trigger a local or HTTP provider fallback."""
+        deadline = R2GenerationDeadlineExceeded("deadline elapsed")
+        with patch(
+            "librarian_answer_adapters.grpc_generation.GrpcGenerationGenerator"
+        ) as factory:
+            factory.return_value.generate.side_effect = deadline
+            judge = GrpcEvaluatorJudge(
+                client=object(),
+                model="gpt-5.6-sol",
+                event_loop=Mock(spec=asyncio.AbstractEventLoop),
+                shutdown_requested=threading.Event(),
+            )
+            with self.assertRaisesRegex(LLMJudgeError, "30-second deadline"):
+                judge.judge("Judge this answer.")
 
     def test_broker_judge_is_allowed_to_enforce_but_ollama_is_not(self) -> None:
         """A broker is a Codex transport, not a local-model fallback."""

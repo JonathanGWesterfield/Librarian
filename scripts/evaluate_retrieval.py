@@ -46,6 +46,7 @@ Run live answer evaluation with Codex as the generator and LLM judge:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import copy
 import json
 import logging
@@ -76,6 +77,7 @@ from librarian_evaluation.answer import (
 )
 from librarian_evaluation.comparison import compare_report_documents
 from librarian_evaluation.llm_judge import (
+    GrpcEvaluatorJudge,
     LLMJudge,
     LLMJudgeError,
     create_judge,
@@ -93,6 +95,11 @@ from librarian_evaluation.retrieval import (
 from librarian_logging import configure_cli_logging
 from librarian_search.hybrid import HybridSearchOptions, hybrid_search_chunks
 from librarian_search.search import SearchResponse, SearchResult
+from librarian_answer_adapters.r2_startup import open_r2_client
+from librarian_answer_adapters.worker_lifecycle import (
+    WorkerShutdown,
+    WorkerShutdownRequested,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -265,15 +272,31 @@ def main() -> int:
         help="Fail if the output file does not match the generated report.",
     )
     args = parser.parse_args()
-    try:
-        judge = _create_optional_judge(
-            enabled=args.llm_judge,
-            mode=args.judge_mode,
-            ollama_base_url=args.ollama_base_url,
-        )
-    except (LLMJudgeError, ValueError) as exc:
-        logger.error("LLM semantic judge failed: %s", exc)
-        return 1
+    if args.llm_judge:
+        config = get_librarian_config()
+        if config.uses_r2_evaluator_runtime:
+            try:
+                return asyncio.run(_run_r2_evaluator(args, model=config.generation.model))
+            except WorkerShutdownRequested:
+                logger.info("Evaluator shutdown cancelled active R2 judgement")
+                return 0
+
+    return _run_evaluation(args)
+
+
+def _run_evaluation(args: argparse.Namespace, *, judge: LLMJudge | None = None) -> int:
+    """Run the synchronous report pipeline with its already-selected judge."""
+
+    if judge is None:
+        try:
+            judge = _create_optional_judge(
+                enabled=args.llm_judge,
+                mode=args.judge_mode,
+                ollama_base_url=args.ollama_base_url,
+            )
+        except (LLMJudgeError, ValueError) as exc:
+            logger.error("LLM semantic judge failed: %s", exc)
+            return 1
 
     try:
         if args.live:
@@ -384,6 +407,38 @@ def main() -> int:
         )
         return 1
     return 0
+
+
+async def _run_r2_evaluator(args: argparse.Namespace, *, model: str) -> int:
+    """Run evaluator judgements through one ready generated R2 client.
+
+    The report pipeline is synchronous, so it runs in a worker thread while the
+    process-owned ``grpc.aio`` channel remains on this event loop. A shutdown
+    signal cancels the in-flight RPC through ``GrpcEvaluatorJudge`` rather than
+    waiting for its fixed 30-second judgement budget.
+    """
+
+    loop = asyncio.get_running_loop()
+    shutdown = WorkerShutdown(loop)
+    client = None
+    try:
+        client = await open_r2_client(expected_principal="evaluator")
+        judge = GrpcEvaluatorJudge(
+            client=client,
+            model=model,
+            event_loop=loop,
+            shutdown_requested=shutdown.requested,
+        )
+        try:
+            return await asyncio.to_thread(_run_evaluation, args, judge=judge)
+        except asyncio.CancelledError:
+            if shutdown.requested.is_set():
+                raise WorkerShutdownRequested() from None
+            raise
+    finally:
+        if client is not None:
+            await client.close()
+        shutdown.close()
 
 
 def generate_report_document(
