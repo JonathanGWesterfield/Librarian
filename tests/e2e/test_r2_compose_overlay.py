@@ -38,6 +38,24 @@ R2_API_SERVER_COMMAND = [
     "--app-dir",
     "apps/api",
 ]
+R2_EVALUATOR_COMMAND = [
+    "python",
+    "scripts/evaluate_retrieval.py",
+    "--output",
+    "/tmp/librarian-evaluation-report.json",
+    "--markdown-output",
+    "/tmp/librarian-evaluation-report.md",
+    "--llm-judge",
+]
+R2_EVALUATOR_ENTRYPOINT = [
+    "python",
+    "-m",
+    "librarian_answer_adapters.r2_startup",
+    "--principal",
+    "evaluator",
+    "--",
+    *R2_EVALUATOR_COMMAND,
+]
 
 
 @unittest.skipUnless(shutil.which("docker"), "Docker Compose is required for overlay rendering")
@@ -84,6 +102,11 @@ class R2ComposeOverlayTests(unittest.TestCase):
             compose["services"]["api"]["command"],
             R2_API_SERVER_COMMAND,
         )
+        self.assertEqual(
+            compose["services"]["evaluator"]["entrypoint"],
+            R2_EVALUATOR_ENTRYPOINT,
+        )
+        self.assertEqual(compose["services"]["evaluator"]["command"], [])
         validate_r2_compose_security(compose)
 
 

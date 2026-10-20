@@ -576,6 +576,7 @@ class LibrarianConfigTests(unittest.TestCase):
         for role, mode in (
             ("summary-worker", "r2_summary_worker"),
             ("metadata-worker", "r2_metadata_worker"),
+            ("evaluator", "r2_evaluator"),
         ):
             with self.subTest(role=role):
                 worker_runtime = json.loads(rendered[role])
@@ -586,7 +587,10 @@ class LibrarianConfigTests(unittest.TestCase):
                     worker_path = Path(worker_directory) / "librarian.json"
                     worker_path.write_text(rendered[role], encoding="utf-8")
                     parsed_worker = get_librarian_config(worker_path)
-                self.assertTrue(parsed_worker.uses_r2_worker_runtime)
+                if role == "evaluator":
+                    self.assertTrue(parsed_worker.uses_r2_evaluator_runtime)
+                else:
+                    self.assertTrue(parsed_worker.uses_r2_worker_runtime)
                 self.assertEqual(parsed_worker.paths.database_url, "sqlite:////data/librarian.db")
 
     def test_r2_api_runtime_rejects_credential_bearing_embedding_configuration(self) -> None:

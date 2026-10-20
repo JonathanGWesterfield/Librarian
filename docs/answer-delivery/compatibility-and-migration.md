@@ -112,6 +112,13 @@ The preflight projects and validates that nested broker section before it opens
 a channel, while the normal configuration parser validates the rest of the
 same fixed-path file.
 
+The evaluator's document declares `runtime.mode: r2_evaluator`. Its default
+one-shot Compose command passes `--llm-judge`, opens one ready generated client
+as `evaluator`, and sends each judgement only as
+`EVALUATOR_JUDGEMENT` with the v1 evaluator-verdict output contract. Each
+judgement has a fixed 30-second budget; evaluator shutdown cancels the active
+RPC. R2 never constructs the legacy HTTP judge or substitutes a local judge.
+
 This activates R2 API chat at FastAPI lifespan: a failed capability handshake
 prevents browser admission, one generated client/stub serves the process, and
 shutdown closes it. R0 keeps its original configuration and startup path.

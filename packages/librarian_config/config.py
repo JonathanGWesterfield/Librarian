@@ -190,6 +190,12 @@ class LibrarianConfig:
 
         return self.runtime_mode in {"r2_summary_worker", "r2_metadata_worker"}
 
+    @property
+    def uses_r2_evaluator_runtime(self) -> bool:
+        """Whether this is the resolver-owned R2 evaluator document."""
+
+        return self.runtime_mode == "r2_evaluator"
+
 
 def default_config_path(*, cwd: Path | None = None) -> Path:
     """Return the documented local or mounted JSON configuration location."""
@@ -292,7 +298,12 @@ def _parse_runtime_mode(value: object, *, version: object) -> str:
     runtime = _require_mapping(value, "runtime")
     _reject_unknown_keys(runtime, {"mode"}, "runtime")
     mode = runtime.get("mode")
-    if mode not in {"r2_api", "r2_summary_worker", "r2_metadata_worker"}:
+    if mode not in {
+        "r2_api",
+        "r2_summary_worker",
+        "r2_metadata_worker",
+        "r2_evaluator",
+    }:
         raise LibrarianConfigError("runtime.mode must name an R2 application role")
     return mode
 
@@ -306,7 +317,12 @@ def _validate_r2_application_document(root: dict[str, Any], *, runtime_mode: str
     the non-secret ``answer_delivery`` section.
     """
 
-    if runtime_mode not in {"r2_api", "r2_summary_worker", "r2_metadata_worker"}:
+    if runtime_mode not in {
+        "r2_api",
+        "r2_summary_worker",
+        "r2_metadata_worker",
+        "r2_evaluator",
+    }:
         raise LibrarianConfigError("version 2 configuration requires an R2 application role")
     if "codex_executable" in root or "evaluation" in root:
         raise LibrarianConfigError(

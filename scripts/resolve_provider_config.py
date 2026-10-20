@@ -148,7 +148,7 @@ def render_r2_runtime_configs(config: LibrarianConfig) -> dict[str, str]:
     rendered = render_broker_client_runtime_configs(config)
     if not rendered:
         return {}
-    for role in ("api", "summary-worker", "metadata-worker"):
+    for role in ("api", "summary-worker", "metadata-worker", "evaluator"):
         client = build_broker_client_runtime_config(
             model=config.generation.model,
             answer_capability=config.generation.answer_capability or "quality",
