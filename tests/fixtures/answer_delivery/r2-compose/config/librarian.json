@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "paths": {
+    "books_dir": "/books",
+    "host_books_dir": "./tests/fixtures/epubs",
+    "database_url": "sqlite:////data/librarian.db",
+    "log_file": "/data/librarian.log"
+  },
+  "embedding": {
+    "mode": "native_ollama",
+    "model": "all-minilm",
+    "base_url": "http://127.0.0.1:11434"
+  },
+  "generation": {
+    "mode": "docker_codex_broker",
+    "model": "fixture-model",
+    "answer_capability": "quality"
+  },
+  "search": {
+    "opensearch_url": "http://opensearch:9200",
+    "opensearch_index": "librarian-chunks",
+    "retrieval_backend": "auto"
+  },
+  "summaries": {
+    "chunk_timeout_seconds": 30,
+    "max_parallel_chunks": 1
+  },
+  "semantic_source_selector": {
+    "enabled": false,
+    "provider": "docker_codex_broker",
+    "model": "fixture-model"
+  },
+  "evaluation": {
+    "enforcing_judge": {
+      "provider": "docker_codex_broker",
+      "model": "fixture-model"
+    },
+    "advisory_judge": {
+      "provider": "ollama",
+      "model": "fixture-model"
+    }
+  },
+  "services": {
+    "api_port": 8000,
+    "web_port": 3000,
+    "opensearch_port": 9200,
+    "opensearch_java_opts": "-Xms192m -Xmx192m",
+    "ollama_host": "0.0.0.0:11434",
+    "summary_worker_limit": 1,
+    "summary_worker_poll_interval_seconds": 10
+  },
+  "codex_executable": "codex"
+}
