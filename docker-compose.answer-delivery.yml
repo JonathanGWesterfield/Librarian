@@ -1,0 +1,66 @@
+# Isolated, deterministic M03 R2 acceptance overlay.  It replaces all
+# user-owned configuration, local data, credentials, and Codex session state
+# with tracked synthetic fixtures.  It is invoked only by
+# scripts/run_answer_delivery_compose.sh.
+services:
+  config-resolver:
+    volumes: !override
+      - ./tests/fixtures/answer_delivery/r2-compose/config:/config:ro
+      - ./.runtime/answer-delivery:/output
+    command:
+      - --config
+      - /config/librarian.json
+      - --no-host-ports
+      - --compose-output
+      - /output/librarian.compose.json
+      - --state-output
+      - /output/librarian.state.json
+      - --broker-runtime-output-dir
+      - /output/config
+      - --r2
+
+  opensearch:
+    ports: !reset []
+    volumes: !override
+      - answer-delivery-opensearch-data:/usr/share/opensearch/data
+
+  codex-broker:
+    command: ["python", "-m", "librarian_broker.compose_harness", "serve-fake"]
+    volumes: !override
+      - ./.runtime/answer-delivery/config/codex-broker/librarian.json:/config/librarian.json:ro
+
+  api:
+    ports: !reset []
+    volumes: !override
+      - ./.runtime/answer-delivery/config/api/librarian.json:/config/librarian.json:ro
+      - answer-delivery-data:/data
+
+  summary-worker:
+    volumes: !override
+      - ./.runtime/answer-delivery/config/summary-worker/librarian.json:/config/librarian.json:ro
+      - answer-delivery-data:/data
+
+  metadata-worker:
+    volumes: !override
+      - ./.runtime/answer-delivery/config/metadata-worker/librarian.json:/config/librarian.json:ro
+      - answer-delivery-data:/data
+
+  evaluator:
+    volumes: !override
+      - ./.runtime/answer-delivery/config/evaluator/librarian.json:/config/librarian.json:ro
+
+secrets:
+  codex-broker-api:
+    file: ./tests/fixtures/answer_delivery/r2-compose/config/secrets/codex-broker-api
+  codex-broker-summary-worker:
+    file: ./tests/fixtures/answer_delivery/r2-compose/config/secrets/codex-broker-summary-worker
+  codex-broker-metadata-worker:
+    file: ./tests/fixtures/answer_delivery/r2-compose/config/secrets/codex-broker-metadata-worker
+  codex-broker-evaluator:
+    file: ./tests/fixtures/answer_delivery/r2-compose/config/secrets/codex-broker-evaluator
+  codex-broker-health:
+    file: ./tests/fixtures/answer_delivery/r2-compose/config/secrets/codex-broker-health
+
+volumes:
+  answer-delivery-data:
+  answer-delivery-opensearch-data:
