@@ -68,6 +68,23 @@ class AnswerDeliveryComposeScriptTests(unittest.TestCase):
             )
             authorization.write_text(
                 authorization.read_text(encoding="utf-8").replace(
+                    '"authorized_operations": 12', '"authorized_operations": 11'
+                ).replace(
+                    '"denied_operations": 24', '"denied_operations": 25'
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(validator.ReportValidationError):
+                validator.validate_reports(report_dir)
+
+            validator.write_reports(
+                probe=_probe(),
+                report_dir=report_dir,
+                release_sha="a" * 40,
+                profiles=["codex-broker", "workers", "metadata-workers", "evaluation"],
+            )
+            authorization.write_text(
+                authorization.read_text(encoding="utf-8").replace(
                     "unauthenticated_denied", "prompt"
                 ),
                 encoding="utf-8",
@@ -122,8 +139,8 @@ def _probe() -> dict[str, object]:
         "authorization": {
             "schema_version": 1,
             "principals_checked": 4,
-            "authorized_operations": 11,
-            "denied_operations": 25,
+            "authorized_operations": 12,
+            "denied_operations": 24,
             "unauthenticated_denied": True,
         },
         "compatibility": {

@@ -124,8 +124,8 @@ def _validate_authorization(report: dict[str, Any]) -> None:
     )
     _require_schema_version(report, "authorization.json")
     _require_int(report["principals_checked"], 4, "principals_checked")
-    _require_int(report["authorized_operations"], 11, "authorized_operations")
-    _require_int(report["denied_operations"], 25, "denied_operations")
+    _require_int(report["authorized_operations"], 12, "authorized_operations")
+    _require_int(report["denied_operations"], 24, "denied_operations")
     _require_bool(report["unauthenticated_denied"], "unauthenticated_denied")
 
 
