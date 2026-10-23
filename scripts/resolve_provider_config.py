@@ -251,7 +251,7 @@ def _serialize_safe_embedding(config: LibrarianConfig) -> dict[str, str]:
 def write_r2_runtime_configs(output_directory: Path, config: LibrarianConfig) -> list[Path]:
     """Synchronize all R2 broker/caller files after validating secret sources."""
 
-    _validate_r2_broker_secret_sources(config)
+    validate_r2_broker_secret_sources(config)
     rendered = render_r2_runtime_configs(config)
     written_paths: list[Path] = []
     for service in (*sorted(CLIENT_CREDENTIAL_ROLES), R2_BROKER_SERVICE):
@@ -348,7 +348,7 @@ def _remove_stale_broker_client_runtime_config(path: Path) -> None:
         )
 
 
-def _validate_r2_broker_secret_sources(config: LibrarianConfig) -> None:
+def validate_r2_broker_secret_sources(config: LibrarianConfig) -> None:
     """Reject a partial R2 secret set before it can replace an R0 stack."""
 
     if not config.uses_docker_codex_broker:
