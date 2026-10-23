@@ -180,6 +180,20 @@ deadline, unhealthy broker, and real subprocess cancellation behave as
 specified. The old HTTP listener/client paths are removed, and rollback restores
 the complete R0 stack rather than mixing it.
 
+### R2 local cutover preparation
+
+Before an operator stops or replaces an R0 stack, run:
+
+```sh
+python3 scripts/prepare_r2_cutover.py
+```
+
+The command requires a clean release, validates the rendered all-profile R2
+Compose security topology and all five ignored role-specific secrets, then
+creates one timestamped, owner-only snapshot under `backups/r2-cutover/`. It
+does not start, stop, build, or recreate any Compose service. A later atomic
+deployment/rollback slice consumes this prerequisite.
+
 ### M04 — Buffered JSON and progressive SSE delivery adapters
 
 Owner: API delivery.
