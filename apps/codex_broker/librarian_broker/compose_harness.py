@@ -374,8 +374,10 @@ async def _run_controlled_subprocess(request, *, timeout_seconds: float) -> tupl
     command = [
         "/bin/sh",
         "-c",
-        "trap '' TERM; sleep 60 & child=$!; "
-        f"echo \"$$ $child\" > {_CANCELLATION_PID_PATH}; wait $child; echo synthetic",
+        "sleep 60 & child=$!; "
+        f"echo \"$$ $child\" > {_CANCELLATION_PID_PATH}; "
+        "trap 'wait \"$child\"; exit 0' TERM; "
+        "wait \"$child\"; echo synthetic",
     ]
     executor = CodexSubprocessExecutor(lambda _: command)
     return await executor.generate(request, timeout_seconds=timeout_seconds)
