@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -572,6 +573,23 @@ class LibrarianConfigTests(unittest.TestCase):
             parsed_api = get_librarian_config(api_path)
         self.assertTrue(parsed_api.uses_r2_api_runtime)
         self.assertEqual(parsed_api.paths.database_url, "sqlite:////data/librarian.db")
+
+    def test_r2_compose_fixture_resolves_to_non_secret_runtime_files(self) -> None:
+        """The tracked R2 acceptance fixture satisfies the legacy input boundary."""
+        fixture_config = (
+            REPO_ROOT / "tests/fixtures/answer_delivery/r2-compose/config"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "config"
+            shutil.copytree(fixture_config, root)
+            config = get_librarian_config(root / "librarian.json")
+            rendered = resolver.render_r2_runtime_configs(config)
+            resolver.write_r2_runtime_configs(root / "runtime", config)
+
+        self.assertEqual(set(rendered), {*resolver.CLIENT_CREDENTIAL_ROLES, "codex-broker"})
+        for runtime_json in rendered.values():
+            self.assertNotIn("api_key_file", runtime_json)
+            self.assertNotIn("synthetic-", runtime_json)
 
         for role, mode in (
             ("summary-worker", "r2_summary_worker"),
