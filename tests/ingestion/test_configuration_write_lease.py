@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -82,6 +85,131 @@ class ConfigurationWriteLeaseTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 2)
             self.assertEqual(destination.read_text(encoding="utf-8"), '{"existing": true}\n')
             self.assertNotIn('{"fixture": true}', completed.stderr)
+
+    @unittest.skipIf(os.name == "nt", "process-group interruption is a Unix behavior")
+    def test_interrupted_wrapper_holds_lease_until_child_restores_config_and_exits(self) -> None:
+        """A TERM sent only to the wrapper cannot open a write window.
+
+        The child mimics the check/test cleanup trap: on TERM it restores the
+        original config, then waits for this test to permit its final exit.
+        A competing helper must still be denied during that window.
+        """
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config" / "librarian.json"
+            config.parent.mkdir()
+            original_config = b'{"provider": "local"}\n'
+            config.write_bytes(original_config)
+            source = root / "replacement.json"
+            source.write_bytes(b'{"provider": "replacement"}\n')
+            restored = root / "config-restored"
+            started = root / "child-started"
+            finish = root / "child-finish"
+            cleanup_child = root / "cleanup_child.py"
+            cleanup_child.write_text(
+                "\n".join(
+                    (
+                        "import signal",
+                        "import sys",
+                        "import time",
+                        "from pathlib import Path",
+                        "root = Path(sys.argv[1])",
+                        "config = root / 'config' / 'librarian.json'",
+                        "config.write_bytes(b'{\\\"provider\\\": \\\"temporary\\\"}\\n')",
+                        "(root / 'cleanup-child-pid').write_text(str(__import__('os').getpid()))",
+                        "(root / 'child-started').touch()",
+                        "def restore(_signum, _frame):",
+                        "    config.write_bytes(b'{\\\"provider\\\": \\\"local\\\"}\\n')",
+                        "    (root / 'config-restored').touch()",
+                        "    while not (root / 'child-finish').exists():",
+                        "        time.sleep(0.01)",
+                        "    raise SystemExit(143)",
+                        "signal.signal(signal.SIGTERM, restore)",
+                        "while True:",
+                        "    time.sleep(0.01)",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            leader = root / "leader.py"
+            leader.write_text(
+                "\n".join(
+                    (
+                        "import signal",
+                        "import subprocess",
+                        "import sys",
+                        "import time",
+                        "from pathlib import Path",
+                        "root = Path(sys.argv[1])",
+                        "subprocess.Popen([sys.executable, str(root / 'cleanup_child.py'), str(root)])",
+                        "(root / 'leader-pid').write_text(str(__import__('os').getpid()))",
+                        "def stop(_signum, _frame):",
+                        "    raise SystemExit(143)",
+                        "signal.signal(signal.SIGTERM, stop)",
+                        "while True:",
+                        "    time.sleep(0.01)",
+                    )
+                ),
+                encoding="utf-8",
+            )
+            wrapper = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(LEASE_HELPER),
+                    "--root",
+                    str(root),
+                    "--",
+                    sys.executable,
+                    str(leader),
+                    str(root),
+                ]
+            )
+            try:
+                self._wait_for_path(started)
+                os.kill(wrapper.pid, signal.SIGTERM)
+                self._wait_for_path(restored)
+
+                self.assertIsNone(wrapper.poll(), "wrapper released the lease before child cleanup")
+                competing_writer = subprocess.run(
+                    [
+                        sys.executable,
+                        str(LEASE_HELPER),
+                        "--root",
+                        str(root),
+                        "--copy-file",
+                        str(source),
+                        str(config),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(competing_writer.returncode, 2)
+                self.assertEqual(config.read_bytes(), original_config)
+
+                finish.touch()
+                self.assertEqual(wrapper.wait(timeout=10), 143)
+                self.assertEqual(config.read_bytes(), original_config)
+            finally:
+                finish.touch(exist_ok=True)
+                if wrapper.poll() is None:
+                    wrapper.send_signal(signal.SIGTERM)
+                    wrapper.wait(timeout=10)
+                for pid_file in (root / "leader-pid", root / "cleanup-child-pid"):
+                    if pid_file.exists():
+                        try:
+                            os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+
+    def _wait_for_path(self, path: Path, *, timeout_seconds: float = 10.0) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if path.exists():
+                return
+            time.sleep(0.01)
+        self.fail(f"timed out waiting for {path.name}")
 
 
 if __name__ == "__main__":
