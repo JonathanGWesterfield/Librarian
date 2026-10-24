@@ -12,6 +12,11 @@
 #   scripts/test.sh --failfast tests.ingestion.test_epub
 set -euo pipefail
 
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${LIBRARIAN_CONFIG_WRITE_LEASE_HELD:-}" != "1" ]]; then
+  exec python3 "$root_dir/scripts/config_write_lease.py" --root "$root_dir" -- bash "$0" "$@"
+fi
+
 usage() {
   cat <<'EOF'
 Usage: scripts/test.sh [--verbose] [--failfast] [TEST_NAME ...]

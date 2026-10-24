@@ -37,7 +37,8 @@ if ($LASTEXITCODE -ne 0) { throw "[librarian] Docker is not running. Start Docke
 
 New-Item -ItemType Directory -Force -Path data, .runtime, config/secrets | Out-Null
 if (-not (Test-Path config/librarian.json)) {
-    Copy-Item config/librarian.example.json config/librarian.json
+    & python "$root/scripts/config_write_lease.py" --root "$root" --copy-file config/librarian.example.json config/librarian.json
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "[librarian] Created config/librarian.json from the example."
 }
 & docker compose --profile config-resolver run --rm --build config-resolver

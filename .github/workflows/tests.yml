@@ -68,8 +68,9 @@ jobs:
           # deterministic evaluator still initializes configured logging, so
           # give this post-check step the committed test configuration without
           # relying on legacy environment settings or local user configuration.
-          cp tests/fixtures/config/librarian.test.json config/librarian.json
-          trap 'rm -f config/librarian.json' EXIT
+          python scripts/config_write_lease.py --root "$PWD" -- \
+            cp tests/fixtures/config/librarian.test.json config/librarian.json
+          trap 'python scripts/config_write_lease.py --root "$PWD" -- rm -f config/librarian.json' EXIT
           python scripts/evaluate_retrieval.py --check --github-summary "$GITHUB_STEP_SUMMARY" --compare-to /tmp/librarian-base-evaluation-report.json
 
       - name: Upload evaluation reports

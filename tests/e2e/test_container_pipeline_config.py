@@ -47,10 +47,11 @@ class ContainerPipelineConfigTests(unittest.TestCase):
         )[0]
 
         self.assertIn(
-            "cp tests/fixtures/config/librarian.test.json config/librarian.json",
+            'scripts/config_write_lease.py --root "$PWD" -- ',
             evaluation_step,
         )
-        self.assertIn("trap 'rm -f config/librarian.json' EXIT", evaluation_step)
+        self.assertIn("cp tests/fixtures/config/librarian.test.json config/librarian.json", evaluation_step)
+        self.assertIn('scripts/config_write_lease.py --root "$PWD" -- rm -f', evaluation_step)
         self.assertIn("python scripts/evaluate_retrieval.py --check", evaluation_step)
         self.assertNotIn("LIBRARIAN_", evaluation_step)
 

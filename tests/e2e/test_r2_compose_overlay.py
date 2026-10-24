@@ -107,6 +107,10 @@ class R2ComposeOverlayTests(unittest.TestCase):
             R2_EVALUATOR_ENTRYPOINT,
         )
         self.assertEqual(compose["services"]["evaluator"]["command"], [])
+        # Evaluator is a deliberate one-shot post-start check, not a long-lived
+        # service suitable for `compose up --wait` health admission.
+        self.assertNotIn("healthcheck", compose["services"]["evaluator"])
+        self.assertNotIn("restart", compose["services"]["evaluator"])
         validate_r2_compose_security(compose)
 
 
