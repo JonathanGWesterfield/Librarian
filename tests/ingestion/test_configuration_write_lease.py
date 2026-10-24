@@ -43,6 +43,19 @@ class ConfigurationWriteLeaseTests(unittest.TestCase):
             with self.subTest(writer=writer.name):
                 self.assertIn("config_write_lease.py", writer.read_text(encoding="utf-8"))
 
+    def test_check_reuses_its_config_snapshot_for_the_nested_test_runner(self) -> None:
+        """Only one cleanup handler may restore the user configuration."""
+
+        check = (REPO_ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
+        test = (REPO_ROOT / "scripts" / "test.sh").read_text(encoding="utf-8")
+
+        self.assertIn("LIBRARIAN_TEST_CONFIG_INSTALLED=1 scripts/test.sh", check)
+        self.assertIn("cleanup_test_config_on_signal", check)
+        self.assertIn("trap 'cleanup_test_config_on_signal 143' TERM", check)
+        self.assertIn('LIBRARIAN_TEST_CONFIG_INSTALLED:-}', test)
+        self.assertIn("cleanup_test_config_on_signal", test)
+        self.assertIn("trap 'cleanup_test_config_on_signal 143' TERM", test)
+
     def test_helper_refuses_a_live_config_copy_while_cutover_holds_the_lease(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
