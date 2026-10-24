@@ -62,27 +62,41 @@ export PYTHONPATH="${PWD}/packages${PYTHONPATH:+:${PYTHONPATH}}"
 # running app. Tests must not inherit a developer's provider, model, or
 # container-only paths, so temporarily install the checked-in fixture and
 # restore an existing ignored configuration byte-for-byte on exit.
-test_config_path="config/librarian.json"
-test_config_fixture="tests/fixtures/config/librarian.test.json"
-test_config_backup=""
-if [[ -f "$test_config_path" ]]; then
-  test_config_backup="$(mktemp)"
-  cp "$test_config_path" "$test_config_backup"
-fi
-cp "$test_config_fixture" "$test_config_path"
-cleanup_test_config() {
-  if [[ -n "$test_config_backup" ]]; then
-    if cmp -s "$test_config_path" "$test_config_fixture"; then
-      cp "$test_config_backup" "$test_config_path"
-    else
-      printf '%s\n' '[librarian] Test configuration changed during the run; preserving it instead of restoring the prior local configuration.' >&2
-    fi
-    rm -f "$test_config_backup"
-  else
-    rm -f "$test_config_path"
+if [[ "${LIBRARIAN_TEST_CONFIG_INSTALLED:-}" != "1" ]]; then
+  test_config_path="config/librarian.json"
+  test_config_fixture="tests/fixtures/config/librarian.test.json"
+  test_config_backup=""
+  test_config_cleaned=false
+  if [[ -f "$test_config_path" ]]; then
+    test_config_backup="$(mktemp)"
+    cp "$test_config_path" "$test_config_backup"
   fi
-}
-trap cleanup_test_config EXIT
+  cp "$test_config_fixture" "$test_config_path"
+  cleanup_test_config() {
+    if [[ "$test_config_cleaned" == "true" ]]; then
+      return
+    fi
+    test_config_cleaned=true
+    if [[ -n "$test_config_backup" ]]; then
+      if cmp -s "$test_config_path" "$test_config_fixture"; then
+        cp "$test_config_backup" "$test_config_path"
+      else
+        printf '%s\n' '[librarian] Test configuration changed during the run; preserving it instead of restoring the prior local configuration.' >&2
+      fi
+      rm -f "$test_config_backup"
+    else
+      rm -f "$test_config_path"
+    fi
+  }
+  cleanup_test_config_on_signal() {
+    cleanup_test_config
+    trap - EXIT
+    exit "$1"
+  }
+  trap cleanup_test_config EXIT
+  trap 'cleanup_test_config_on_signal 130' INT
+  trap 'cleanup_test_config_on_signal 143' TERM
+fi
 
 if ((${#tests[@]})); then
   command=(python3 -m unittest)
