@@ -43,6 +43,7 @@ from resolve_provider_config import (
 
 R2_PROFILES = ("codex-broker", "workers", "metadata-workers", "evaluation")
 R2_BACKUP_PREFIX = "r2-cutover-"
+R2_BACKUP_MANIFEST_NAME = "cutover.json"
 
 
 class R2CutoverPreflightError(ValueError):
@@ -97,6 +98,7 @@ def prepare_r2_cutover(
     backup_path = _backup_path(backup_root, release_sha, now())
     _write_atomic_backup(
         backup_path=backup_path,
+        release_sha=release_sha,
         config_bytes=config_bytes,
         secret_bytes=secret_bytes,
     )
@@ -212,7 +214,11 @@ def _backup_path(backup_root: Path, release_sha: str, timestamp: datetime) -> Pa
 
 
 def _write_atomic_backup(
-    *, backup_path: Path, config_bytes: bytes, secret_bytes: dict[str, bytes]
+    *,
+    backup_path: Path,
+    release_sha: str,
+    config_bytes: bytes,
+    secret_bytes: dict[str, bytes],
 ) -> None:
     _ensure_backup_root(backup_path.parent)
     if backup_path.exists() or backup_path.is_symlink():
@@ -222,6 +228,10 @@ def _write_atomic_backup(
     )
     try:
         staging.chmod(0o700)
+        _write_private_file(
+            staging / R2_BACKUP_MANIFEST_NAME,
+            (json.dumps({"schema_version": 1, "release_sha": release_sha}, sort_keys=True) + "\n").encode("utf-8"),
+        )
         _write_private_file(staging / "config" / "librarian.json", config_bytes)
         for role in R2_BROKER_SECRET_ROLES:
             _write_private_file(

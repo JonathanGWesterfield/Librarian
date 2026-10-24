@@ -13,6 +13,11 @@
 #   python3 scripts/evaluate_retrieval.py --check
 set -euo pipefail
 
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${LIBRARIAN_CONFIG_WRITE_LEASE_HELD:-}" != "1" ]]; then
+  exec python3 "$root_dir/scripts/config_write_lease.py" --root "$root_dir" -- bash "$0" "$@"
+fi
+
 # Every package entry point uses the required user-facing JSON configuration.
 # Keep this complete validation isolated from a developer's provider and
 # container-only file paths, then restore the ignored configuration afterward.

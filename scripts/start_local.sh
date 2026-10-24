@@ -61,7 +61,8 @@ fi
 cd "$ROOT_DIR"
 mkdir -p data config/secrets .runtime
 if [[ ! -f config/librarian.json ]]; then
-  cp config/librarian.example.json config/librarian.json
+  python3 "$ROOT_DIR/scripts/config_write_lease.py" --root "$ROOT_DIR" -- \
+    cp config/librarian.example.json config/librarian.json
   printf '%s\n' '[librarian] Created config/librarian.json from the example.'
 fi
 

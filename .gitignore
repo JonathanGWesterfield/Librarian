@@ -13,6 +13,7 @@ node_modules/
 # Local configuration and credentials
 config/librarian.json
 config/secrets/
+.librarian-config-write.lock
 .runtime/
 backups/
 .env

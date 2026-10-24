@@ -55,6 +55,10 @@ class R2CutoverPreflightTests(unittest.TestCase):
                 (backup.path / "config" / "librarian.json").read_bytes(),
                 config.read_bytes(),
             )
+            self.assertEqual(
+                json.loads((backup.path / preflight.R2_BACKUP_MANIFEST_NAME).read_text()),
+                {"schema_version": 1, "release_sha": "a" * 40},
+            )
             for role, secret_name in BROKER_SECRET_NAMES.items():
                 with self.subTest(role=role):
                     self.assertEqual(

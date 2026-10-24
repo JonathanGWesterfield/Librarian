@@ -42,6 +42,15 @@ RUN apt-get update \
     && pip install --no-cache-dir -e "apps/api[dev]" -e "packages[dev]"
 
 
+# The isolated R2 contract gate needs the checked-in descriptor and its
+# generation/preflight helpers. Keep these verification-only files out of the
+# general test image and deployable runtime image.
+FROM test AS answer-delivery-contract-gate
+
+COPY proto/librarian/answer/v1/ proto/librarian/answer/v1/
+COPY scripts/generate_contracts.sh scripts/prepare_r2_cutover.py scripts/resolve_provider_config.py scripts/
+
+
 # The separate R2 composition supplies this build argument from its release
 # pipeline.  A missing SHA fails the build instead of producing an image that
 # could hand-shake as an unspecified release.  Keep this target after ``test``

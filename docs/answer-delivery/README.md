@@ -191,8 +191,34 @@ python3 scripts/prepare_r2_cutover.py
 The command requires a clean release, validates the rendered all-profile R2
 Compose security topology and all five ignored role-specific secrets, then
 creates one timestamped, owner-only snapshot under `backups/r2-cutover/`. It
-does not start, stop, build, or recreate any Compose service. A later atomic
-deployment/rollback slice consumes this prerequisite.
+does not start, stop, build, or recreate any Compose service.
+
+### R2 local cutover activation
+
+Use the preflight snapshot from the same clean release to inspect the atomic
+activation plan without changing Compose:
+
+```sh
+python3 scripts/deploy_r2_cutover.py --backup backups/r2-cutover/<snapshot>
+```
+
+The default command only displays the plan. It does not run Compose, expose
+configuration or secret content, or modify the stack. Activation requires the
+explicit acknowledgement:
+
+```sh
+python3 scripts/deploy_r2_cutover.py --backup backups/r2-cutover/<snapshot> \
+  --confirm-r2-cutover
+```
+
+The confirmed command first runs isolated release and Compose acceptance gates,
+then closes browser admission, drains R0, and recreates the R2 services as one
+Compose release. It marks R2 active only after readiness and deterministic
+smoke checks pass. If activation fails after R0 admission closes, it restores
+the saved R0 images, configuration, and secrets as one complete baseline. If
+that rollback fails, the command reports the failure and the operator must
+inspect the backup before taking further action. It never falls back to HTTP or
+a mixed R0/R2 stack.
 
 ### M04 — Buffered JSON and progressive SSE delivery adapters
 
