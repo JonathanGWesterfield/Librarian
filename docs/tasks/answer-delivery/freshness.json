@@ -1,18 +1,18 @@
 {
   "canonical_source_sha256": {
-    "docs/answer-delivery/README.md": "f7987d32fda81bf1e566bfa4b5b0b2a6996cb71b18f63f29b6b2fee56e426843",
+    "docs/answer-delivery/README.md": "9da2661a2828e17c9fc566c7ef5a9ac3bee9b69266f659c869b2bf6460e80b25",
     "docs/answer-delivery/acceptance.md": "c880d2cabfa1c27d03eb2805d5097a95c552d2b3b5d1cb98bc1524e4aab009fb",
     "docs/answer-delivery/adr-internal-rpc-transport.md": "25c9a8c678da181c18d0f7d8b4a05ac5be829c95944cf33b1d9a83491ae4a9bb",
     "docs/answer-delivery/compatibility-and-migration.md": "8f2eaac2f1b2fefc5a6806a766a8588f0d3e37c136a60c8888024455db93d097",
     "docs/answer-delivery/technical-design.md": "a3ed15dfca1d2eab8245482ff942baa935bf6f3cb300c8974fee195db1c0467d"
   },
   "last_freshness_review": {
-    "note": "Status-only M03 update records merged metadata proof, reviewed summary proof, and current-main harness bootstrap blocker. Tasks16/17 retain valid anchors and scope; summary baseline Compose evidence is separate from current-main acceptance.",
-    "reviewed_at_utc": "2026-10-26T17:12:12Z",
+    "note": "Reviewed status-only M03 changes: PR116 completes summary proof; evaluator proof is reviewed. Tasks16/18 scope and anchors remain valid; historical evaluator Compose evidence does not clear current-main bootstrap blocker.",
+    "reviewed_at_utc": "2026-10-26T17:35:59Z",
     "reviewed_by": "root-reviewer",
     "task_ids": [
       "AD-M03-16",
-      "AD-M03-17"
+      "AD-M03-18"
     ]
   },
   "schema_version": 1

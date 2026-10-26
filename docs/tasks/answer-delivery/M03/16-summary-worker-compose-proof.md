@@ -2,7 +2,7 @@
 
 - **Task ID:** `AD-M03-16`
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md); task status does not advance milestone status.
-- **Lifecycle status:** **in review**
+- **Lifecycle status:** **complete**
 - **Claim record:** owner: **/root/implementer**; branch/worktree: **codex/ad-m03-16-summary-proof** / **/Users/codexai/Documents/Librarian-worktrees/ad-m03-16**; claimed timestamp: **2026-10-26 18:08 CET**; last update: **2026-10-26 18:11 CET**; coordination contact: **/root**.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 
@@ -62,6 +62,8 @@ Append dated entries; never rewrite or delete earlier claims, commands, review f
 - **2026-10-26 — Current-main integration:** rebased the reviewed slice onto `39644a32d4be28b07cea55d380b85a3ab7e98e03` without conflicts. Re-ran the full `scripts/check.sh`: 501 tests passed in 7.524 seconds, exit 0; log `/tmp/librarian-ad-m03-16-rebased-check.log`. The current-main live Compose bootstrap blocker remains separate from this passing deterministic gate.
 
 - **2026-10-26 — PR handoff:** [PR #116](https://github.com/JonathanGWesterfield/Librarian/pull/116) contains the reviewed proof and task-status reconciliation. Its head commit is the implementation SHA. Task16 remains `in review` until merge; task17 is complete via merged PR114.
+
+- **2026-10-26 — Merged completion:** verified PR #116 merged as `e5d57a03ad40b2358968335d5ec53f5785277125`. The independent review, 501-test gate, and labeled clean-baseline Compose proof are recorded above. Task lifecycle is `complete`; the separate current-main Compose bootstrap blocker and M03 release gates remain.
 
 ## Handoff
 
