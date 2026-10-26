@@ -9,6 +9,12 @@ from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from librarian_answer_adapters.grpc_generation import R2GenerationDeadlineExceeded
+from librarian_answer_adapters.public_events import (
+    PublicAnswerEventSerializer,
+    SseFrameTooLargeError,
+    encode_sse_event,
+)
 from librarian_chat.chat import (
     ChatOptions,
     answer_question,
@@ -53,7 +59,6 @@ from pydantic import BaseModel, Field
 
 from librarian_api.config import get_settings
 from librarian_api.r2_chat import R2ApiChatCaller, _RequestContext
-from librarian_answer_adapters.grpc_generation import R2GenerationDeadlineExceeded
 
 configure_logging(file_enabled=False)
 
@@ -226,6 +231,8 @@ class ChatTimingsResponse(BaseModel):
     retrieval_seconds: float = Field(ge=0)
     prompt_construction_seconds: float = Field(ge=0)
     generation_seconds: float = Field(ge=0)
+    validation_seconds: float = Field(ge=0)
+    repair_seconds: float = Field(ge=0)
     total_seconds: float = Field(ge=0)
 
 
@@ -265,7 +272,9 @@ class ChatResponse(BaseModel):
     )
     minimum_citation_count: int = Field(ge=1)
     citation_count: int = Field(ge=0)
-    outcome: Literal["answered", "insufficient_evidence", "generation_unavailable"]
+    outcome: Literal[
+        "answered", "insufficient_evidence", "generation_unavailable", "source_changed"
+    ]
     sources: list[ChatSourceResponse]
 
 
@@ -525,6 +534,78 @@ async def chat_endpoint(payload: ChatRequest, request: Request) -> dict[str, obj
     except (ValueError, NotImplementedError, RuntimeError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return result.to_dict()
+
+
+@app.post(
+    "/chat/events",
+    response_class=StreamingResponse,
+    response_description=(
+        "Versioned v1 answer lifecycle events. Candidate progress contains only "
+        "identifiers and book titles; answer text appears only after validation."
+    ),
+    responses={
+        200: {
+            "description": "A v1 text/event-stream answer lifecycle.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        },
+        400: _CHAT_BAD_REQUEST_RESPONSE,
+        503: {"model": ErrorResponse, "description": "R2 answer delivery is not ready."},
+    },
+)
+async def chat_events_endpoint(payload: ChatRequest, request: Request) -> StreamingResponse:
+    """Project the R2 runtime iterator onto the checked-in public SSE schema."""
+
+    caller = getattr(app.state, "r2_api_chat_caller", None)
+    if caller is None:
+        raise HTTPException(
+            status_code=503,
+            detail="R2 answer delivery is not ready.",
+        )
+    try:
+        options = _chat_options(payload)
+        caller.validate_options(options)
+    except (ValueError, NotImplementedError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    async def event_bytes():
+        context = _RequestContext(is_disconnected=request.is_disconnected)
+        context.start()
+        serializer: PublicAnswerEventSerializer | None = None
+        try:
+            async for run_event in caller.run(options, context=context):
+                if serializer is None:
+                    serializer = PublicAnswerEventSerializer(run_event.event.request_id)
+                response = (
+                    run_event.response.to_dict()
+                    if run_event.response is not None
+                    else None
+                )
+                try:
+                    serialized = serializer.serialize(run_event.event, result=response)
+                except SseFrameTooLargeError:
+                    # The serializer has not advanced state for an oversized
+                    # frame. Replace the undeliverable runtime event with the
+                    # only safe, bounded public terminal result.
+                    yield encode_sse_event(
+                        serializer.serialize_failure(sequence=run_event.event.sequence)
+                    )
+                    return
+                yield encode_sse_event(serialized)
+        except asyncio.CancelledError:
+            # A response-body disconnect must reach the runtime before the
+            # request watcher is torn down.  No late terminal frame is written
+            # to a client that has already gone away.
+            context.cancel()
+            raise
+        finally:
+            context.cancel()
+            await context.close()
+
+    return StreamingResponse(
+        event_bytes(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post(

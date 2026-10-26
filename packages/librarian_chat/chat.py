@@ -213,6 +213,8 @@ class ChatTimings:
     retrieval_seconds: float = 0.0
     prompt_construction_seconds: float = 0.0
     generation_seconds: float = 0.0
+    validation_seconds: float = 0.0
+    repair_seconds: float = 0.0
     total_seconds: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
