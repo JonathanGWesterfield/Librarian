@@ -8,7 +8,8 @@ import sys
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
-from time import monotonic
+from time import monotonic, perf_counter
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "codex_broker"))
@@ -28,14 +29,17 @@ from librarian_answer import (
 )
 from librarian_answer_adapters.grpc_broker import GeneratedGrpcBrokerClient
 from librarian_answer_adapters.grpc_chat import GrpcChatOperations
-from librarian_api.r2_chat import _PhaseRequestContext
+from librarian_api.r2_chat import R2ApiChatCaller, _PhaseRequestContext, _RequestContext
 from librarian_broker.execution import BrokerScheduler, ProviderExecutor
 from librarian_broker.grpc_service import BrokerCredentials, create_broker_server
+from librarian_chat.chat import ChatOptions, ChatSource, RetrievedChatEvidence
 from librarian_contracts.broker_limits import build_broker_execution_limits
 from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2 as delivery_pb2,
 )
 from librarian_contracts.stack_contract import build_stack_contract
+from librarian_search.search import SearchResponse
+from librarian_storage.storage import StoredChunkRecord
 
 
 class GrpcChatOperationsTests(unittest.IsolatedAsyncioTestCase):
@@ -488,6 +492,108 @@ class LiveGrpcChatCancellationTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(self.provider.cancelled.wait(), timeout=1)
 
 
+class LiveGrpcChatCompositionProofTests(unittest.IsolatedAsyncioTestCase):
+    """Prove the R2 API composition reaches only its authenticated stub."""
+
+    async def asyncSetUp(self) -> None:
+        self.contract = build_stack_contract(
+            stack_release_sha="b" * 40,
+            descriptor=b"API chat generated composition proof descriptor",
+        )
+        self.provider = _SuccessfulApiProvider()
+        self.server = create_broker_server(
+            contract=self.contract,
+            credentials=BrokerCredentials({"api": "api-token"}),
+            scheduler=BrokerScheduler(
+                self.provider,
+                limits=build_broker_execution_limits(validation_reserve_seconds=0.01),
+            ),
+        )
+        port = self.server.add_insecure_port("127.0.0.1:0")
+        await self.server.start()
+        self.client = GeneratedGrpcBrokerClient.connect(
+            target=f"127.0.0.1:{port}",
+            contract=self.contract,
+            principal="api",
+            bearer_token="api-token",
+        )
+        await self.client.ensure_ready()
+
+    async def asyncTearDown(self) -> None:
+        await self.client.close()
+        await self.server.stop(0)
+
+    async def test_r2_api_chat_composition_uses_generated_selection_synthesis_and_review(self) -> None:
+        """Run the API caller with only local retrieval/storage seams stubbed."""
+
+        caller = R2ApiChatCaller(
+            client=self.client,
+            operations=GrpcChatOperations(client=self.client, model_id="fixture-model"),
+        )
+        source_store = _FixtureSourceStore()
+        with (
+            patch(
+                "librarian_api.r2_chat.retrieve_chat_evidence",
+                return_value=_retrieved_chat_evidence(),
+            ),
+            patch(
+                "librarian_api.r2_chat.create_ingestion_store",
+                return_value=source_store,
+            ),
+        ):
+            events = [
+                event
+                async for event in caller.run(
+                    ChatOptions(
+                        question="Who opens the gate?",
+                        database_url="sqlite:////tmp/r2-api-chat-proof.db",
+                    ),
+                    context=_RequestContext(),
+                )
+            ]
+
+        self.assertEqual(self.client.principal, "api")
+        self.assertEqual(
+            [request.operation for request in self.provider.requests],
+            [
+                delivery_pb2.SEMANTIC_SOURCE_SELECTION,
+                delivery_pb2.GROUNDED_SYNTHESIS,
+                delivery_pb2.SUPPORT_REVIEW,
+            ],
+        )
+        self.assertEqual(
+            [request.output_contract for request in self.provider.requests],
+            [
+                delivery_pb2.SOURCE_SELECTION_JSON_V1,
+                delivery_pb2.GROUNDED_ANSWER_JSON_V1,
+                delivery_pb2.SUPPORT_REVIEW_JSON_V1,
+            ],
+        )
+        self.assertTrue(
+            all(
+                [candidate.candidate_id for candidate in request.evidence_snapshot.candidates]
+                == ["S1:1"]
+                and all(candidate.body_text_eligible for candidate in request.evidence_snapshot.candidates)
+                for request in self.provider.requests
+            )
+        )
+        self.assertEqual(
+            [event.event.event for event in events],
+            [
+                "started",
+                "evidence_candidates",
+                "generation_started",
+                "validation_started",
+                "answer_validated",
+                "completed",
+            ],
+        )
+        self.assertEqual(events[-1].response.outcome, "answered")
+        self.assertEqual(events[-1].response.answer, "Mara opens the gate. [S1]")
+        self.assertEqual(source_store.opened, 2)
+        self.assertEqual(source_store.closed, 2)
+
+
 @dataclass
 class _FakeClient:
     responses: list[str]
@@ -500,6 +606,95 @@ class _FakeClient:
             provider_model_id="fixture-model",
             success=delivery_pb2.GenerationSuccess(content=self.responses.pop(0)),
         )
+
+
+class _SuccessfulApiProvider(ProviderExecutor):
+    """The live broker's local executor; each response matches one v1 operation."""
+
+    def __init__(self) -> None:
+        self.requests: list[delivery_pb2.GenerateRequest] = []
+
+    async def generate(
+        self, request: delivery_pb2.GenerateRequest, *, timeout_seconds: float
+    ) -> tuple[str, str]:
+        del timeout_seconds
+        self.requests.append(request)
+        responses = {
+            delivery_pb2.SEMANTIC_SOURCE_SELECTION: json.dumps(
+                {"sentence_ids": ["S1:1"]}
+            ),
+            delivery_pb2.GROUNDED_SYNTHESIS: json.dumps(
+                {"answer": "Mara opens the gate.", "sentence_ids": ["S1:1"]}
+            ),
+            delivery_pb2.SUPPORT_REVIEW: _review_payload(supported=True),
+        }
+        return responses[request.operation], request.model_id
+
+
+class _FixtureSourceStore:
+    """Minimal local persistence seam retained by API chat evidence snapshots."""
+
+    def __init__(self) -> None:
+        self.opened = 0
+        self.closed = 0
+
+    def initialize(self) -> None:
+        self.opened += 1
+
+    def close(self) -> None:
+        self.closed += 1
+
+    def get_source_chunk(self, *, book_id: str, chunk_id: str) -> StoredChunkRecord:
+        if (book_id, chunk_id) != ("book", "chunk"):
+            raise AssertionError("R2 chat requested an unexpected local source")
+        text = "Mara opens the gate."
+        return StoredChunkRecord(
+            id="chunk",
+            book_id="book",
+            chunk_index=0,
+            text=text,
+            character_count=len(text),
+            token_estimate=5,
+            chapter_title=None,
+            content_type="body",
+            source_revision="fixture-revision",
+        )
+
+
+def _retrieved_chat_evidence() -> RetrievedChatEvidence:
+    source = ChatSource(
+        source_id="S1",
+        score=1.0,
+        chunk_id="chunk",
+        book_id="book",
+        relative_path="fixture.epub",
+        title="Fixture Book",
+        authors=["Fixture Author"],
+        chunk_index=0,
+        text="Mara opens the gate.",
+    )
+    return RetrievedChatEvidence(
+        total_started=perf_counter(),
+        question="Who opens the gate?",
+        answer_capability="quality",
+        required_sources=1,
+        retrieval_limit=1,
+        search_response=SearchResponse(
+            query="Who opens the gate?",
+            embedding_provider="fixture-embedding",
+            embedding_model="fixture-model",
+            dimensions=1,
+            candidate_count=1,
+            results=[],
+            filters={"book_id": "book"},
+        ),
+        retrieval_backend="fixture",
+        sources=[source],
+        evidence_sufficient=True,
+        publication_question=False,
+        query_embedding_seconds=0.0,
+        retrieval_seconds=0.0,
+    )
 
 
 class _BlockingApiProvider(ProviderExecutor):
