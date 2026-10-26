@@ -40,7 +40,23 @@ class StartLocalLauncherTests(unittest.TestCase):
         self.assertIn("ollama-init logs", completed.stderr)
         self.assertNotIn("up --force-recreate -d api web", calls)
 
-    def _run_launcher(self, initializer_state: str) -> tuple[subprocess.CompletedProcess[str], str]:
+    def test_docker_codex_selection_is_rejected_before_any_stack_service_starts(self) -> None:
+        """The normal launcher cannot recreate the retired HTTP composition."""
+        completed, calls = self._run_launcher(
+            "running-then-success",
+            docker_broker_enabled=True,
+        )
+
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("atomic R2 cutover", completed.stderr)
+        self.assertNotIn(" up ", f" {calls} ")
+
+    def _run_launcher(
+        self,
+        initializer_state: str,
+        *,
+        docker_broker_enabled: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "scripts").mkdir()
@@ -57,6 +73,7 @@ class StartLocalLauncherTests(unittest.TestCase):
             environment = os.environ | {
                 "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
                 "OLLAMA_INIT_FAKE_STATE": initializer_state,
+                "CODEX_BROKER_FAKE_ENABLED": "true" if docker_broker_enabled else "false",
             }
             completed = subprocess.run(
                 ["bash", "scripts/start_local.sh", "--no-build"],
@@ -81,7 +98,7 @@ if [[ "$*" == "compose version" || "$1" == "info" ]]; then
 fi
 if [[ "$*" == *"config-resolver run"* ]]; then
   mkdir -p .runtime
-  printf '%s\\n' '{' '  "docker_ollama_enabled": true,' '  "docker_codex_broker_enabled": false,' '  "api_port": 8000,' '  "web_port": 3000' '}' > .runtime/librarian.state.json
+  printf '%s\\n' '{' '  "docker_ollama_enabled": true,' "  \\"docker_codex_broker_enabled\\": ${CODEX_BROKER_FAKE_ENABLED:-false}," '  "api_port": 8000,' '  "web_port": 3000' '}' > .runtime/librarian.state.json
   printf '%s\\n' '{' '  "services": {' '    "ollama-init": {' '      "environment": {' '        "OLLAMA_INIT_MODELS": "all-minilm,qwen2.5:1.5b"' '      }' '    }' '  }' '}' > .runtime/librarian.compose.json
   exit 0
 fi

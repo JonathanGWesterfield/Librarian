@@ -173,7 +173,7 @@ class GenerationProviderTests(unittest.TestCase):
         )
         generator = OpenAICompatibleGenerator(
             model="gpt-5.6-sol",
-            base_url="http://codex-broker:3000/v1",
+            base_url="http://gateway.test.invalid/v1",
             api_key="test-token",
             extra_headers={
                 GROUNDED_CHAT_SYNTHESIS_HEADER: "misconfigured",

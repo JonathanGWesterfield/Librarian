@@ -111,7 +111,7 @@ class LegacyEvidenceRetriever:
 
 @dataclass(frozen=True)
 class LegacyGenerationBroker:
-    """Adapts the configured R1 generator, including its HTTP broker target."""
+    """Adapts a configured non-R2 generator for the retained R1 facade."""
 
     generator: Generator
 

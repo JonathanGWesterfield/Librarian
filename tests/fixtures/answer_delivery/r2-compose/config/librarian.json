@@ -14,7 +14,6 @@
   "generation": {
     "mode": "docker_codex_broker",
     "model": "fixture-model",
-    "api_key_file": "secrets/codex-broker-api",
     "answer_capability": "quality"
   },
   "search": {

@@ -80,8 +80,6 @@ class ProviderSettings:
     def provider(self) -> str:
         if self.mode in {"docker_ollama", "native_ollama"}:
             return "ollama"
-        if self.mode == "docker_codex_broker":
-            return "openai_compatible"
         return self.mode
 
     @property
@@ -450,13 +448,9 @@ def enforce_docker_broker_host_guard(
 ) -> None:
     """Reject a host process before it can construct the private broker client.
 
-    R0 keeps a private HTTP broker so the existing Compose stack can continue to
-    run while M01 and M02 establish the gRPC migration.  That broker has no host
-    port, however, and a host CLI must not mistake its configuration default for
-    a supported topology.  R2 replaces this compatibility check with the
-    stricter role-and-Docker-secret admission rule in the answer-delivery
-    design.  The environment is intentionally not consulted here: exporting a
-    principal must never turn a host process into a Compose caller.
+    The Docker Codex selection is an R2 Compose input, never a provider a host
+    process can construct. The environment is intentionally not consulted:
+    exporting a principal must not turn a host process into a Compose caller.
     """
     normalized_provider = (generation_provider or "").strip().casefold()
     if normalized_provider in {"codex", "ollama", "noop"}:
@@ -472,14 +466,10 @@ def enforce_docker_broker_host_guard(
     )
     if not docker_broker_selected:
         return
-    if resolved_config.path == CONTAINER_CONFIG_PATH.resolve():
-        return
-
     raise LibrarianConfigError(
-        f"{entrypoint} cannot use docker_codex_broker from the host. "
-        "Run the corresponding Docker Compose service with the codex-broker "
-        "profile, or select codex, ollama, noop, or an independently configured "
-        "external openai_compatible provider."
+        f"{entrypoint} cannot construct docker_codex_broker directly. "
+        "Run the atomic R2 Compose deployment, or select codex, ollama, noop, "
+        "or an independently configured external openai_compatible provider."
     )
 
 
@@ -598,18 +588,15 @@ def _parse_provider(value: object, *, role: str, config_root: Path) -> ProviderS
             answer_capability=answer_capability,
         )
     if mode == "docker_codex_broker":
-        _reject_present(provider, {"base_url", "headers", "header_files"}, role)
+        _reject_present(
+            provider,
+            {"base_url", "api_key_file", "headers", "header_files"},
+            role,
+        )
         return ProviderSettings(
             role=role,
             mode=mode,
             model=model,
-            base_url="http://codex-broker:3000/v1",
-            api_key=_read_secret_file(
-                _require_string(provider.get("api_key_file"), f"{role}.api_key_file"),
-                config_root=config_root,
-                label=f"{role}.api_key_file",
-            ),
-            headers={},
             answer_capability=answer_capability,
         )
     if mode == "native_ollama":

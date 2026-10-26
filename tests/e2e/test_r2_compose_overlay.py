@@ -107,6 +107,14 @@ class R2ComposeOverlayTests(unittest.TestCase):
             R2_EVALUATOR_ENTRYPOINT,
         )
         self.assertEqual(compose["services"]["evaluator"]["command"], [])
+        for service_name in ("api", "summary-worker", "metadata-worker", "evaluator"):
+            with self.subTest(service=service_name):
+                self.assertEqual(
+                    compose["services"][service_name]["depends_on"]["codex-broker"][
+                        "condition"
+                    ],
+                    "service_healthy",
+                )
         # Evaluator is a deliberate one-shot post-start check, not a long-lived
         # service suitable for `compose up --wait` health admission.
         self.assertNotIn("healthcheck", compose["services"]["evaluator"])

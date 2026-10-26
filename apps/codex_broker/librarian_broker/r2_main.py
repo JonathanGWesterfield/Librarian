@@ -1,8 +1,7 @@
 """The gRPC-only R2 Codex broker process entrypoint.
 
-This module is intentionally separate from ``main``.  ``main`` remains the
-temporary R0 HTTP broker until the atomic M03 caller cutover retires it; an R2
-image starts only this gRPC server and has no HTTP listener.
+This is the broker's sole application entrypoint. Its image starts only this
+gRPC server and exposes no owned HTTP listener.
 """
 
 from __future__ import annotations

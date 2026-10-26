@@ -65,8 +65,8 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(config.evaluation.enforcing_judge.provider, "codex")
         self.assertEqual(config.evaluation.advisory_judge.provider, "ollama")
 
-    def test_base_profile_is_complete_without_tracking_its_broker_token(self) -> None:
-        """The tracked Compose Codex baseline needs only an ignored broker token."""
+    def test_base_profile_is_complete_without_tracking_a_legacy_broker_token(self) -> None:
+        """The tracked Compose Codex selection delegates credentials to R2 roles."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / "librarian.json"
@@ -76,20 +76,15 @@ class LibrarianConfigTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            secrets = root / "secrets"
-            secrets.mkdir()
-            (secrets / "codex-bridge-token.txt").write_text(
-                "test-bridge-token\n", encoding="utf-8"
-            )
             config = get_librarian_config(path)
 
         self.assertEqual(config.embedding.provider, "ollama")
         self.assertEqual(config.embedding.model, "all-minilm")
-        self.assertEqual(config.generation.provider, "openai_compatible")
+        self.assertEqual(config.generation.provider, "docker_codex_broker")
         self.assertEqual(config.generation.mode, "docker_codex_broker")
         self.assertEqual(config.generation.model, "gpt-5.6-sol")
         self.assertEqual(config.generation.answer_capability, "quality")
-        self.assertEqual(config.generation.api_key, "test-bridge-token")
+        self.assertIsNone(config.generation.api_key)
         self.assertEqual(config.semantic_source_selector.model, config.generation.model)
         self.assertEqual(
             config.evaluation.enforcing_judge.provider, "docker_codex_broker"
@@ -164,11 +159,6 @@ class LibrarianConfigTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            secrets = root / "secrets"
-            secrets.mkdir()
-            (secrets / "codex-bridge-token.txt").write_text(
-                "test-bridge-token\n", encoding="utf-8"
-            )
             path.write_text(json.dumps(payload), encoding="utf-8")
 
             config = get_librarian_config(path)
@@ -179,7 +169,7 @@ class LibrarianConfigTests(unittest.TestCase):
         self.assertEqual(
             config.evaluation.enforcing_judge.model, config.generation.model
         )
-        self.assertEqual(config.generation.api_key, "test-bridge-token")
+        self.assertIsNone(config.generation.api_key)
 
     def test_broker_selector_reuses_the_generation_model(self) -> None:
         """The single-model broker rejects a selector model that cannot execute."""
@@ -192,11 +182,6 @@ class LibrarianConfigTests(unittest.TestCase):
                 )
             )
             payload["semantic_source_selector"]["model"] = "different-model"
-            secrets = root / "secrets"
-            secrets.mkdir()
-            (secrets / "codex-bridge-token.txt").write_text(
-                "test-bridge-token\n", encoding="utf-8"
-            )
             path.write_text(json.dumps(payload), encoding="utf-8")
 
             with self.assertRaisesRegex(
@@ -335,8 +320,6 @@ class LibrarianConfigTests(unittest.TestCase):
                         config.generation.provider,
                         "ollama"
                         if generation_mode.endswith("ollama")
-                        else "openai_compatible"
-                        if generation_mode == "docker_codex_broker"
                         else generation_mode,
                     )
                     clear_librarian_config_cache()
@@ -687,7 +670,6 @@ def _selection(mode: str, role: str) -> dict[str, object]:
         return {
             "mode": mode,
             "model": "gpt-5.6-sol",
-            "api_key_file": f"secrets/{role}.token",
             "answer_capability": "quality",
         }
     return {
@@ -703,7 +685,7 @@ def _write_secret_files(root: Path, embedding_mode: str, generation_mode: str) -
     secrets.mkdir(exist_ok=True)
     if embedding_mode == "openai_compatible":
         (secrets / "embedding.token").write_text("embedding-secret\n", encoding="utf-8")
-    if generation_mode in {"openai_compatible", "docker_codex_broker"}:
+    if generation_mode == "openai_compatible":
         (secrets / "generation.token").write_text("generation-secret\n", encoding="utf-8")
 
 

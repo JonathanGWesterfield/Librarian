@@ -146,8 +146,8 @@ def _direct_factory_calls() -> set[CallSite]:
                 _calls_to_factory(
                     tree,
                     source=relative_source,
-                    factory="DockerCodexBrokerJudge",
-                    aliases={"DockerCodexBrokerJudge"},
+                    factory="GrpcEvaluatorJudge",
+                    aliases={"GrpcEvaluatorJudge"},
                     module_aliases=set(),
                 )
             )

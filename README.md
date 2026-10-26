@@ -407,9 +407,9 @@ launcher creates it from [`config/librarian.example.json`](config/librarian.exam
 on first run. JSON is authoritative; `LIBRARIAN_*` shell variables are not read.
 
 For the populated, non-secret Compose Codex-broker baseline, copy
-[`config/librarian.base.json`](config/librarian.base.json), add its referenced
-API-to-broker token file under ignored `config/secrets/`, and complete the
-one-time broker `codex login` command in the configuration guide. See
+[`config/librarian.base.json`](config/librarian.base.json), create its
+role-specific ignored broker credentials, and use the atomic R2 cutover
+workflow in the configuration guide. See
 [`docs/configuration.md`](docs/configuration.md) for the full configuration
 reference, provider matrix, secret rules, and validation steps.
 

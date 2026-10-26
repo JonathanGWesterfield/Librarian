@@ -32,36 +32,10 @@ Common error behavior:
 
 ## Internal Codex broker
 
-When `generation.mode` is `docker_codex_broker`, Compose starts an
-internal-only service named `codex-broker`. It has no published host port and
-is not a browser or third-party integration surface. The API and summary worker
-call it with the ignored token configured by `generation.api_key_file`.
-
-### `GET /health` on `codex-broker:3000`
-
-Compose healthcheck used to wait before API/worker generation traffic starts.
-It returns `{"status":"ok"}` when the broker process is running. It does not
-make a Codex request or expose login state.
-
-### `POST /v1/chat/completions` on `codex-broker:3000`
-
-Accepts the non-streaming OpenAI-compatible subset used internally:
-
-```json
-{
-  "model": "gpt-5.6-sol",
-  "messages": [{"role": "user", "content": "Use these passages."}],
-  "stream": false
-}
-```
-
-The broker requires `Authorization: Bearer <token>`, accepts only the model in
-`librarian.json`, and returns a standard `choices[0].message.content` response.
-It invokes `codex exec --model <model> --ephemeral --skip-git-repo-check` inside
-the fixed, non-repository broker container, with Codex's read-only sandbox.
-`401` means the internal token was absent or invalid; `502` means Codex itself
-failed and gives the one-time broker-login recovery command without echoing CLI
-stderr or credentials.
+When `generation.mode` is `docker_codex_broker`, the atomic R2 Compose release
+starts an internal-only gRPC `codex-broker`. It has no published host port and
+no HTTP compatibility route. API and worker callers use generated gRPC clients
+with their assigned role-specific secrets; browser clients never call it.
 
 ## Ingestion
 

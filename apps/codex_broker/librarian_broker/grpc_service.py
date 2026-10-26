@@ -1,8 +1,7 @@
 """Authenticated gRPC control-plane foundation for the Codex broker.
 
-This module intentionally coexists with the R0 HTTP application while M03 is
-being built. Its generated-stub service exposes Health, GetCapabilities, and
-the bounded unary Generate path without changing existing HTTP callers.
+Its generated-stub service exposes Health, GetCapabilities, and the bounded
+unary Generate path. The retired HTTP application has no source-tree fallback.
 """
 
 from __future__ import annotations

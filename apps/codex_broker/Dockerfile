@@ -21,16 +21,6 @@ COPY packages packages
 RUN pip install --no-cache-dir -e packages -e apps/codex_broker
 
 
-FROM base AS runtime
-
-EXPOSE 3000
-
-CMD ["uvicorn", "librarian_broker.main:app", "--host", "0.0.0.0", "--port", "3000", "--app-dir", "apps/codex_broker"]
-
-
-# This target is selected only by docker-compose.r2.yml.  It packages the
-# release-bound manifest and starts a gRPC listener exclusively; R0 continues
-# to use the HTTP ``runtime`` target above until the atomic M03 cutover.
 FROM base AS r2-runtime
 
 ARG STACK_RELEASE_SHA
@@ -46,3 +36,8 @@ RUN test -n "$STACK_RELEASE_SHA" \
 EXPOSE 50051
 
 CMD ["python", "-m", "librarian_broker.r2_main"]
+
+
+# ``runtime`` remains the public build target for Compose callers, but the
+# retired HTTP listener no longer has a buildable image in this source tree.
+FROM r2-runtime AS runtime

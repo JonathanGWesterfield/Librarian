@@ -49,7 +49,7 @@ required M00/M01 deliverables have passed review.
 | M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) |
 | M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Complete ([PR #101](https://github.com/JonathanGWesterfield/Librarian/pull/101)) |
 | M02 | In-process answer-runtime extraction and parity | M01 | Not started |
-| M03 | Atomic gRPC Codex-broker migration | M02 | Not started |
+| M03 | Atomic gRPC Codex-broker migration | M02 | In progress |
 | M04 | Buffered JSON and progressive SSE delivery adapters | M03 | Not started |
 | M05 | Configuration, capabilities, and feature off-switch | M04 | Not started |
 | M06 | Web reducer and truthful progress UI | M04, M05 | Not started |
@@ -92,8 +92,8 @@ the tracked synthetic answer-fixture bank and lifecycle checks required by the
 acceptance charter. The fifth slice is complete in [PR #95](https://github.com/JonathanGWesterfield/Librarian/pull/95):
 the base-descriptor compatibility gate required before a v1 protobuf change can
 merge. The sixth slice is complete in [PR #96](https://github.com/JonathanGWesterfield/Librarian/pull/96):
-the remaining R0 HTTP broker target is an explicit M03-removal exception and a
-new runtime target is blocked in CI. The seventh slice is complete in
+the remaining R0 HTTP broker target was recorded for M03 removal and new
+runtime targets are blocked in CI. The seventh slice is complete in
 [PR #97](https://github.com/JonathanGWesterfield/Librarian/pull/97): it
 generates and strictly validates the immutable, descriptor-bound release
 manifest that M03 will package into every R2 image. The eighth slice is complete
@@ -159,6 +159,12 @@ cases. No broker transport or browser behavior changes in M02.
 
 Owner: broker, API, summary/metadata workers, evaluator, and configuration
 owners.
+
+The source-tree retirement slice is complete: the owned HTTP broker listener,
+HTTP client paths, and exception inventory are removed, and direct
+`docker_codex_broker` configuration fails closed. M03 remains in progress until
+the atomic R2 release, cutover/rollback, isolation, and live acceptance exit
+conditions below are satisfied.
 
 - [ ] Implement the unary v1 broker service, generated clients, authenticated
   Health and `GetCapabilities`, release-manifest enforcement, scheduler,

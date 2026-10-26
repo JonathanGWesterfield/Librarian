@@ -12,10 +12,10 @@ private books, or model access. Python lifecycle checks and the browser event
 schema test consume the same bank so later runtime, gRPC, and SSE work retain a
 single deterministic baseline.
 
-`answer_delivery/v1/http_broker_target_exceptions.json` records the one R0
-runtime HTTP Codex-broker URL that remains until M03. Its static test scans the
-runtime source roots, so any added broker target must be explicitly reviewed
-and cannot silently extend the pre-gRPC topology.
+The HTTP-broker retirement contract scans the runtime source roots and requires
+zero owned `codex-broker` HTTP targets. A new target must be covered by an ADR
+amendment and an explicit compatibility decision; it cannot silently recreate
+the retired pre-gRPC topology.
 
 `answer_delivery/v1/broker_runtime_config.json` is the canonical sanitized R2
 broker-client configuration. It locks the generated model, gRPC target,

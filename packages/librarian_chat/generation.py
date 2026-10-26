@@ -13,6 +13,7 @@ from typing import Protocol, runtime_checkable
 from urllib import error, request
 
 from librarian_config.config import (
+    LibrarianConfigError,
     enforce_docker_broker_host_guard,
     resolve_codex_executable,
     resolve_generation_model,
@@ -343,6 +344,14 @@ def create_configured_generator(
     ollama_base_url: str | None = None,
 ) -> Generator:
     resolved_provider = resolve_generation_provider(provider)
+    if resolved_provider.strip().casefold() == "docker_codex_broker":
+        # The private HTTP bridge was retired in M03. R2 owns generated gRPC
+        # clients at composition roots, so this generic factory cannot recreate
+        # a hidden HTTP path.
+        raise LibrarianConfigError(
+            "docker_codex_broker requires the atomic R2 Compose runtime; "
+            "it is not a direct generation provider"
+        )
     enforce_docker_broker_host_guard(
         generation_provider=resolved_provider,
         entrypoint="configured generation",

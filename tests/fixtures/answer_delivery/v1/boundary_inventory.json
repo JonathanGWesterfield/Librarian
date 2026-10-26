@@ -20,6 +20,22 @@
       ]
     },
     {
+      "id": "retrieval-evaluator",
+      "factory_call": {
+        "source": "scripts/evaluate_retrieval.py",
+        "callable": "_run_r2_evaluator",
+        "factory": "GrpcEvaluatorJudge"
+      },
+      "r2_consumers": [
+        {
+          "principal": "evaluator",
+          "operations": [
+            "EVALUATOR_JUDGEMENT"
+          ]
+        }
+      ]
+    },
+    {
       "id": "book-summaries",
       "factory_call": {
         "source": "packages/librarian_summarization/summarize.py",
@@ -93,22 +109,6 @@
           "principal": "api",
           "operations": [
             "RECOMMENDATION_SYNTHESIS"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "retrieval-evaluator",
-      "factory_call": {
-        "source": "packages/librarian_evaluation/llm_judge.py",
-        "callable": "create_judge",
-        "factory": "DockerCodexBrokerJudge"
-      },
-      "r2_consumers": [
-        {
-          "principal": "evaluator",
-          "operations": [
-            "EVALUATOR_JUDGEMENT"
           ]
         }
       ]

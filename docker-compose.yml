@@ -77,9 +77,9 @@ services:
         IFS="$$old_ifs"
     restart: "no"
 
-  # Optional internal-only Codex bridge. The login/session lives in the named
-  # volume below; this service intentionally has no host port and never mounts
-  # the host's ~/.codex directory.
+  # The Codex broker image is gRPC-only. Atomic R2 composition replaces this
+  # base definition with its release-bound build, private networks, secrets,
+  # sanitized runtime configuration, and authenticated gRPC health check.
   codex-broker:
     profiles:
       - codex-broker
@@ -88,7 +88,6 @@ services:
       dockerfile: apps/codex_broker/Dockerfile
       target: runtime
     volumes:
-      - ./config:/config:ro
       - codex-broker-session:/root/.codex
     read_only: true
     tmpfs:
@@ -97,15 +96,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:3000/health', timeout=2).read()\""]
-      interval: 5s
-      timeout: 3s
-      retries: 30
 
-  # An opt-in, one-shot semantic evaluator. It shares the Compose network and
-  # ignored API-to-broker token with the application, but never mounts the
-  # broker's Codex session volume or publishes a host port.
+  # An opt-in, one-shot evaluator. The R2 overlay gives it its own broker
+  # credential and private network; this base service has no broker transport.
   evaluator:
     profiles:
       - evaluation
@@ -125,9 +118,6 @@ services:
     command: []
     volumes:
       - ./config:/config:ro
-    depends_on:
-      codex-broker:
-        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
