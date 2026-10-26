@@ -2,8 +2,8 @@
 
 - **Task ID:** `AD-M03-20`
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md); task status does not advance milestone status.
-- **Lifecycle status:** **in review**
-- **Claim record:** owner: **`/root/m03_api_chat_implementer`**; branch/worktree: **`codex/m03-api-chat-grpc-proof` in the shared Librarian worktree**; claimed timestamp: **2026-10-26T10:58:27-05:00**; last update: **2026-10-26T11:13:00-05:00**; coordination contact: **`/root` via this task record**. Reserved paths: **`scripts/run_answer_delivery_compose.sh`**, **`tests/e2e/test_answer_delivery_compose_script.py`**, and this task record.
+- **Lifecycle status:** **complete**
+- **Claim record:** **Completed / non-claimable.** `/root/m03_api_chat_implementer` completed the work on `codex/m03-harness-config-resolver`; [PR #115](https://github.com/JonathanGWesterfield/Librarian/pull/115) merged 2026-10-26. Reopen only through a new task or an approved linked decision.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 
 ## Immutable scope and goal
@@ -43,10 +43,10 @@ Run the focused harness-script regression and static/rendered Compose configurat
 
 Append dated entries; never rewrite or delete earlier claims, commands, review findings, or handoffs.
 
-- **Implementation / merged PR / SHA:** 2026-10-26 — Added an internal `config_resolver_compose` command with only the `config-resolver` profile. The existing `profiles` array remains the exact four reported R2 caller profiles. Commit `3f83d6384e32924a2569ec0913605bba197c9e1d`; PR [#115](https://github.com/JonathanGWesterfield/Librarian/pull/115) is in review.
+- **Implementation / merged PR / SHA:** 2026-10-26 — Added an internal `config_resolver_compose` command with only the `config-resolver` profile. The existing `profiles` array remains the exact four reported R2 caller profiles. Commit `3f83d6384e32924a2569ec0913605bba197c9e1d`; [PR #115](https://github.com/JonathanGWesterfield/Librarian/pull/115) merged.
 - **Commands and results:** 2026-10-26 — `docker run --rm --volume /Users/codexai/Documents/Librarian:/app --workdir /app librarian-grpc-chat-test python -m unittest -v tests.e2e.test_answer_delivery_compose_script` — passed: 4 tests. `docker run --rm --volume /Users/codexai/Documents/Librarian:/app --workdir /app librarian-grpc-chat-test ruff check tests/e2e/test_answer_delivery_compose_script.py` — passed. `bash -n scripts/run_answer_delivery_compose.sh && git diff --check` — passed. `LIBRARIAN_STACK_RELEASE_SHA=ba2b5ba32c6bae1920fd10a7288cb6597fc07b31 docker compose --project-name m03-profile-proof --profile config-resolver --profile codex-broker --profile workers --profile metadata-workers --profile evaluation -f docker-compose.yml -f docker-compose.r2.yml -f docker-compose.answer-delivery.yml config --format json` — rendered successfully; a JSON assertion confirmed `config-resolver`, API, broker, both workers, and evaluator. Docker emitted its expected non-Swarm secret-mode warnings.
 - **Reports / screenshots:** 2026-10-26 — No retained report: the static rendered JSON was discarded after its assertion. The full live harness was not run because this shared worktree is not a clean release checkout; that remains AD-M03-04 and the caller-proof tasks' required clean-checkout evidence.
-- **Review findings and repairs:** 2026-10-26 — Created after AD-M03-15’s clean-worktree harness invocation failed before startup. The tracked fixture mount was confirmed when the config-resolver profile was supplied. 2026-10-26 — Independent senior review passed: the regression executes the Bash script, observes command boundaries, rejects the old shared-profile construction, and preserves the four reported profiles. Reviewer independently repeated the focused suite, Bash/diff/task-ledger checks, lint, and static Compose rendering; no repair requested.
+- **Review findings and repairs:** 2026-10-26 — Created after AD-M03-15’s clean-worktree harness invocation failed before startup. The tracked fixture mount was confirmed when the config-resolver profile was supplied. 2026-10-26 — Independent senior review passed: the regression executes the Bash script, observes command boundaries, rejects the old shared-profile construction, and preserves the four reported profiles. Reviewer independently repeated the focused suite, Bash/diff/task-ledger checks, lint, and static Compose rendering; no repair requested. 2026-10-26 — Merged in [PR #115](https://github.com/JonathanGWesterfield/Librarian/pull/115); task lifecycle reconciled to complete.
 - **Blockers / decisions:** _Not recorded._
 
 ## Handoff
