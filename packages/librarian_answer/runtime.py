@@ -7,6 +7,7 @@ gRPC/SSE adapters without allowing either transport to own grounding policy.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from librarian_answer.ports import (
     GenerationBroker,
     RequestContext,
     SupportReviewer,
+    resolve_cancellation_cause,
 )
 from librarian_answer.snapshots import SourceFreshness, reload_citation_sources
 
@@ -74,9 +76,20 @@ class AnswerRuntime:
                 payload=payload or {},
             )
 
+        def cancellation_terminal_event() -> AnswerEvent | None:
+            cause = resolve_cancellation_cause(context)
+            if cause == "deadline":
+                result = _result(
+                    request, "generation_unavailable", _SAFE_GENERATION_FAILURE
+                )
+                return event("completed", {"result": result})
+            if cause in {"explicit", "disconnect"}:
+                return event("cancelled")
+            return None
+
         yield event("started")
-        if context.is_cancelled():
-            yield event("cancelled")
+        if terminal_event := cancellation_terminal_event():
+            yield terminal_event
             return
 
         try:
@@ -87,8 +100,8 @@ class AnswerRuntime:
             yield event("failed", {"error": "evidence retrieval failed"})
             return
 
-        if context.is_cancelled():
-            yield event("cancelled")
+        if terminal_event := cancellation_terminal_event():
+            yield terminal_event
             return
 
         yield event("evidence_candidates", _candidate_payload(evidence))
@@ -106,8 +119,8 @@ class AnswerRuntime:
         repair_citation_ids: tuple[str, ...] = ()
         review_feedback: Mapping[str, object] = {}
         for attempt in range(1, _MAX_REPAIR_ATTEMPTS + 2):
-            if context.is_cancelled():
-                yield event("cancelled")
+            if terminal_event := cancellation_terminal_event():
+                yield terminal_event
                 return
             yield event("generation_started", {"attempt": attempt})
             try:
@@ -129,6 +142,16 @@ class AnswerRuntime:
                 )
                 if isawaitable(generated):
                     generated = await generated
+            except asyncio.CancelledError:
+                # A context-driven disconnect cancels the in-flight gRPC await.
+                # It is a normal terminal lifecycle outcome. The generated
+                # adapter converts an elapsed request deadline to an ordinary
+                # safe failure before it reaches this boundary; unrelated task
+                # cancellation still propagates to its owning transport.
+                if terminal_event := cancellation_terminal_event():
+                    yield terminal_event
+                    return
+                raise
             except Exception:  # noqa: BLE001 - provider failures must not leak a draft.
                 result = _result(
                     request, "generation_unavailable", _SAFE_GENERATION_FAILURE
@@ -136,8 +159,8 @@ class AnswerRuntime:
                 yield event("completed", {"result": result})
                 return
 
-            if context.is_cancelled():
-                yield event("cancelled")
+            if terminal_event := cancellation_terminal_event():
+                yield terminal_event
                 return
             yield event("validation_started", {"attempt": attempt})
             candidate = _validated_candidate(
@@ -185,10 +208,15 @@ class AnswerRuntime:
                 )
                 if isawaitable(review):
                     review = await review
+            except asyncio.CancelledError:
+                if terminal_event := cancellation_terminal_event():
+                    yield terminal_event
+                    return
+                raise
             except Exception:  # noqa: BLE001 - a review failure consumes the repair budget.
                 review = None
-            if context.is_cancelled():
-                yield event("cancelled")
+            if terminal_event := cancellation_terminal_event():
+                yield terminal_event
                 return
             if review is None or not review.supported:
                 repair_hint = review.reason if review is not None else None

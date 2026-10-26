@@ -17,7 +17,7 @@ from librarian_answer.models import (
     GenerationRequest,
     GenerationResult,
 )
-from librarian_answer.ports import RequestContext
+from librarian_answer.ports import RequestContext, resolve_cancellation_cause
 from librarian_contracts.admission import OPERATION_POLICIES
 from librarian_contracts.capabilities import (
     CapabilitiesContractMismatch,
@@ -54,6 +54,10 @@ class GrpcBrokerClientError(RuntimeError):
         self.status = status
         self.error_code = error_code
         super().__init__(f"broker RPC failed with {status.name}")
+
+
+class GrpcRuntimeDeadlineExceeded(RuntimeError):
+    """The answer runtime exhausted its generation budget after admission."""
 
 
 @dataclass
@@ -181,18 +185,25 @@ class GrpcRuntimeGenerationBroker:
 
         if context.is_cancelled():
             raise RuntimeError("answer request was cancelled before generation")
-        result = await _await_generation_with_context(
-            self.client.generate(
-                _to_proto_request(
-                    request,
-                    operation=self.operation,
-                    output_contract=self.output_contract,
-                    model_id=self.model_id,
+        try:
+            result = await _await_generation_with_context(
+                self.client.generate(
+                    _to_proto_request(
+                        request,
+                        operation=self.operation,
+                        output_contract=self.output_contract,
+                        model_id=self.model_id,
+                    ),
+                    timeout=context.remaining_seconds(),
                 ),
-                timeout=context.remaining_seconds(),
-            ),
-            context,
-        )
+                context,
+            )
+        except asyncio.CancelledError:
+            if resolve_cancellation_cause(context) == "deadline":
+                raise GrpcRuntimeDeadlineExceeded(
+                    "answer request deadline elapsed during generation"
+                ) from None
+            raise
         if result.WhichOneof("outcome") == "invalid_structured_output":
             return GenerationResult(
                 body="{}",
