@@ -2,7 +2,7 @@
 
 - **Task ID:** `AD-M03-17`
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md); task status does not advance milestone status.
-- **Lifecycle status:** **in review**
+- **Lifecycle status:** **complete**
 - **Claim record:** owner: **/root/implementer**; branch/worktree: **codex/ad-m03-17-metadata-proof** / **/Users/codexai/Documents/Librarian**; claimed timestamp: **2026-10-26 16:51 CET**; last update: **2026-10-26 16:58 CET**; coordination contact: **/root**.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 
@@ -59,6 +59,8 @@ Append dated entries; never rewrite or delete earlier claims, commands, review f
 - **2026-10-26 16:58 CET — Final independent review:** `/root/reviewer` re-reviewed the final two-file diff and approved it. Scope, append-only chronology correction, `in review` lifecycle, and the distinction between baseline Compose evidence and the uncommitted proof were confirmed. No blocker or important findings remain. The full-gate log has pre-existing-style resource warnings and expected host-guard messages but exits successfully; neither is attributed to this slice.
 
 - **2026-10-26 — PR handoff:** [PR #114](https://github.com/JonathanGWesterfield/Librarian/pull/114) contains the approved two-file slice. Its head commit is the implementation SHA; the task remains `in review` until merge. No milestone completion or release readiness is claimed.
+
+- **2026-10-26 — Merged completion:** PR #114 merged as `d4a4d1cea73247fa5c7320135992089abb0c36d0`; merge verified through GitHub. The approved focused proof, 496-test full gate, and isolated Compose baseline evidence satisfy this task. Lifecycle is now `complete`; M03 remains in progress with its separate acceptance/release gates.
 
 ## Handoff
 
