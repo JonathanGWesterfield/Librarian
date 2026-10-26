@@ -14,23 +14,20 @@ retains its current framing until a separately reviewed public API deprecation.
 New `POST /chat/events` SSE uses the v1 event schema. All delivery paths execute
 one runtime and apply the same grounding rules.
 
-The Codex broker is internal-only. Its HTTP OpenAI-compatible endpoint has no
-public compatibility promise and is removed during M03 after all known callers
-migrate. The selected rollout is an **atomic Compose release**, never an
-indefinite dual-protocol period.
+The Codex broker is internal-only and gRPC-only. The selected rollout is an
+**atomic Compose release**, never an indefinite dual-protocol period.
 
 ## Version matrix and enforced handshake
 
 | Stack version | API/runtime | broker | summary/metadata workers | evaluator | Expected action |
 | --- | --- | --- | --- | --- | --- |
-| R0 current | HTTP client | HTTP broker | configured HTTP generator when a worker runs | HTTP judge | current baseline only |
-| R1 M01/M02 | no behavior change | HTTP broker | HTTP generator | HTTP judge | build contracts and prove in-process parity |
+| R0/R1 archived release | HTTP client | HTTP broker | configured HTTP generator when a worker runs | HTTP judge | rollback input only; not runnable from this source tree |
 | R2 M03 | generated gRPC client | gRPC only | generated gRPC clients | generated gRPC client | deploy all five together; legacy/mixed combinations are refused |
 | R3 M04–M10 | R2 plus JSON/SSE adapters | gRPC only | gRPC clients | gRPC client | buffered default, progressive opt-in |
 
 R2 does not support an R0 API, worker, or evaluator talking to an R2 broker,
-nor an R2 client talking to an R0 broker. It does not rely on an informal
-launcher check. Every R2 image contains the same immutable
+nor an R2 client talking to an R0 broker. The source tree rejects direct
+`docker_codex_broker` execution outside the R2 composition root. Every R2 image contains the same immutable
 `librarian-stack-contract.json` with a clean source Git SHA, `v1` major/minor,
 and the canonical descriptor SHA-256. At startup each API, summary worker,
 metadata worker, and evaluator sends its manifest to authenticated
@@ -96,9 +93,9 @@ health secret. `docker compose config`, a rendered mount/network assertion, and
 an in-container assertion that `/config/secrets` is absent are release gates,
 not documentation-only checks.
 
-Until the atomic caller migration makes R2 the normal launcher, validate the
-R2 overlay with every required profile enabled. This does not alter ordinary R0
-startup, which continues to use `docker-compose.yml` alone:
+Validate the R2 overlay with every required profile enabled. The ordinary
+launchers reject `docker_codex_broker` rather than recreating the retired R0
+path; use the documented cutover workflow for that selection:
 
 The API chat migration owns one ready generated client and its source-selection,
 synthesis, and support-review adapters for the process lifetime. Each R2 caller
@@ -197,8 +194,7 @@ M03 may remove the old HTTP route only when all are true:
   `CONTRACT_MISMATCH` before admission;
 - rendered Compose configuration proves per-principal secret mounts and private
   network membership, and negative in-container reads prove isolation;
-- a repository scan has no `http://codex-broker` target outside an approved ADR
-  amendment; and
+- a repository scan has no retired owned HTTP broker target; and
 - R2 rollback succeeds from documented local backups without data migration.
 
 ## Public event evolution

@@ -1,7 +1,6 @@
 # Atomic R2 gRPC broker composition.  This file is deliberately separate from
-# docker-compose.yml so ordinary R0 startup stays unchanged until every caller
-# has migrated.  Invoke it only with the resolver output and a clean release
-# SHA supplied by the deployment workflow:
+# docker-compose.yml. Invoke it only with the resolver output and a clean
+# release SHA supplied by the deployment workflow:
 #
 #   LIBRARIAN_STACK_RELEASE_SHA=<40-char-sha> \
 #     docker compose \
@@ -12,8 +11,8 @@
 #       -f docker-compose.yml -f docker-compose.r2.yml config --format json
 #
 # API chat and generation routes, the summary and metadata workers, and the
-# evaluator use generated gRPC in this overlay. This composition remains
-# outside the normal R0 launcher until the atomic cutover is complete.
+# evaluator use generated gRPC in this overlay. The normal launcher rejects a
+# Docker-Codex selection so it cannot recreate the retired HTTP composition.
 
 services:
   config-resolver:
@@ -106,6 +105,11 @@ services:
     volumes: !override
       - ./.runtime/config/api/librarian.json:/config/librarian.json:ro
       - ./data:/data
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      codex-broker:
+        condition: service_healthy
     networks: [application, broker-api]
     secrets:
       - source: codex-broker-api
@@ -132,6 +136,11 @@ services:
     volumes: !override
       - ./.runtime/config/summary-worker/librarian.json:/config/librarian.json:ro
       - ./data:/data
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      codex-broker:
+        condition: service_healthy
     networks: [application, broker-summary-worker]
     secrets:
       - source: codex-broker-summary-worker
@@ -208,6 +217,9 @@ services:
     command: []
     volumes: !override
       - ./.runtime/config/evaluator/librarian.json:/config/librarian.json:ro
+    depends_on:
+      codex-broker:
+        condition: service_healthy
     networks: [application, broker-evaluator]
     secrets:
       - source: codex-broker-evaluator

@@ -78,18 +78,16 @@ the broker must not silently grant that capability because the enum exists.
 | API recommendations | `recommend_books()` generates a narrative for ranked candidates | **Migrate R2:** `RECOMMENDATION_SYNTHESIS`; `api` principal | 30 s; request cancellation cancels | recommendation fixture and API Compose test; delete HTTP generator path |
 | `summary-worker` Compose profile | `scripts/process_summary_jobs.py` calls `summarize_book()` with configured generation | **Migrate R2:** `CHAPTER_SUMMARIZATION`, `BOOK_SUMMARIZATION`; `summary-worker` principal | job deadline is capped by the broker maximum; worker shutdown cancels | worker-profile Compose test with both operations; delete HTTP generator path |
 | metadata worker profile added in R2 | `scripts/process_metadata_jobs.py` calls tag/genre generation | **Migrate R2:** `TAG_GENERATION`, `GENRE_GENERATION`; `metadata-worker` principal | 30 s per job; worker shutdown cancels | metadata-worker profile Compose test; delete HTTP generator path |
-| evaluator Compose profile | `DockerCodexBrokerJudge` in `scripts/evaluate_retrieval.py` | **Migrate R2:** `EVALUATOR_JUDGEMENT`; `evaluator` principal | 30 s per judgement; evaluator cancellation cancels | evaluator Compose test, wrong-principal denial, and delete HTTP judge |
+| evaluator Compose profile | R0/R1 archived-release evaluator judge | **Migrate R2:** `EVALUATOR_JUDGEMENT`; `evaluator` principal | 30 s per judgement; evaluator cancellation cancels | evaluator Compose test, wrong-principal denial, and delete HTTP judge |
 | Host CLI: `scripts/chat.py`, `scripts/summarize.py`, `scripts/tags.py`, `scripts/genres.py`, `scripts/process_summary_jobs.py`, `scripts/process_metadata_jobs.py`, `scripts/play/librarian.py`, `scripts/play/summary_jobs.py`, and host `scripts/evaluate_retrieval.py` | Each can inherit the default configured generator or judge, yet the broker has no host port | **Guard before R2 and retain in R2:** Docker-broker mode requires a matching runtime role **and** the exact non-symlink Docker-secret file at `/run/secrets/codex-broker-<role>`; `LIBRARIAN_EXECUTION_PRINCIPAL` alone is never sufficient. Host CLIs must select Codex/Ollama/external provider or run the corresponding Compose profile. | fails before target/channel/HTTP-client construction | tests exercise every listed host entry point, including forged `LIBRARIAN_EXECUTION_PRINCIPAL=api` without a secret mount; error names the allowed profile/provider |
 | Future extracted answer runtime | any answer operation after M09 only | deferred; `answer-runtime` principal and a dedicated private network | propagated absolute deadline and cancellation | required only if M09 is approved |
 
-R0/R1's executable host guard identifies the existing Compose compatibility
-configuration by its mounted `/config/librarian.json` path and rejects every
-other Docker-broker selection without consulting an execution-principal
-environment variable. It preserves the current in-container HTTP exception
-only until M03. It is intentionally a topology denial rather than a claim that
-the R2 role/credential checks already exist; M03 replaces this branch with the
-full runtime-role, environment-role, exact-secret-path, non-symlink, and
-readability validation below.
+The source-tree host guard rejects every direct Docker-broker selection without
+consulting an execution-principal environment variable. Only the atomic R2
+Compose deployment may construct the generated gRPC clients, after its
+runtime-role, environment-role, exact-secret-path, non-symlink, and readability
+validation below. R0/R1 remain rollback release inputs, not a runnable
+source-tree compatibility branch.
 
 The API receives the `api` credential only, so it may serve all six API
 operations but cannot impersonate a worker or evaluator. The operation matrix
@@ -610,8 +608,7 @@ generation command. The browser generator is
 `npm --prefix apps/web run generate:answer-event-contract -- --check`. CI runs
 the protobuf and TypeScript generators, fails if their output differs, compiles
 the contracts, runs a protobuf breaking-change check against the prior released
-schema, and verifies that no prohibited `http://codex-broker` target exists
-outside a documented, temporary amendment.
+schema, and verifies that no retired owned HTTP broker target exists.
 
 M01 acceptance is a clean checkout command that runs the generators and all
 contract fixtures without local EPUBs, secrets, Docker credentials, or a model.

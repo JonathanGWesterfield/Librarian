@@ -65,7 +65,6 @@ if str(PACKAGES_DIR) not in sys.path:
 
 from librarian_chat.chat import ChatOptions, ChatResponse, answer_question
 from librarian_config.config import (
-    enforce_docker_broker_host_guard,
     get_librarian_config,
     resolve_evaluation_judge,
 )
@@ -828,26 +827,14 @@ def _create_optional_judge(
     if not enabled:
         return None
     selection = resolve_evaluation_judge(mode)
-    broker_base_url = None
-    broker_api_key = None
     if selection.provider == "docker_codex_broker":
-        # Config validation guarantees this is the same Docker broker selected
-        # for generation, including its model and ignored internal token. The
-        # evaluator must run as a Compose service: `codex-broker` deliberately
-        # has no host port.
-        enforce_docker_broker_host_guard(
-            generation_provider="docker_codex_broker",
-            entrypoint="scripts/evaluate_retrieval.py --llm-judge",
+        raise LLMJudgeError(
+            "docker_codex_broker requires the R2 evaluator Compose runtime"
         )
-        generation = get_librarian_config().generation
-        broker_base_url = generation.base_url
-        broker_api_key = generation.api_key
     return create_judge(
         selection.provider,
         model=selection.model,
         ollama_base_url=ollama_base_url or "http://localhost:11434",
-        broker_base_url=broker_base_url,
-        broker_api_key=broker_api_key,
     )
 
 

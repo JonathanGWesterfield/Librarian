@@ -9,7 +9,6 @@ import sys
 import tempfile
 import unittest
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,7 +19,6 @@ sys.path.insert(0, str(PACKAGES_DIR))
 
 from librarian_chat.generation import create_configured_generator
 from librarian_config.config import (
-    CONTAINER_CONFIG_PATH,
     LibrarianConfigError,
     clear_librarian_config_cache,
     enforce_docker_broker_host_guard,
@@ -55,7 +53,7 @@ class HostDockerBrokerGuardTests(unittest.TestCase):
             ) as create:
                 with self.assertRaisesRegex(
                     LibrarianConfigError,
-                    "configured generation cannot use docker_codex_broker from the host",
+                    "requires the atomic R2 Compose runtime",
                 ):
                     create_configured_generator()
 
@@ -70,18 +68,16 @@ class HostDockerBrokerGuardTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     LibrarianConfigError,
-                    "cannot use docker_codex_broker from the host",
+                    "cannot construct docker_codex_broker directly",
                 ):
                     enforce_docker_broker_host_guard(entrypoint="host test")
 
-    def test_compose_configuration_is_not_rejected_during_r0_compatibility(self) -> None:
+    def test_source_configuration_is_rejected_outside_the_r2_composition_root(self) -> None:
         with _docker_broker_config():
             config = get_librarian_config()
 
-        enforce_docker_broker_host_guard(
-            entrypoint="container test",
-            config=replace(config, path=CONTAINER_CONFIG_PATH.resolve()),
-        )
+        with self.assertRaisesRegex(LibrarianConfigError, "cannot construct docker_codex_broker"):
+            enforce_docker_broker_host_guard(entrypoint="container test", config=config)
 
     def test_explicit_non_docker_providers_remain_valid_host_choices(self) -> None:
         for provider in ("codex", "ollama", "noop"):
@@ -92,18 +88,12 @@ class HostDockerBrokerGuardTests(unittest.TestCase):
                 )
 
     def test_broker_judge_is_rejected_before_it_can_construct_an_http_client(self) -> None:
-        with _docker_broker_config():
-            with self.assertRaisesRegex(
-                LibrarianConfigError,
-                "Docker Codex broker judge cannot use docker_codex_broker from the host",
-            ):
-                create_judge(
-                    "docker_codex_broker",
-                    model="gpt-5.6-sol",
-                    ollama_base_url="http://unused",
-                    broker_base_url="http://codex-broker:3000/v1",
-                    broker_api_key="fixture-token",
-                )
+        with self.assertRaisesRegex(ValueError, "R2 gRPC evaluator runtime"):
+            create_judge(
+                "docker_codex_broker",
+                model="gpt-5.6-sol",
+                ollama_base_url="http://unused",
+            )
 
     def test_host_cli_suite_covers_the_complete_boundary_inventory(self) -> None:
         inventory = json.loads(BOUNDARY_INVENTORY_PATH.read_text(encoding="utf-8"))
@@ -154,9 +144,6 @@ def _docker_broker_config():
         payload = json.loads(
             (REPO_ROOT / "config" / "librarian.base.json").read_text(encoding="utf-8")
         )
-        secrets = root / "secrets"
-        secrets.mkdir()
-        (secrets / "codex-bridge-token.txt").write_text("fixture-token\n", encoding="utf-8")
         path.write_text(json.dumps(payload), encoding="utf-8")
         with patch("librarian_config.config.default_config_path", return_value=path):
             clear_librarian_config_cache()

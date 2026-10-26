@@ -21,20 +21,20 @@ To select the base profile explicitly:
 ```bash
 cp config/librarian.base.json config/librarian.json
 mkdir -p config/secrets
-# Create an API-to-broker token. This is not a Codex credential and stays ignored.
-printf '%s\n' 'replace-with-your-token' > config/secrets/codex-bridge-token.txt
-# Authenticate once inside the broker's named Docker volume. This never mounts
-# or copies the host's ~/.codex directory.
-docker compose --profile codex-broker run --rm codex-broker codex login
-scripts/start_local.sh
+# Create one distinct ignored credential for each R2 broker role.
+for role in api summary-worker metadata-worker evaluator health; do
+  openssl rand -hex 32 > "config/secrets/codex-broker-${role}"
+  chmod 400 "config/secrets/codex-broker-${role}"
+done
+python3 scripts/prepare_r2_cutover.py
+# Inspect first; add --confirm-r2-cutover only when ready to activate.
+python3 scripts/deploy_r2_cutover.py --backup backups/r2-cutover/<snapshot>
 ```
 
 The base profile keeps embeddings local: Docker Ollama downloads and uses
-`all-minilm`, while answer generation calls an internal-only Compose service at
-`http://codex-broker:3000/v1`. The broker stores its own Codex login/session in
-the named `codex-broker-session` volume. It exposes no host port and never
-mounts host Codex credentials. Docker Compose starts only the Docker Ollama
-models and Codex broker selected by JSON.
+`all-minilm`, while answer generation uses an internal-only gRPC broker. The
+broker stores its own Codex login/session in the named `codex-broker-session`
+volume. It exposes no host port and never mounts host Codex credentials.
 
 Choosing this remote profile is an explicit privacy decision: the user's
 question and only the retrieved candidate passages needed for source selection
@@ -42,12 +42,12 @@ or evaluation leave the machine for Codex. EPUB files, SQLite, OpenSearch, and
 embedding generation remain local. The automatically created example profile
 does not make any remote call and continues to use Docker Ollama by default.
 
-Both `scripts/start_local.sh` and `scripts/start_local.ps1` run the JSON
-resolver first and automatically enable the `codex-broker` Compose profile when
-`generation.mode` is `docker_codex_broker`. They do not start Docker Ollama for
-broker generation itself; Docker Ollama starts only when `embedding` or another
-configured role explicitly uses `docker_ollama` (the base profile uses it for
-the local `all-minilm` embedding model).
+Both `scripts/start_local.sh` and `scripts/start_local.ps1` reject
+`docker_codex_broker` so they cannot recreate the retired HTTP broker path. Use
+the atomic R2 preflight and deployment commands above. Docker Ollama starts
+only when `embedding` or another configured role explicitly uses
+`docker_ollama` (the base profile uses it for the local `all-minilm` embedding
+model).
 
 ## Configuration shape
 
@@ -83,7 +83,7 @@ the required companion fields.
 | `docker_ollama` | Embedding and generation | `model` | Starts Compose Ollama and downloads the selected model. |
 | `native_ollama` | Embedding and generation | `model`, `base_url` | Calls an Ollama service already running on the host or network. |
 | `openai_compatible` | Embedding and generation | `model`, `base_url`, `api_key_file` | Calls a gateway and does not start Ollama for that section. |
-| `docker_codex_broker` | Generation only | `model`, `api_key_file` | Starts the internal-only Compose Codex broker. Its session stays in a named Docker volume; the token authenticates only API/worker-to-broker traffic. |
+| `docker_codex_broker` | Generation only | `model` | Selects the atomic R2 gRPC Codex broker. It is valid only through the R2 Compose deployment and uses role-specific Compose secrets. |
 | `codex` | Generation only | `model` | Runs the configured host Codex CLI; this is an advanced host-side option, not the Docker API container. |
 
 For `native_ollama`, Docker Desktop users normally use
@@ -115,7 +115,6 @@ generation, source selection, and the enforcing evaluation judge.
   "generation": {
     "mode": "docker_codex_broker",
     "model": "gpt-5.6-sol",
-    "api_key_file": "secrets/codex-bridge-token.txt",
     "answer_capability": "quality"
   },
   "semantic_source_selector": {
@@ -164,21 +163,13 @@ the deterministic test suite. It has two deliberately different roles:
 
 `enforcing_judge` must use Codex, either directly (`codex`) or through the
 internal `docker_codex_broker`. The broker is the supported Docker path and is
-what the base profile selects. It uses the same named-volume Codex login and
-the same ignored API-to-broker token as chat's semantic source selector; it
-does not require a second host `codex login`.
+what the base profile selects. It uses its named-volume Codex login and
+role-specific ignored Compose credentials; it does not require a host login.
 
-After `scripts/start_local.sh` has started the base profile, run its enforcing
-judge inside the Compose network:
-
-```bash
-docker compose -f docker-compose.yml -f .runtime/librarian.compose.json \
-  --profile codex-broker --profile evaluation run --rm evaluator --llm-judge
-```
-
-The evaluator has no host port and does not mount `codex-broker-session`; only
-the broker can read the subscription session. The command returns failure on a
-transport problem, invalid judge schema, or mismatch with a curated
+The R2 deployment runs an enforcing evaluator with its own private broker
+credential and network. The evaluator has no host port and does not mount
+`codex-broker-session`; only the broker can read the subscription session. The
+command returns failure on a transport problem, invalid judge schema, or mismatch with a curated
 `expected_judge_verdict`. There is no Ollama or configured-provider fallback.
 For the advanced direct-host option, run
 `python3 scripts/evaluate_retrieval.py --llm-judge` after completing a host

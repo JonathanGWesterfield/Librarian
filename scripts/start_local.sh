@@ -173,6 +173,10 @@ if [[ "$docker_codex_broker_enabled" != "true" && "$docker_codex_broker_enabled"
   printf '%s\n' '[librarian] Configuration resolver did not produce a valid Docker Codex broker selection.' >&2
   exit 1
 fi
+if [[ "$docker_codex_broker_enabled" == "true" ]]; then
+  printf '%s\n' '[librarian] docker_codex_broker is available only through the atomic R2 cutover. Run python3 scripts/prepare_r2_cutover.py, then inspect and confirm scripts/deploy_r2_cutover.py.' >&2
+  exit 2
+fi
 if [[ ! "$api_port" =~ ^[0-9]+$ ]] || ((api_port < 1 || api_port > 65535)); then
   printf '%s\n' '[librarian] Configuration resolver did not produce a valid API port.' >&2
   exit 1
@@ -184,9 +188,6 @@ fi
 
 if [[ "$WITH_WORKERS" == "true" ]]; then
   compose_args+=(--profile workers)
-fi
-if [[ "$docker_codex_broker_enabled" == "true" ]]; then
-  compose_args+=(--profile codex-broker)
 fi
 if [[ "$docker_ollama_enabled" == "true" ]]; then
   compose_args+=(--profile docker-ollama)

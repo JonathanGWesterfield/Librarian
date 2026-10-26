@@ -13,7 +13,6 @@ from librarian_evaluation.answer import (
     AnswerSource,
 )
 from librarian_evaluation.llm_judge import (
-    DockerCodexBrokerJudge,
     GrpcEvaluatorJudge,
     LLMJudgeError,
     CodexJudge,
@@ -141,40 +140,6 @@ class LLMJudgeTests(unittest.TestCase):
         self.assertIn("credential=[redacted]", message)
         self.assertNotIn("should-not-leak", message)
 
-    def test_docker_broker_judge_uses_internal_bearer_auth_without_host_cli(self) -> None:
-        """The one-shot evaluator reaches the broker over its private API."""
-        response = _FakeHTTPResponse(
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "content": '{"evidence_verdict":"supported",'
-                            '"citation_relevance":"all_relevant",'
-                            '"missing_coverage":[],"unsupported_claims":[],'
-                            '"reason":"Exact source evidence."}'
-                        }
-                    }
-                ]
-            }
-        )
-        judge = DockerCodexBrokerJudge(
-            model="gpt-5.6",
-            base_url="http://codex-broker:3000/v1",
-            api_key="internal-test-token",
-        )
-
-        with patch("librarian_evaluation.llm_judge.request.urlopen", return_value=response) as urlopen:
-            result = judge.judge("Judge only cited sources.")
-
-        self.assertIn('"evidence_verdict":"supported"', result)
-        sent = urlopen.call_args.args[0]
-        self.assertEqual(sent.full_url, "http://codex-broker:3000/v1/chat/completions")
-        self.assertEqual(sent.get_header("Authorization"), "Bearer internal-test-token")
-        payload = json.loads(sent.data)
-        self.assertEqual(payload["model"], "gpt-5.6")
-        self.assertFalse(payload["stream"])
-        self.assertEqual(payload["messages"][1]["content"], "Judge only cited sources.")
-
     def test_grpc_evaluator_judge_uses_only_the_evaluator_contract_operation(self) -> None:
         """The R2 evaluator facade cannot select a broader broker operation."""
         client = object()
@@ -232,16 +197,16 @@ class LLMJudgeTests(unittest.TestCase):
             {"sample": AnswerCandidate(answer="answer", sources=[])},
             judge=StaticJudge(
                 response=_semantic_response("supported"),
-                provider="docker_codex_broker",
+                provider="grpc_codex_broker",
                 model="gpt-5.6",
             ),
         )
 
-        self.assertEqual(report.provider, "docker_codex_broker")
+        self.assertEqual(report.provider, "grpc_codex_broker")
 
-    def test_broker_judge_refuses_to_start_without_the_internal_token(self) -> None:
-        """No default or host credential may substitute for broker auth."""
-        with self.assertRaisesRegex(ValueError, "broker URL and token"):
+    def test_broker_judge_requires_the_r2_evaluator_runtime(self) -> None:
+        """No HTTP endpoint or bearer token can substitute for R2 admission."""
+        with self.assertRaisesRegex(ValueError, "R2 gRPC evaluator runtime"):
             create_judge(
                 "docker_codex_broker",
                 model="gpt-5.6",

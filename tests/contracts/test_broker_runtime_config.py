@@ -104,12 +104,12 @@ class BrokerRuntimeConfigTests(unittest.TestCase):
                     }
                 },
             },
-            "HTTP target": {
+            "non-gRPC target": {
                 **valid,
                 "services": {
                     "codex_broker": {
                         **valid["services"]["codex_broker"],
-                        "target": "http://codex-broker:3000/v1",
+                        "target": "https://retired-broker.invalid/v1",
                     }
                 },
             },

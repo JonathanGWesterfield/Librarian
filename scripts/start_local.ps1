@@ -51,6 +51,9 @@ if ($null -eq $selection.docker_ollama_enabled -or $selection.docker_ollama_enab
 if ($null -eq $selection.docker_codex_broker_enabled -or $selection.docker_codex_broker_enabled -isnot [bool]) {
     throw "[librarian] Configuration resolver did not produce a valid Docker Codex broker selection."
 }
+if ($selection.docker_codex_broker_enabled) {
+    throw "[librarian] docker_codex_broker is available only through the atomic R2 cutover. Run python3 scripts/prepare_r2_cutover.py, then inspect and confirm scripts/deploy_r2_cutover.py."
+}
 foreach ($name in @("api_port", "web_port")) {
     try { $value = [Convert]::ToInt32($selection.$name) } catch { throw "[librarian] Configuration resolver did not produce a valid $name." }
     if ($value -lt 1 -or $value -gt 65535) { throw "[librarian] Configuration resolver did not produce a valid $name." }
@@ -58,7 +61,6 @@ foreach ($name in @("api_port", "web_port")) {
 
 $composePrefix = @("compose", "-f", "docker-compose.yml", "-f", ".runtime/librarian.compose.json")
 if ($WithWorkers) { $composePrefix += @("--profile", "workers") }
-if ($selection.docker_codex_broker_enabled) { $composePrefix += @("--profile", "codex-broker") }
 
 function Show-OllamaInitDiagnostics {
     param([string[]]$ComposePrefix)
