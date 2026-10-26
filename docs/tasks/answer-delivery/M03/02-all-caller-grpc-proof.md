@@ -2,9 +2,9 @@
 
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md)
 - **Task ID:** `AD-M03-02`
-- **Lifecycle status:** **in review**
+- **Lifecycle status:** **complete**
 - **Milestone status:** In progress. Task status never advances milestone status.
-- **Claim record:** owner: **`/root`**; branch/worktree: **`codex/m03-api-chat-generated-proof` in the shared Librarian worktree**; claimed timestamp: **2026-10-26T13:32:00-05:00**; last update: **2026-10-26T13:45:00-05:00**; coordination contact: **`/root` via this task record**. Reserved paths: **`tests/answer/test_grpc_chat.py`** and this task record. [AD-M03-19](19-api-chat-cancellation-terminal-event.md) released the test surface after its merge.
+- **Claim record:** owner: **`/root`**; branch/worktree: **`codex/m03-api-chat-generated-proof` in the shared Librarian worktree**; claimed timestamp: **2026-10-26T13:32:00-05:00**; last update: **2026-10-26T13:56:49-05:00**; coordination contact: **`/root` via this task record**. Reserved paths: **`tests/answer/test_grpc_chat.py`** and this task record. [AD-M03-19](19-api-chat-cancellation-terminal-event.md) released the test surface after its merge.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 - **Source of truth:** [roadmap](../../../answer-delivery/README.md), [technical design](../../../answer-delivery/technical-design.md), [ADR 001](../../../answer-delivery/adr-internal-rpc-transport.md), [compatibility plan](../../../answer-delivery/compatibility-and-migration.md), and [acceptance charter](../../../answer-delivery/acceptance.md)
 
@@ -59,6 +59,7 @@ Append dated entries; never rewrite or delete an earlier claim, command result, 
 
 - **Implementation/PR:** No claim yet. Attach exact test command, report path, SHA, and PR after execution.
 - **Implementation/PR:** 2026-10-26 — Packaged in commit `c26e6bda126b8a168e0121584b9bec31fae258be`; [PR #118](https://github.com/JonathanGWesterfield/Librarian/pull/118) is in review. Keep this task `in review` until the PR merges.
+- **Implementation/PR:** 2026-10-26 — [PR #118](https://github.com/JonathanGWesterfield/Librarian/pull/118) merged at `b1561ac2bde024fd6ae9dad6e125efdf39f7a2aa`. The focused API-chat generated-client proof is complete; current-main Compose acceptance remains a separate M03 gate.
 - **Commands and results:** _Not recorded._
 - **Commands and results:** 2026-10-26 — `docker run --rm --volume /Users/codexai/Documents/Librarian:/app --workdir /app librarian-grpc-chat-test python -m unittest -v tests.answer.test_grpc_chat tests.answer.test_runtime tests.answer.test_grpc_broker_adapter tests.answer.test_grpc_generation tests.api.test_r2_chat` — passed: **42 tests**. The new positive fixture runs `R2ApiChatCaller.run()` with a live authenticated `api` generated client and in-process generated gRPC broker; it observes semantic selection, grounded synthesis, and support review at the provider in order, each with its required v1 output contract and one body-text evidence snapshot. The retained live cancellation cases cover disconnect, explicit cancellation, deadline, and unrelated-task cancellation. Test image: `librarian-grpc-chat-test` (Python 3.12; image ID previously recorded in AD-M03-19).
 - **Commands and results:** 2026-10-26 — `docker run --rm --volume /Users/codexai/Documents/Librarian:/app --workdir /app librarian-grpc-chat-test ruff check tests/answer/test_grpc_chat.py` — passed. `git diff --check && python3 scripts/check_task_ledger.py` — passed; task ledger reports 64 fresh task files. Baseline Git SHA: `81e72fa8192e8ab217a4de9cba4bf7478e370619`.

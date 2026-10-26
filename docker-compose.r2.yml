@@ -77,6 +77,10 @@ services:
       retries: 30
 
   api:
+    # The API is an atomic R2 caller. Keeping it behind the same profile as the
+    # broker lets the resolver-only bootstrap render without a disabled-service
+    # dependency, while the documented all-profile R2 launch still includes it.
+    profiles: [codex-broker]
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -230,6 +234,9 @@ services:
       LIBRARIAN_BROKER_CREDENTIAL_FILE: /run/secrets/codex-broker-evaluator
 
   web:
+    # The web service depends on the R2 API, so it must be omitted during the
+    # resolver-only bootstrap alongside that API and the broker.
+    profiles: [codex-broker]
     networks: [application]
 
 secrets:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -110,6 +111,90 @@ class AnswerDeliveryComposeScriptTests(unittest.TestCase):
         )
         for secret in secrets.iterdir():
             self.assertTrue(secret.read_text(encoding="utf-8").startswith("synthetic-"))
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose is required")
+    def test_resolver_bootstrap_profile_renders_without_r2_callers(self) -> None:
+        environment = {
+            **os.environ,
+            "LIBRARIAN_STACK_RELEASE_SHA": "a" * 40,
+        }
+        command = [
+            "docker",
+            "compose",
+            "--profile",
+            "config-resolver",
+            "-f",
+            "docker-compose.yml",
+            "-f",
+            "docker-compose.r2.yml",
+            "config",
+            "--format",
+            "json",
+        ]
+        rendered = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        services = set(json.loads(rendered.stdout)["services"])
+        self.assertIn("config-resolver", services)
+        self.assertFalse(
+            {
+                "api",
+                "codex-broker",
+                "summary-worker",
+                "metadata-worker",
+                "evaluator",
+                "web",
+            }
+            & services
+        )
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose is required")
+    def test_documented_r2_profiles_render_the_web_and_every_caller(self) -> None:
+        environment = {
+            **os.environ,
+            "LIBRARIAN_STACK_RELEASE_SHA": "a" * 40,
+        }
+        command = ["docker", "compose"]
+        for profile in ("codex-broker", "workers", "metadata-workers", "evaluation"):
+            command.extend(("--profile", profile))
+        command.extend(
+            (
+                "-f",
+                "docker-compose.yml",
+                "-f",
+                "docker-compose.r2.yml",
+                "config",
+                "--format",
+                "json",
+            )
+        )
+        rendered = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        self.assertTrue(
+            {
+                "api",
+                "codex-broker",
+                "summary-worker",
+                "metadata-worker",
+                "evaluator",
+                "web",
+            }.issubset(json.loads(rendered.stdout)["services"])
+        )
 
     def test_resolver_bootstrap_profile_is_separate_from_reported_r2_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
