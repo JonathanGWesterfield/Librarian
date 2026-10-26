@@ -48,15 +48,29 @@ required M00/M01 deliverables have passed review.
 | --- | --- | --- | --- |
 | M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) |
 | M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Complete ([PR #101](https://github.com/JonathanGWesterfield/Librarian/pull/101)) |
-| M02 | In-process answer-runtime extraction and parity | M01 | Not started |
+| M02 | In-process answer-runtime extraction and parity | M01 | Complete ([#102](https://github.com/JonathanGWesterfield/Librarian/pull/102), [#103](https://github.com/JonathanGWesterfield/Librarian/pull/103)) |
 | M03 | Atomic gRPC Codex-broker migration | M02 | In progress |
-| M04 | Buffered JSON and progressive SSE delivery adapters | M03 | Not started |
+| M04 | Buffered JSON and progressive SSE delivery adapters | M03 | In progress in parallel with M03 ([#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)); M03 exit gates M04 acceptance and release |
 | M05 | Configuration, capabilities, and feature off-switch | M04 | Not started |
 | M06 | Web reducer and truthful progress UI | M04, M05 | Not started |
 | M07 | Compatibility, failure, Chrome UAT, and independent review | M06 | Not started |
 | M08 | Measured broker optimization | M03 baseline, M07 harness | Not started |
 | M09 | Separate answer-runtime deployment decision | M07, M08 | Not started |
 | M10 | Controlled rollout and operational handoff | M07–M09 | Not started |
+
+## Coordination state
+
+This table is the authoritative milestone state for every branch and agent.
+Issue [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87) is the
+companion progress ledger: it records merged PRs, acceptance evidence, active
+blockers, and the next eligible slice. A branch name, an unmerged commit, or
+conversation history does not advance a milestone.
+
+Every implementation PR must update this table and #87 when it changes a
+slice's completion, blocker, or next eligible work. A dependency orders final
+acceptance and release; it does not prohibit independent implementation in
+parallel. Parallel work must state its dependency and cannot by itself advance
+the later milestone to complete.
 
 ### M00 — Publish and approve the design source of truth
 
@@ -143,28 +157,37 @@ configuration decisions are executable tests, not comments.
 
 Owner: answer-runtime and retrieval owners.
 
-- [ ] Extract the current answer orchestration from `prepare_answer_question()`
+- [x] Extract the current answer orchestration from `prepare_answer_question()`
   behind the ports and immutable evidence snapshot defined in the technical
   design. Keep the runtime in process.
-- [ ] Preserve scoped refusal, citation validation, repair budget, source
+- [x] Preserve scoped refusal, citation validation, repair budget, source
   revision behavior, and final result semantics.
-- [ ] Keep existing CLI/API entry points as thin facades and enforce dependency
+- [x] Keep existing CLI/API entry points as thin facades and enforce dependency
   direction with focused tests.
 
 **Exit:** old and new paths yield equivalent terminal results for deterministic
 fixtures, including point, bounded, broad, refusal, source-change, and repair
-cases. No broker transport or browser behavior changes in M02.
+cases. No broker transport or browser behavior changes in M02. This exit was
+completed by [#102](https://github.com/JonathanGWesterfield/Librarian/pull/102)
+and [#103](https://github.com/JonathanGWesterfield/Librarian/pull/103): the
+runtime foundation, retained-R1 adapters, and deterministic parity matrix were
+independently reviewed before the next milestone began.
 
 ### M03 — Atomic gRPC Codex-broker migration
 
 Owner: broker, API, summary/metadata workers, evaluator, and configuration
 owners.
 
-The source-tree retirement slice is complete: the owned HTTP broker listener,
-HTTP client paths, and exception inventory are removed, and direct
-`docker_codex_broker` configuration fails closed. M03 remains in progress until
-the atomic R2 release, cutover/rollback, isolation, and live acceptance exit
-conditions below are satisfied.
+The gRPC foundation, R2 topology, caller migrations, evaluator, and cutover
+automation were implemented incrementally in
+[#104](https://github.com/JonathanGWesterfield/Librarian/pull/104) through
+[#111](https://github.com/JonathanGWesterfield/Librarian/pull/111). M03 remains
+in progress until the atomic R2 release, cutover/rollback, isolation, and live
+acceptance exit conditions below are satisfied. The remaining source-tree HTTP
+retirement code is part of unmerged [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112);
+it is not completion evidence until reviewed and merged. M04's API delivery
+adapter may be implemented and reviewed in parallel, but M03 exit remains its
+acceptance and release gate.
 
 - [ ] Implement the unary v1 broker service, generated clients, authenticated
   Health and `GetCapabilities`, release-manifest enforcement, scheduler,
@@ -229,6 +252,11 @@ a mixed R0/R2 stack.
 ### M04 — Buffered JSON and progressive SSE delivery adapters
 
 Owner: API delivery.
+
+**Status:** in progress in parallel with M03. [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)
+contains the API-adapter slice. Its implementation and review may proceed now;
+M03 exit gates M04's final acceptance, release evidence, and any claim that
+M04 is complete. M05 and M06 retain their own listed dependencies.
 
 - [ ] Expose versioned event delivery as a serializer over the runtime iterator;
   collect that same iterator for `POST /chat`.
