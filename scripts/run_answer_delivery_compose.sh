@@ -22,6 +22,7 @@ readonly report_names=(
   cancellation.json
 )
 readonly profiles=(codex-broker workers metadata-workers evaluation)
+readonly config_resolver_profile=config-resolver
 readonly caller_services=(api summary-worker metadata-worker)
 
 if ! [[ "$project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
@@ -75,6 +76,18 @@ compose+=(
   -f docker-compose.answer-delivery.yml
 )
 
+# The resolver is a one-shot bootstrap service. It needs its own overlay
+# profile, but that internal setup profile must not appear in the four reports
+# that describe the externally exercised R2 callers.
+config_resolver_compose=(
+  docker compose
+  --project-name "$project_name"
+  --profile "$config_resolver_profile"
+  -f docker-compose.yml
+  -f docker-compose.r2.yml
+  -f docker-compose.answer-delivery.yml
+)
+
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
@@ -97,7 +110,7 @@ export LIBRARIAN_STACK_RELEASE_SHA="$release_sha"
 
 # Resolve only the tracked R2 fixture configuration. The generated documents
 # live under this harness's disposable state directory, never under config/.
-"${compose[@]}" run --rm --build config-resolver
+"${config_resolver_compose[@]}" run --rm --build config-resolver
 compose+=( -f "$runtime_dir/librarian.compose.json" )
 
 # Rendering is a release gate. The later live checks prove the container state

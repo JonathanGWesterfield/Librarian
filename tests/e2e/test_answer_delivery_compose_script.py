@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+COMPOSE_SCRIPT = REPO_ROOT / "scripts/run_answer_delivery_compose.sh"
 VALIDATOR_PATH = REPO_ROOT / "scripts/validate_answer_delivery_compose_reports.py"
 
 
@@ -106,6 +110,111 @@ class AnswerDeliveryComposeScriptTests(unittest.TestCase):
         )
         for secret in secrets.iterdir():
             self.assertTrue(secret.read_text(encoding="utf-8").startswith("synthetic-"))
+
+    def test_resolver_bootstrap_profile_is_separate_from_reported_r2_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            command_dir = workspace / "bin"
+            command_dir.mkdir()
+            call_log = workspace / "docker-calls.jsonl"
+            _write_fake_docker(command_dir / "docker")
+            _write_fake_git(command_dir / "git")
+
+            environment = {
+                **os.environ,
+                "ANSWER_DELIVERY_REPORT_DIR": str(workspace / "reports"),
+                "CALL_LOG": str(call_log),
+                "PATH": f"{command_dir}{os.pathsep}{os.environ['PATH']}",
+                "VERIFY_PROJECT": "answer-delivery-profile-proof",
+            }
+            result = subprocess.run(
+                ["bash", str(COMPOSE_SCRIPT)],
+                cwd=workspace,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 23, result.stderr)
+            compose_calls = [
+                command
+                for command in _recorded_commands(call_log)
+                if command and command[0] == "compose"
+            ]
+            resolver_call = next(
+                command
+                for command in compose_calls
+                if command[-4:] == ["run", "--rm", "--build", "config-resolver"]
+            )
+            rendered_config_call = next(
+                command
+                for command in compose_calls
+                if "config" in command and "--format" in command
+            )
+
+            self.assertEqual(_profiles(resolver_call), ["config-resolver"])
+            self.assertEqual(
+                _profiles(rendered_config_call),
+                ["codex-broker", "workers", "metadata-workers", "evaluation"],
+            )
+
+
+def _write_fake_docker(path: Path) -> None:
+    path.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import sys
+            from pathlib import Path
+
+            arguments = sys.argv[1:]
+            with Path(os.environ["CALL_LOG"]).open("a", encoding="utf-8") as output:
+                output.write(json.dumps(arguments) + "\\n")
+            if arguments == ["info"]:
+                raise SystemExit(0)
+            if "run" in arguments and arguments[-1] == "config-resolver":
+                runtime_dir = Path.cwd() / ".runtime" / "answer-delivery"
+                runtime_dir.mkdir(parents=True, exist_ok=True)
+                (runtime_dir / "librarian.compose.json").write_text("{}\\n", encoding="utf-8")
+                raise SystemExit(0)
+            if "config" in arguments and "--format" in arguments:
+                raise SystemExit(23)
+            raise SystemExit(0)
+            """
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def _write_fake_git(path: Path) -> None:
+    path.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import sys
+
+            arguments = sys.argv[1:]
+            if arguments == ["rev-parse", "HEAD"]:
+                print("a" * 40)
+            elif arguments != ["status", "--porcelain"]:
+                raise SystemExit(1)
+            """
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def _recorded_commands(path: Path) -> list[list[str]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _profiles(command: list[str]) -> list[str]:
+    return [command[index + 1] for index, item in enumerate(command[:-1]) if item == "--profile"]
 
 
 if __name__ == "__main__":
