@@ -236,6 +236,8 @@ def _serialize_r2_application_runtime_config(
             }
         },
     }
+    if runtime_mode == "r2_api":
+        payload["chat"] = {"delivery_mode": config.chat.delivery_mode}
     return json.dumps(payload, indent=2) + "\n"
 
 

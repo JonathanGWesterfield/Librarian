@@ -3,7 +3,7 @@
 - **Milestone:** [M05 — Configuration, capabilities, and feature off-switch](README.md)
 - **Task ID:** `AD-M05-02`
 - **Lifecycle status:** **planned**
-- **Milestone status:** Not started. Task status never advances milestone status.
+- **Milestone status:** Parallel configuration implementation in progress; M04 acceptance and M03 exit still gate acceptance/release. Task status never advances milestone status.
 - **Claim record:** owner: **Unassigned**; branch/worktree: **Unassigned**; claimed timestamp: **Unassigned**; last update: **Unassigned**; coordination contact: **Unassigned**. Claim by filling every field and changing status to `claimed` before edits.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 - **Source of truth:** [roadmap](../../../answer-delivery/README.md), [technical design](../../../answer-delivery/technical-design.md), [ADR 001](../../../answer-delivery/adr-internal-rpc-transport.md), [compatibility plan](../../../answer-delivery/compatibility-and-migration.md), and [acceptance charter](../../../answer-delivery/acceptance.md)
@@ -27,6 +27,8 @@ Publish browser delivery capabilities and return a pre-admission disabled respon
 ## Parallel safety and reserved surfaces
 
 Reserve capability response/API composition root and endpoint documentation. Coordinate route changes with M04/M06 owners.
+
+AD-M05-01 temporarily reserves `scripts/resolve_provider_config.py` and `packages/librarian_contracts/runtime_config.py` to carry the validated non-secret `chat.delivery_mode` into generated `r2_api` configuration and its API-only client preflight only. This is the configuration handoff for this task; AD-M05-02 retains API composition and pre-admission behavior and does not edit either reserved surface. Buffered disables only new event delivery; it does not describe a completed API behavior in this planned task.
 
 Before editing a shared surface, add the planned files and branch/worktree to the claim record. If another active task owns the same surface, coordinate a sequence or split the boundary; do not overwrite its work.
 

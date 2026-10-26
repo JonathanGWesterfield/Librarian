@@ -51,6 +51,7 @@ _R2_APPLICATION_TOP_LEVEL_REQUIRED_FIELDS = frozenset(
         "answer_delivery",
     }
 )
+_R2_API_CHAT_DELIVERY_MODES = frozenset({"buffered", "progressive"})
 
 
 class RuntimeConfigError(ValueError):
@@ -144,10 +145,7 @@ def _parse_r2_application_runtime_config(root: dict[str, Any]) -> BrokerClientRu
     broker configuration consumed before a channel is opened.
     """
 
-    _require_exact_fields(
-        root, _R2_APPLICATION_TOP_LEVEL_REQUIRED_FIELDS, "R2 application runtime configuration"
-    )
-    runtime = _require_object(root["runtime"], "runtime")
+    runtime = _require_object(root.get("runtime"), "runtime")
     _require_exact_fields(runtime, frozenset({"mode"}), "runtime")
     if runtime["mode"] not in {
         "r2_api",
@@ -156,6 +154,20 @@ def _parse_r2_application_runtime_config(root: dict[str, Any]) -> BrokerClientRu
         "r2_evaluator",
     }:
         raise RuntimeConfigError("runtime.mode must name an R2 application role")
+    if runtime["mode"] == "r2_api":
+        root_without_chat = dict(root)
+        root_without_chat.pop("chat", None)
+        _require_exact_fields(
+            root_without_chat,
+            _R2_APPLICATION_TOP_LEVEL_REQUIRED_FIELDS,
+            "R2 application runtime configuration",
+        )
+        if "chat" in root:
+            _validate_r2_api_chat(root["chat"])
+    else:
+        _require_exact_fields(
+            root, _R2_APPLICATION_TOP_LEVEL_REQUIRED_FIELDS, "R2 application runtime configuration"
+        )
     generation = _require_object(root["generation"], "generation")
     _require_exact_fields(generation, _GENERATION_FIELDS | frozenset({"mode"}), "generation")
     if generation["mode"] != "r2_grpc":
@@ -178,6 +190,18 @@ def _parse_r2_application_runtime_config(root: dict[str, Any]) -> BrokerClientRu
             f"answer_delivery.codex_broker.transport must be {BROKER_TRANSPORT}"
         )
     return config
+
+
+def _validate_r2_api_chat(value: object) -> None:
+    """Validate the API-only public delivery setting without importing app config."""
+
+    chat = _require_object(value, "chat")
+    _require_exact_fields(chat, frozenset({"delivery_mode"}), "chat")
+    if (
+        not isinstance(chat["delivery_mode"], str)
+        or chat["delivery_mode"] not in _R2_API_CHAT_DELIVERY_MODES
+    ):
+        raise RuntimeConfigError("chat.delivery_mode must be buffered or progressive")
 
 
 def serialize_broker_client_runtime_config(config: BrokerClientRuntimeConfig) -> str:

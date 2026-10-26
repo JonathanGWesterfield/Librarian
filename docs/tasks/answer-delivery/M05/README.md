@@ -1,6 +1,6 @@
 # M05 task ledger — Configuration, capabilities, and feature off-switch
 
-- **Milestone status:** Not started; authoritative state and evidence remain the [roadmap](../../../answer-delivery/README.md#milestones) and [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87).
+- **Milestone status:** Parallel configuration implementation in progress; M04 acceptance and M03 exit still gate acceptance/release; authoritative state and evidence remain the [roadmap](../../../answer-delivery/README.md#milestones) and [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87).
 - **Milestone dependency:** M04
 
 Each linked task file is the single source for its mutable lifecycle, claim, evidence, blockers, and handoff.

@@ -3,7 +3,7 @@
 - **Milestone:** [M05 — Configuration, capabilities, and feature off-switch](README.md)
 - **Task ID:** `AD-M05-03`
 - **Lifecycle status:** **planned**
-- **Milestone status:** Not started. Task status never advances milestone status.
+- **Milestone status:** Parallel configuration implementation in progress; M04 acceptance and M03 exit still gate acceptance/release. Task status never advances milestone status.
 - **Claim record:** owner: **Unassigned**; branch/worktree: **Unassigned**; claimed timestamp: **Unassigned**; last update: **Unassigned**; coordination contact: **Unassigned**. Claim by filling every field and changing status to `claimed` before edits.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 - **Source of truth:** [roadmap](../../../answer-delivery/README.md), [technical design](../../../answer-delivery/technical-design.md), [ADR 001](../../../answer-delivery/adr-internal-rpc-transport.md), [compatibility plan](../../../answer-delivery/compatibility-and-migration.md), and [acceptance charter](../../../answer-delivery/acceptance.md)

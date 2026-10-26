@@ -67,6 +67,8 @@ Append dated entries; never rewrite or delete an earlier claim, command result, 
 
 - **2026-10-26 — Isolation probe coordination:** after merged AD-M03-21 released the harness, AD-M03-03 reserves bounded probe wiring in `scripts/run_answer_delivery_compose.sh` for caller-local handshake/isolation checks and the ephemeral evaluator network. AD-M03-04 stays unclaimed and its sequential acceptance prerequisites remain mandatory.
 
+- **2026-10-26 — Isolation reservation released:** AD-M03-03 merged in PR #122 and releases the bounded harness wiring surface. This task remains unclaimed until its independent AD-M03-15 prerequisite completes.
+
 ## Handoff
 
 Required evidence for M03 exit; hand reports to M07 UAT/review.
