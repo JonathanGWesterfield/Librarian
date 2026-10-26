@@ -2,9 +2,9 @@
 
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md)
 - **Task ID:** `AD-M03-02`
-- **Lifecycle status:** **planned**
+- **Lifecycle status:** **blocked**
 - **Milestone status:** In progress. Task status never advances milestone status.
-- **Claim record:** owner: **Unassigned**; branch/worktree: **Unassigned**; claimed timestamp: **Unassigned**; last update: **Unassigned**; coordination contact: **Unassigned**. Claim by filling every field and changing status to `claimed` before edits.
+- **Claim record:** owner: **`/root/m03_api_chat_implementer`**; branch/worktree: **`codex/m03-api-chat-grpc-proof` in the shared Librarian worktree**; claimed timestamp: **2026-10-26T10:50:44-05:00**; last update: **2026-10-26T10:54:18-05:00**; coordination contact: **`/root` via this task record**. The former `tests/answer/test_grpc_chat.py` reservation is released to [AD-M03-19](19-api-chat-cancellation-terminal-event.md); this blocked record now owns only its evidence.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 - **Source of truth:** [roadmap](../../../answer-delivery/README.md), [technical design](../../../answer-delivery/technical-design.md), [ADR 001](../../../answer-delivery/adr-internal-rpc-transport.md), [compatibility plan](../../../answer-delivery/compatibility-and-migration.md), and [acceptance charter](../../../answer-delivery/acceptance.md)
 
@@ -61,10 +61,10 @@ Append dated entries; never rewrite or delete an earlier claim, command result, 
 - **Commands and results:** _Not recorded._
 - **Reports / screenshots:** _Not recorded._
 - **Review findings and repairs:** _Not recorded._
-- **Blockers / decisions:** _Not recorded._
+- **Blockers / decisions:** 2026-10-26 — **Blocked.** A live authenticated `api` generated-client integration fixture reached the broker for grounded synthesis, then a parent cancellation caused the in-flight gRPC await to raise `asyncio.CancelledError` out of `AnswerRuntime.run()` after `generation_started`. This contradicts the acceptance charter requirement for exactly one terminal `cancelled` event with no late completion. The proof-only task cannot edit `packages/librarian_answer/runtime.py` or the generated-client adapter. [AD-M03-19](19-api-chat-cancellation-terminal-event.md) is the required repair task and owns the released chat proof surface; reopen this proof after it makes in-flight generated RPC cancellation yield that terminal event and its live regression passes. Focused Python 3.12 container command (before removing the contradictory test): `docker run --rm --volume /Users/codexai/Documents/Librarian:/app --workdir /app librarian-grpc-chat-test python -m unittest -v tests.answer.test_grpc_chat` — **9 tests passed**, but the passing cancellation assertion accepted the contradicted behavior and was removed.
 
 ## Handoff
 
-Blocks `AD-M03-04`, `AD-M03-05`, and `AD-M03-06`; hand chat-specific evidence to those tasks.
+Blocks `AD-M03-04`, `AD-M03-05`, and `AD-M03-06`. The **answer-runtime owner** must claim [AD-M03-19](19-api-chat-cancellation-terminal-event.md), repair the terminal cancellation contract, and then return live evidence here before this proof is reopened.
 
 A claimant moves the lifecycle only through `planned → claimed → in progress → in review → complete`, or to `blocked` with the exact blocker, completion condition, and next owner. Before requesting review, update every artifact line above and confirm this task’s scope does not overlap an active claim.

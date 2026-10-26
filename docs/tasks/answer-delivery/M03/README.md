@@ -25,5 +25,7 @@ Each linked task file is the single source for its mutable lifecycle, claim, evi
 - [AD-M03-16 — Summary-worker gRPC proof](16-summary-worker-compose-proof.md)
 - [AD-M03-17 — Metadata-worker gRPC proof](17-metadata-worker-compose-proof.md)
 - [AD-M03-18 — Evaluator gRPC proof](18-evaluator-compose-proof.md)
+- [AD-M03-19 — Restore API chat cancellation terminal event](19-api-chat-cancellation-terminal-event.md)
+- [AD-M03-20 — Include the config-resolver profile in the R2 harness](20-compose-harness-config-resolver-profile.md)
 
 Follow the [task-ledger protocol](../README.md#contributor-protocol) before claiming work.
