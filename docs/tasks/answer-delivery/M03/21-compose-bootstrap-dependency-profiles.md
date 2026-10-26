@@ -2,7 +2,7 @@
 
 - **Task ID:** `AD-M03-21`
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md); task status does not advance milestone status.
-- **Lifecycle status:** **in review**
+- **Lifecycle status:** **complete**
 - **Claim record:** owner: **/root/implementer**; branch/worktree: **codex/ad-m03-21-compose-bootstrap** / **/Users/codexai/Documents/Librarian-worktrees/ad-m03-21**; claimed timestamp: **2026-10-26 19:57 CET**; last update: **2026-10-26 19:58 CET**; coordination contact: **/root**.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 
@@ -57,6 +57,8 @@ Append dated entries; never rewrite or delete earlier claims, commands, review f
 - **2026-10-26 — Independent live review and full gate:** `/root/reviewer` inspected the canonical log and all four redacted reports and approved live evidence without blocker/important findings. The subsequent `PATH=/private/tmp/librarian-m03-test-venv/bin:$PATH scripts/check.sh` passed 514 tests in 8.723 seconds (exit 0), including actual Compose rendering, contract generation/breaking checks, ledger freshness, compilation, and evaluation. Log: `/tmp/librarian-ad-m03-21-check.log`.
 
 - **2026-10-26 — Final approval:** `/root/reviewer` approved the complete ten-file implementation/evidence transition after the 514-test gate, with no blocker or important findings. The current task remains `in review` until PR #120 merges; AD-M03-04 and the non-chat proof retain their own gates.
+
+- **2026-10-26 — Merged completion:** verified PR #120 merged as `224c7d2a631ab67201fec919afea0b8b09003a9f`. Independent code/live review and the 514-test full gate passed; task is complete and releases its shared harness regression surface. M03 acceptance and cutover gates remain separate.
 
 ## Handoff
 

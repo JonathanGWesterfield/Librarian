@@ -1,19 +1,19 @@
 {
   "canonical_source_sha256": {
-    "docs/answer-delivery/README.md": "32d05ea081c09e669e7efc36947f4e48e9fc1e43b396f55529cd1f1ca31f9b05",
+    "docs/answer-delivery/README.md": "4f26eb15f8b1f8b86945e121e79a290d997413b03541a1c3673f5e1884625f5f",
     "docs/answer-delivery/acceptance.md": "c880d2cabfa1c27d03eb2805d5097a95c552d2b3b5d1cb98bc1524e4aab009fb",
     "docs/answer-delivery/adr-internal-rpc-transport.md": "25c9a8c678da181c18d0f7d8b4a05ac5be829c95944cf33b1d9a83491ae4a9bb",
     "docs/answer-delivery/compatibility-and-migration.md": "8f2eaac2f1b2fefc5a6806a766a8588f0d3e37c136a60c8888024455db93d097",
     "docs/answer-delivery/technical-design.md": "a3ed15dfca1d2eab8245482ff942baa935bf6f3cb300c8974fee195db1c0467d"
   },
   "last_freshness_review": {
-    "note": "Reviewed status/handoff update after clean live bootstrap repair. Task15 reopens after repair merge and needs its own proof; task04 remains sequential and unclaimed; task18 is merged; task21 live evidence does not advance M03 release.",
-    "reviewed_at_utc": "2026-10-26T19:07:41Z",
+    "note": "Reviewed merged bootstrap completion and live-verified caller isolation proof in review. Bounded harness reservation and separate AD-M03-04 gates retained. Concurrent task15 blocker handoff reviewed without editing its owned record.",
+    "reviewed_at_utc": "2026-10-26T20:08:12Z",
     "reviewed_by": "root-reviewer",
     "task_ids": [
+      "AD-M03-03",
       "AD-M03-04",
       "AD-M03-15",
-      "AD-M03-18",
       "AD-M03-21"
     ]
   },

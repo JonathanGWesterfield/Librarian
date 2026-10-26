@@ -24,6 +24,9 @@ readonly report_names=(
 readonly profiles=(codex-broker workers metadata-workers evaluation)
 readonly config_resolver_profile=config-resolver
 readonly caller_services=(api summary-worker metadata-worker)
+readonly caller_probe="tests/fixtures/answer_delivery/r2-compose/caller_isolation_probe.py"
+readonly evaluator_probe_container="${project_name}-evaluator-isolation-probe"
+evaluator_probe_started=false
 
 if ! [[ "$project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
   echo "[librarian] VERIFY_PROJECT must contain only lowercase letters, digits, underscores, or hyphens." >&2
@@ -96,6 +99,9 @@ config_resolver_compose+=(
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
+  if [[ "$evaluator_probe_started" == true ]]; then
+    docker rm --force "$evaluator_probe_container" >/dev/null 2>&1 || true
+  fi
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$runtime_dir"
   if ((status != 0)); then
@@ -170,6 +176,12 @@ PY
 # without invoking a corpus evaluation or any external model.
 "${compose[@]}" run --rm --no-deps --entrypoint python evaluator \
   -m librarian_answer_adapters.r2_startup --principal evaluator -- python -c 'pass'
+
+# Keep one evaluator container alive long enough to inspect its real network
+# attachment and run the same caller-local probe as the long-running callers.
+"${compose[@]}" run --detach --name "$evaluator_probe_container" --no-deps \
+  --entrypoint python evaluator -c 'import time; time.sleep(300)'
+evaluator_probe_started=true
 
 assert_client_isolation() {
   local service="$1"
@@ -261,6 +273,12 @@ assert_networks() {
     echo "[librarian] Required service is not running: $service" >&2
     return 1
   fi
+  assert_container_networks "$container_id" "$expected_csv"
+}
+
+assert_container_networks() {
+  local container_id="$1"
+  local expected_csv="$2"
   local networks
   networks="$(docker inspect --format '{{json .NetworkSettings.Networks}}' "$container_id")"
   python3 -c '
@@ -274,12 +292,51 @@ if actual != expected:
 ' "$networks" "$expected_csv"
 }
 
+broker_id="$("${compose[@]}" ps -q codex-broker)"
+if [[ -z "$broker_id" ]]; then
+  echo "[librarian] Required service is not running: codex-broker" >&2
+  exit 1
+fi
+
 assert_networks codex-broker 'broker-api,broker-summary-worker,broker-metadata-worker,broker-evaluator,broker-egress'
 assert_networks api 'application,broker-api'
 assert_networks summary-worker 'application,broker-summary-worker'
 assert_networks metadata-worker 'application,broker-metadata-worker'
+assert_container_networks "$evaluator_probe_container" 'application,broker-evaluator'
 
-broker_id="$("${compose[@]}" ps -q codex-broker)"
+broker_private_ip() {
+  local network="$1"
+  docker inspect --format '{{json .NetworkSettings.Networks}}' "$broker_id" | python3 -c '
+import json
+import sys
+
+network = sys.argv[1]
+matches = [
+    details["IPAddress"]
+    for name, details in json.load(sys.stdin).items()
+    if name.rsplit("_", 1)[-1] == network and details["IPAddress"]
+]
+if len(matches) != 1:
+    raise SystemExit("broker private network address is unavailable")
+print(matches[0])
+' "$network"
+}
+
+probe_caller() {
+  local service="$1"
+  local role="$2"
+  local alternate_network="$3"
+  local alternate_ip
+  alternate_ip="$(broker_private_ip "$alternate_network")"
+  "${compose[@]}" exec -T "$service" python - "$role" "$alternate_ip" <"$caller_probe"
+}
+
+probe_caller api api broker-summary-worker
+probe_caller summary-worker summary-worker broker-metadata-worker
+probe_caller metadata-worker metadata-worker broker-evaluator
+evaluator_alternate_ip="$(broker_private_ip broker-api)"
+docker exec -i "$evaluator_probe_container" python - evaluator "$evaluator_alternate_ip" <"$caller_probe"
+
 broker_port_bindings="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$broker_id")"
 python3 -c '
 import json
