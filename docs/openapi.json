@@ -745,6 +745,61 @@
         }
       }
     },
+    "/chat/events": {
+      "post": {
+        "tags": ["chat"],
+        "operationId": "streamAnswerEvents",
+        "summary": "Stream versioned grounded-answer events",
+        "description": "R2-only progressive delivery of the checked-in v1 answer-event schema. Each SSE frame has a request ID and monotonic sequence. Candidate progress contains only candidate IDs, book IDs, and titles; answer text appears only in answer_validated and completed events.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              },
+              "examples": {
+                "pointFact": {
+                  "summary": "Request progressive delivery for a scoped point fact",
+                  "value": {
+                    "question": "Who opens the gate?",
+                    "book_title": "Fixture Book"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One v1 SSE frame per runtime event. Every complete UTF-8 frame is capped at 128 KiB. If a result cannot fit, exactly one bounded safe failed terminal event replaces it; no partial or oversized result frame is sent. The completed, failed, or cancelled event is terminal.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "description": "R2 answer delivery is not ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/recommendations": {
       "post": {
         "tags": ["recommendations"],
@@ -2488,6 +2543,9 @@
           "filters",
           "retrieval_backend",
           "timings",
+          "minimum_citation_count",
+          "citation_count",
+          "outcome",
           "sources"
         ],
         "properties": {
@@ -2534,6 +2592,18 @@
             "$ref": "#/components/schemas/ChatTimingsResponse",
             "description": "Wall-clock seconds spent in each synchronous chat stage."
           },
+          "minimum_citation_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "citation_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["answered", "insufficient_evidence", "generation_unavailable", "source_changed"]
+          },
           "sources": {
             "type": "array",
             "items": {
@@ -2549,6 +2619,8 @@
           "retrieval_seconds",
           "prompt_construction_seconds",
           "generation_seconds",
+          "validation_seconds",
+          "repair_seconds",
           "total_seconds"
         ],
         "properties": {
@@ -2565,6 +2637,14 @@
             "minimum": 0
           },
           "generation_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "validation_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "repair_seconds": {
             "type": "number",
             "minimum": 0
           },

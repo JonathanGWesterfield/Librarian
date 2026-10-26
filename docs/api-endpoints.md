@@ -454,11 +454,11 @@ Chat retrieval follows `search.retrieval_backend` in that JSON configuration:
 
 The response reports the backend that actually supplied the source chunks in
 `retrieval_backend`. It also includes `timings` with wall-clock seconds for
-`query_embedding`, `retrieval`, `prompt_construction`, `generation`, and the
-overall request. These fields let a UI or local diagnostic tool distinguish
-generation latency from retrieval latency. `POST /chat` remains the stable,
-complete JSON request-response contract for clients that do not need
-progressive rendering.
+`query_embedding`, `retrieval`, `prompt_construction`, `generation`,
+`validation`, bounded `repair`, and the overall request. These fields let a UI
+or local diagnostic tool distinguish generation latency from retrieval latency.
+`POST /chat` remains the stable, complete JSON request-response contract for
+clients that do not need progressive rendering.
 
 Request fields:
 
@@ -548,6 +548,67 @@ Search-index passages are checked against the current SQLite chunk records.
 With automatic retrieval, a stale index falls back to SQLite; explicit
 OpenSearch retrieval reports an error requiring an index rebuild. Mixed
 front-matter/body chunks are excluded from ordinary body-evidence answers.
+
+### `POST /chat/events`
+
+Provides the R2 progressive answer-delivery contract as `text/event-stream`.
+It accepts the same JSON request as `POST /chat`; use `fetch` with a
+`ReadableStream` reader because browser `EventSource` only supports `GET`.
+The endpoint is available after the R2 API-to-broker capability handshake. If
+that runtime is not ready, it returns `503` before starting a stream.
+
+Each frame is one checked-in
+[`v1` answer-event envelope](../schemas/librarian/answer/v1/answer_event.schema.json)
+with an SSE `id` of `<request_id>:<sequence>`. The envelope includes the schema
+version, a canonical request UUID, a positive contiguous sequence, and its
+event name. There is no replay or `Last-Event-ID` promise.
+
+Every complete UTF-8 SSE frame is capped at 128 KiB, including its `id`,
+`event`, and `data` lines. If a result cannot fit, the endpoint sends exactly
+one bounded safe `failed` terminal event in its place; it sends neither a
+partial result frame nor an oversized frame.
+
+The possible events are `started`, `evidence_candidates`,
+`generation_started`, `validation_started`, `answer_validated`, `completed`,
+`failed`, and `cancelled`.
+
+- `evidence_candidates` contains a count and candidate IDs, book IDs, and book
+  titles only. It never includes an excerpt, source text, draft answer, model
+  output, or provider diagnostic.
+- `generation_started` and `validation_started` contain only the bounded
+  attempt number.
+- `answer_validated` appears only for an accepted answer. It and `completed`
+  carry the same complete result shape returned by `POST /chat`.
+- `completed`, `failed`, and `cancelled` are terminal. Exactly one terminal
+  event is emitted. `failed` has a bounded safe error; `cancelled` has no
+  additional payload. A browser disconnect cancels the runtime and cannot
+  produce a late completion.
+
+Example request:
+
+```text
+POST /chat/events
+Content-Type: application/json
+
+{"question":"Who opens the gate?","book_title":"Fixture Book"}
+```
+
+Example successful sequence (the result is abbreviated here; each terminal
+result uses the complete `POST /chat` response shape):
+
+```text
+id: 0d4f7c96-49f6-4ea0-8804-3b4fd3d55692:1
+event: started
+data: {"schema_version":"v1","request_id":"0d4f7c96-49f6-4ea0-8804-3b4fd3d55692","sequence":1,"event":"started"}
+
+id: 0d4f7c96-49f6-4ea0-8804-3b4fd3d55692:2
+event: evidence_candidates
+data: {"schema_version":"v1","request_id":"0d4f7c96-49f6-4ea0-8804-3b4fd3d55692","sequence":2,"event":"evidence_candidates","candidate_count":1,"candidates":[{"candidate_id":"S1","book_id":"book-1","book_title":"Fixture Book"}]}
+
+id: 0d4f7c96-49f6-4ea0-8804-3b4fd3d55692:6
+event: completed
+data: {"schema_version":"v1","request_id":"0d4f7c96-49f6-4ea0-8804-3b4fd3d55692","sequence":6,"event":"completed","result":{"outcome":"answered","answer":"Mara opens the gate. [S1]","...":"complete POST /chat result"}}
+```
 
 ### `POST /chat/stream`
 

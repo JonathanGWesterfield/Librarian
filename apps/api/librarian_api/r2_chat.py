@@ -8,7 +8,14 @@ from time import monotonic, perf_counter
 from typing import Awaitable, Callable
 from uuid import uuid4
 
-from librarian_answer import AnswerRequest, AnswerRuntime, AnswerScope, EvidenceSnapshot
+from librarian_answer import (
+    AnswerEvent,
+    AnswerRequest,
+    AnswerResult,
+    AnswerRuntime,
+    AnswerScope,
+    EvidenceSnapshot,
+)
 from librarian_answer_adapters.grpc_broker import GeneratedGrpcBrokerClient
 from librarian_answer_adapters.grpc_chat import GrpcChatOperations
 from librarian_answer_adapters.grpc_generation import GrpcGenerationGenerator
@@ -21,6 +28,7 @@ from librarian_chat.chat import (
     ChatSource,
     ChatStreamEvent,
     ChatTimings,
+    RetrievedChatEvidence,
     retrieve_chat_evidence,
 )
 from librarian_config.config import resolve_database_url
@@ -28,7 +36,10 @@ from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2 as delivery_pb2,
 )
 from librarian_metadata.genres import GenerateBookGenresOptions, generate_book_genres
-from librarian_recommendations.recommendations import RecommendationOptions, recommend_books
+from librarian_recommendations.recommendations import (
+    RecommendationOptions,
+    recommend_books,
+)
 from librarian_storage.storage import create_ingestion_store
 from librarian_summarization.summarize import SummarizeBookOptions, summarize_book
 
@@ -164,109 +175,62 @@ class R2ApiChatCaller:
         *,
         context: _RequestContext | None = None,
     ) -> ChatResponse:
-        """Run retrieval locally and all chat generation through generated RPCs."""
+        """Collect the same runtime lifecycle used by progressive delivery."""
 
-        self.validate_options(options)
         owned_context = context is None
         context = context or _RequestContext()
         try:
-            retrieved = await _retrieve_chat_evidence_with_context(options, context)
+            terminal: ChatResponse | None = None
+            async for run_event in self.run(options, context=context):
+                if run_event.event.event == "completed":
+                    terminal = run_event.response
+            if terminal is not None:
+                return terminal
             if context.is_cancelled():
-                raise asyncio.CancelledError("R2 chat was cancelled during retrieval")
-            started = retrieved.total_started
-            question = retrieved.question
-            answer_capability = retrieved.answer_capability
-            required_sources = retrieved.required_sources
-            retrieval_limit = retrieved.retrieval_limit
-            search_response = retrieved.search_response
-            retrieval_backend = retrieved.retrieval_backend
-            sources = retrieved.sources
-            evidence_sufficient = retrieved.evidence_sufficient
-            publication_question = retrieved.publication_question
-            query_embedding_seconds = retrieved.query_embedding_seconds
-            retrieval_seconds = retrieved.retrieval_seconds
-
-            if not evidence_sufficient:
-                return self._response(
-                    question=question,
-                    answer=chat_module._insufficient_evidence_answer(
-                        publication_question=publication_question,
-                        required_sources=required_sources,
-                        scope=search_response.filters,
-                    ),
-                    sources=[],
-                    answer_capability=answer_capability,
-                    retrieval_limit=retrieval_limit,
-                    search_response=search_response,
-                    retrieval_backend=retrieval_backend,
-                    required_sources=required_sources,
-                    query_embedding_seconds=query_embedding_seconds,
-                    retrieval_seconds=retrieval_seconds,
-                    generation_seconds=0.0,
-                    total_started=started,
-                    outcome="insufficient_evidence",
-                )
-
-            generation_started = perf_counter()
-            store_factory = lambda: create_ingestion_store(resolve_database_url(options.database_url))
-            evidence = LegacySentenceEvidenceRetriever(
-                question=question,
-                sources=sources,
-                required_sources=required_sources,
-                store_factory=store_factory,
-                retrieval_backend=retrieval_backend,
-            )
-            runtime = AnswerRuntime(
-                evidence_retriever=_R2EvidenceRetriever(evidence, self.operations),
-                generation_broker=self.operations.synthesis_broker(),
-                support_reviewer=self.operations,
-            )
-            result = await runtime.collect(
-                AnswerRequest(
-                    request_id=str(uuid4()),
-                    question=question,
-                    scope=AnswerScope(
-                        book_id=search_response.filters.get("book_id"),
-                        book_title=search_response.filters.get("book_title"),
-                        author=search_response.filters.get("author"),
-                    ),
-                    minimum_citation_count=required_sources,
-                ),
-                context,
-            )
-            generation_seconds = perf_counter() - generation_started
-            if result is None:
-                if context.is_cancelled():
-                    raise asyncio.CancelledError("R2 chat was cancelled before a terminal result")
-                raise RuntimeError("R2 chat ended without a terminal result")
-            selected = []
-            for citation in result.citations:
-                source = evidence.source_for_candidate(citation.candidate_id)
-                if source is not None and source.chunk_id not in {item.chunk_id for item in selected}:
-                    selected.append(source)
-            answer = result.answer
-            if result.outcome == "answered":
-                answer = f"{answer} {' '.join(f'[{source.source_id}]' for source in selected)}".strip()
-            else:
-                selected = []
-            return self._response(
-                question=question,
-                answer=answer,
-                sources=selected,
-                answer_capability=answer_capability,
-                retrieval_limit=retrieval_limit,
-                search_response=search_response,
-                retrieval_backend=retrieval_backend,
-                required_sources=required_sources,
-                query_embedding_seconds=query_embedding_seconds,
-                retrieval_seconds=retrieval_seconds,
-                generation_seconds=generation_seconds,
-                total_started=started,
-                outcome=result.outcome,
-            )
+                raise asyncio.CancelledError("R2 chat was cancelled before a terminal result")
+            raise RuntimeError("R2 chat ended without a completed result")
         finally:
             if owned_context:
                 await context.close()
+
+    async def run(self, options: ChatOptions, *, context: _RequestContext):
+        """Yield one actual ``AnswerRuntime.run`` lifecycle for this request.
+
+        Buffered JSON collects this iterator through :meth:`answer`.  The new
+        event endpoint serializes these exact objects, so neither transport can
+        create another generation or replay made-up progress.
+        """
+
+        self.validate_options(options)
+        retrieved = await _retrieve_chat_evidence_with_context(options, context)
+        if context.is_cancelled():
+            raise asyncio.CancelledError("R2 chat was cancelled during retrieval")
+        state = _R2AnswerRunState.from_retrieved(
+            options=options, operations=self.operations, retrieved=retrieved
+        )
+        runtime = AnswerRuntime(
+            evidence_retriever=state.evidence_retriever(),
+            generation_broker=self.operations.synthesis_broker(),
+            support_reviewer=self.operations,
+        )
+        request = AnswerRequest(
+            request_id=str(uuid4()),
+            question=retrieved.question,
+            scope=AnswerScope(
+                book_id=retrieved.search_response.filters.get("book_id"),
+                book_title=retrieved.search_response.filters.get("book_title"),
+                author=retrieved.search_response.filters.get("author"),
+            ),
+            minimum_citation_count=retrieved.required_sources,
+        )
+        async for runtime_event in runtime.run(request, context):
+            response: ChatResponse | None = None
+            if runtime_event.event in {"answer_validated", "completed"}:
+                result = runtime_event.payload.get("result")
+                if not isinstance(result, AnswerResult):
+                    raise RuntimeError("R2 runtime emitted a terminal event without a result")
+                response = state.response_for(result)
+            yield R2AnswerRunEvent(event=runtime_event, response=response)
 
     async def stream(
         self, options: ChatOptions, *, context: _RequestContext
@@ -307,45 +271,100 @@ class R2ApiChatCaller:
         completed["timings"] = timings
         yield ChatStreamEvent("complete", completed)
 
-    def _response(
-        self,
+@dataclass(frozen=True)
+class R2AnswerRunEvent:
+    """One runtime event plus the API result used for terminal delivery."""
+
+    event: AnswerEvent
+    response: ChatResponse | None = None
+
+
+@dataclass
+class _R2AnswerRunState:
+    """R2 retrieval metadata used only to project an accepted runtime result."""
+
+    operations: GrpcChatOperations
+    retrieved: RetrievedChatEvidence
+    evidence: LegacySentenceEvidenceRetriever
+    runtime_started: float
+    terminal_response: ChatResponse | None = None
+
+    @classmethod
+    def from_retrieved(
+        cls,
         *,
-        question: str,
-        answer: str,
-        sources: list[ChatSource],
-        answer_capability: str,
-        retrieval_limit: int,
-        search_response: object,
-        retrieval_backend: str,
-        required_sources: int,
-        query_embedding_seconds: float,
-        retrieval_seconds: float,
-        generation_seconds: float,
-        total_started: float,
-        outcome: str,
-    ) -> ChatResponse:
-        return ChatResponse(
-            question=question,
+        options: ChatOptions,
+        operations: GrpcChatOperations,
+        retrieved: RetrievedChatEvidence,
+    ) -> _R2AnswerRunState:
+        store_factory = lambda: create_ingestion_store(resolve_database_url(options.database_url))
+        evidence = LegacySentenceEvidenceRetriever(
+            question=retrieved.question,
+            sources=retrieved.sources,
+            required_sources=retrieved.required_sources,
+            store_factory=store_factory,
+            retrieval_backend=retrieved.retrieval_backend,
+        )
+        return cls(
+            operations=operations,
+            retrieved=retrieved,
+            evidence=evidence,
+            runtime_started=perf_counter(),
+        )
+
+    def evidence_retriever(self):
+        # The unchanged evidence floor is checked before the selector is
+        # allowed to run.  The runtime still emits its real evidence and
+        # completed events for a refusal; it is never replaced by a replay.
+        if not self.retrieved.evidence_sufficient:
+            return self.evidence
+        return _R2EvidenceRetriever(self.evidence, self.operations)
+
+    def response_for(self, result: AnswerResult) -> ChatResponse:
+        if self.terminal_response is not None:
+            return self.terminal_response
+        selected: list[ChatSource] = []
+        if result.outcome == "answered":
+            for citation in result.citations:
+                source = self.evidence.source_for_candidate(citation.candidate_id)
+                if source is not None and source.chunk_id not in {
+                    item.chunk_id for item in selected
+                }:
+                    selected.append(source)
+        answer = result.answer
+        if result.outcome == "answered":
+            answer = f"{answer} {' '.join(f'[{source.source_id}]' for source in selected)}".strip()
+        elif result.outcome == "insufficient_evidence":
+            answer = chat_module._insufficient_evidence_answer(
+                publication_question=self.retrieved.publication_question,
+                required_sources=self.retrieved.required_sources,
+                scope=self.retrieved.search_response.filters,
+            )
+        else:
+            selected = []
+        self.terminal_response = ChatResponse(
+            question=self.retrieved.question,
             answer=answer,
-            embedding_provider=search_response.embedding_provider,
-            embedding_model=search_response.embedding_model,
+            embedding_provider=self.retrieved.search_response.embedding_provider,
+            embedding_model=self.retrieved.search_response.embedding_model,
             generation_provider="grpc",
             generation_model=self.operations.model_id,
-            retrieval_limit=retrieval_limit,
-            candidate_count=search_response.candidate_count,
-            filters=search_response.filters,
-            sources=sources,
-            answer_capability=answer_capability,
-            retrieval_backend=retrieval_backend,
-            minimum_citation_count=required_sources,
-            outcome=outcome,
+            retrieval_limit=self.retrieved.retrieval_limit,
+            candidate_count=self.retrieved.search_response.candidate_count,
+            filters=self.retrieved.search_response.filters,
+            sources=selected,
+            answer_capability=self.retrieved.answer_capability,
+            retrieval_backend=self.retrieved.retrieval_backend,
+            minimum_citation_count=self.retrieved.required_sources,
+            outcome=result.outcome,
             timings=ChatTimings(
-                query_embedding_seconds=query_embedding_seconds,
-                retrieval_seconds=retrieval_seconds,
-                generation_seconds=generation_seconds,
-                total_seconds=perf_counter() - total_started,
+                query_embedding_seconds=self.retrieved.query_embedding_seconds,
+                retrieval_seconds=self.retrieved.retrieval_seconds,
+                generation_seconds=perf_counter() - self.runtime_started,
+                total_seconds=perf_counter() - self.retrieved.total_started,
             ),
         )
+        return self.terminal_response
 
 
 @dataclass(frozen=True)
@@ -403,6 +422,11 @@ class _RequestContext:
 
         if self._is_disconnected is not None and self._watcher is None:
             self._watcher = asyncio.create_task(self._watch_disconnect())
+
+    def cancel(self) -> None:
+        """Propagate an adapter shutdown to the runtime and broker context."""
+
+        self._cancelled.set()
 
     async def close(self) -> None:
         """Stop a request-scoped watcher once the endpoint has finished."""

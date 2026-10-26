@@ -12,8 +12,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
-from librarian_chat.chat import ChatResponse, ChatSource, ChatStreamEvent
+from librarian_answer import AnswerEvent
 from librarian_answer_adapters.grpc_generation import R2GenerationDeadlineExceeded
+from librarian_api.r2_chat import R2AnswerRunEvent
+from librarian_chat.chat import ChatResponse, ChatSource, ChatStreamEvent
 from librarian_metadata.genres import BookGenreGenerationResult, GeneratedBookGenre
 from librarian_recommendations.recommendations import (
     BookRecommendation,
@@ -417,6 +419,8 @@ class IngestionApiTests(unittest.TestCase):
                 "retrieval_seconds",
                 "prompt_construction_seconds",
                 "generation_seconds",
+                "validation_seconds",
+                "repair_seconds",
                 "total_seconds",
             },
         )
@@ -577,6 +581,150 @@ class IngestionApiTests(unittest.TestCase):
         self.assertEqual(parsed[1][1], {"text": "Mara opens the gate. [S1]"})
         self.assertIn("time_to_first_event_seconds", parsed[0][1]["timings"])
         self.assertIn("time_to_first_token_seconds", parsed[-1][1]["timings"])
+
+    def test_r2_events_endpoint_serializes_the_runtime_lifecycle_without_draft_text(self) -> None:
+        """The new endpoint projects runtime events; it does not replay /chat output."""
+
+        request_id = "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692"
+        result = ChatResponse(
+            question="Who opens the gate?",
+            answer="Mara opens the gate. [S1]",
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="grpc",
+            generation_model="fixture-model",
+            retrieval_limit=1,
+            candidate_count=1,
+            filters={"book_id": "book-1"},
+            sources=[],
+            answer_capability="quality",
+            retrieval_backend="sqlite",
+            minimum_citation_count=1,
+            outcome="answered",
+        )
+
+        async def events(_options, *, context):
+            self.assertFalse(context.is_cancelled())
+            yield R2AnswerRunEvent(AnswerEvent("v1", request_id, 1, "started"))
+            yield R2AnswerRunEvent(
+                AnswerEvent(
+                    "v1",
+                    request_id,
+                    2,
+                    "evidence_candidates",
+                    {
+                        "candidate_count": 1,
+                        "candidates": (
+                            {
+                                "candidate_id": "candidate-1",
+                                "book_id": "book-1",
+                                "book_title": "Fixture Book",
+                            },
+                        ),
+                    },
+                )
+            )
+            yield R2AnswerRunEvent(
+                AnswerEvent("v1", request_id, 3, "generation_started", {"attempt": 1})
+            )
+            yield R2AnswerRunEvent(
+                AnswerEvent("v1", request_id, 4, "validation_started", {"attempt": 1})
+            )
+            yield R2AnswerRunEvent(
+                AnswerEvent("v1", request_id, 5, "answer_validated", {"result": object()}),
+                result,
+            )
+            yield R2AnswerRunEvent(
+                AnswerEvent("v1", request_id, 6, "completed", {"result": object()}), result
+            )
+
+        caller = type(
+            "Caller", (), {"run": staticmethod(events), "validate_options": MagicMock()}
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            response = self.client.post("/chat/events", json={"question": result.question})
+        finally:
+            del app.state.r2_api_chat_caller
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+        parsed = _parse_sse_events(response.text)
+        self.assertEqual(
+            [event for event, _ in parsed],
+            [
+                "started",
+                "evidence_candidates",
+                "generation_started",
+                "validation_started",
+                "answer_validated",
+                "completed",
+            ],
+        )
+        self.assertEqual([payload["sequence"] for _, payload in parsed], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(parsed[1][1]["candidates"][0], {
+            "candidate_id": "candidate-1",
+            "book_id": "book-1",
+            "book_title": "Fixture Book",
+        })
+        self.assertNotIn("answer", parsed[1][1])
+        self.assertEqual(parsed[-2][1]["result"], parsed[-1][1]["result"])
+        self.assertEqual(parsed[-1][1]["result"]["answer"], result.answer)
+
+    def test_events_endpoint_requires_ready_r2_delivery(self) -> None:
+        response = self.client.post("/chat/events", json={"question": "Who opens the gate?"})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"detail": "R2 answer delivery is not ready."})
+
+    def test_r2_events_endpoint_replaces_an_oversized_result_with_safe_failure(self) -> None:
+        request_id = "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692"
+        result = ChatResponse(
+            question="Who opens the gate?",
+            answer="界" * 44_000,
+            embedding_provider="ollama",
+            embedding_model="all-minilm",
+            generation_provider="grpc",
+            generation_model="fixture-model",
+            retrieval_limit=1,
+            candidate_count=1,
+            filters={"book_id": "book-1"},
+            sources=[],
+            answer_capability="quality",
+            retrieval_backend="sqlite",
+            minimum_citation_count=1,
+            outcome="answered",
+        )
+
+        async def events(_options, *, context):
+            yield R2AnswerRunEvent(AnswerEvent("v1", request_id, 1, "started"))
+            yield R2AnswerRunEvent(
+                AnswerEvent("v1", request_id, 2, "completed", {"result": object()}),
+                result,
+            )
+
+        caller = type(
+            "Caller", (), {"run": staticmethod(events), "validate_options": MagicMock()}
+        )()
+        app.state.r2_api_chat_caller = caller
+        try:
+            response = self.client.post("/chat/events", json={"question": result.question})
+        finally:
+            del app.state.r2_api_chat_caller
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(response.content), 128 * 1024 * 2)
+        parsed = _parse_sse_events(response.text)
+        self.assertEqual([event for event, _ in parsed], ["started", "failed"])
+        self.assertEqual([payload["sequence"] for _, payload in parsed], [1, 2])
+        self.assertEqual(
+            parsed[-1][1]["error"],
+            {
+                "code": "internal_error",
+                "message": "Answer delivery failed.",
+                "retryable": False,
+            },
+        )
 
     def test_r2_generation_routes_use_the_lifecycle_caller_without_legacy_http_facades(self) -> None:
         recommendation = RecommendationResponse(

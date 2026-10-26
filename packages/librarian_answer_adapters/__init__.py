@@ -17,6 +17,11 @@ from librarian_answer_adapters.legacy import (
     LegacySentenceEvidenceRetriever,
     LegacySupportReviewer,
 )
+from librarian_answer_adapters.public_events import (
+    PublicAnswerEventSerializer,
+    SseFrameTooLargeError,
+    encode_sse_event,
+)
 
 __all__ = [
     "GeneratedGrpcBrokerClient",
@@ -30,4 +35,7 @@ __all__ = [
     "LegacySemanticGenerationBroker",
     "LegacySentenceEvidenceRetriever",
     "LegacySupportReviewer",
+    "PublicAnswerEventSerializer",
+    "SseFrameTooLargeError",
+    "encode_sse_event",
 ]

@@ -13,8 +13,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
-from librarian_answer import AnswerRequest, EvidenceSnapshot, SourceRecord
-from librarian_api.r2_chat import R2ApiChatCaller, _R2EvidenceRetriever, _RequestContext
+from librarian_answer import AnswerEvent, AnswerRequest, EvidenceSnapshot, SourceRecord
+from librarian_api.r2_chat import (
+    R2AnswerRunEvent,
+    R2ApiChatCaller,
+    _R2EvidenceRetriever,
+    _RequestContext,
+)
 from librarian_chat.chat import ChatOptions, ChatResponse, ChatTimings
 
 
@@ -136,6 +141,42 @@ class R2ApiChatCallerTests(unittest.IsolatedAsyncioTestCase):
         finally:
             release.set()
             await context.close()
+
+    async def test_buffered_answer_collects_the_same_run_iterator_as_event_delivery(self) -> None:
+        """POST /chat's facade must not start a second generation after progress."""
+
+        response = _response()
+        caller = R2ApiChatCaller(client=_Client(), operations=MagicMock())
+        calls = 0
+
+        async def run(_options, *, context):
+            nonlocal calls
+            calls += 1
+            self.assertFalse(context.is_cancelled())
+            yield R2AnswerRunEvent(
+                AnswerEvent(
+                    "v1",
+                    "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+                    1,
+                    "started",
+                )
+            )
+            yield R2AnswerRunEvent(
+                AnswerEvent(
+                    "v1",
+                    "0d4f7c96-49f6-4ea0-8804-3b4fd3d55692",
+                    2,
+                    "completed",
+                    {"result": object()},
+                ),
+                response,
+            )
+
+        caller.run = run  # type: ignore[method-assign]
+        result = await caller.answer(ChatOptions(question=response.question))
+
+        self.assertIs(result, response)
+        self.assertEqual(calls, 1)
 
     async def test_buffered_r2_stream_keeps_r0_frames_and_required_timings(self) -> None:
         response = _response()

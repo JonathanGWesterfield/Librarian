@@ -97,16 +97,23 @@ class StaticOpenApiSpecTests(unittest.TestCase):
             self.assertIn("Deliberately re-parse unchanged EPUBs", property_schema["description"])
 
     def test_openapi_advertises_documented_chat_streaming(self) -> None:
-        """The checked-in contract must expose the SSE route used by the web UI."""
+        """The checked-in contract must expose both current SSE routes."""
         static_spec = json.loads((REPO_ROOT / "docs" / "openapi.json").read_text())
         live_spec = app.openapi()
 
         for spec in (static_spec, live_spec):
             self.assertIn("/chat", spec["paths"])
             self.assertIn("/chat/stream", spec["paths"])
+            self.assertIn("/chat/events", spec["paths"])
             response = spec["paths"]["/chat/stream"]["post"]["responses"]["200"]
             self.assertIn("text/event-stream", response["content"])
             self.assertEqual(response["content"]["text/event-stream"]["schema"], {"type": "string"})
+            event_response = spec["paths"]["/chat/events"]["post"]["responses"]["200"]
+            self.assertIn("text/event-stream", event_response["content"])
+            self.assertEqual(
+                event_response["content"]["text/event-stream"]["schema"],
+                {"type": "string"},
+            )
 
 
 if __name__ == "__main__":

@@ -1741,6 +1741,8 @@ class ChatTests(unittest.TestCase):
             "retrieval_seconds",
             "prompt_construction_seconds",
             "generation_seconds",
+            "validation_seconds",
+            "repair_seconds",
             "total_seconds",
         })
 
