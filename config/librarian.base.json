@@ -20,6 +20,9 @@
     "opensearch_index": "librarian-chunks",
     "retrieval_backend": "auto"
   },
+  "chat": {
+    "delivery_mode": "buffered"
+  },
   "summaries": {
     "chunk_timeout_seconds": 240,
     "max_parallel_chunks": 1

@@ -2,7 +2,7 @@
 
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md)
 - **Task ID:** `AD-M03-03`
-- **Lifecycle status:** **in review**
+- **Lifecycle status:** **complete**
 - **Milestone status:** In progress. Task status never advances milestone status.
 - **Claim record:** owner: **/root/implementer**; branch/worktree: **codex/ad-m03-03-isolation-proof** / **/Users/codexai/Documents/Librarian-worktrees/ad-m03-03**; claimed timestamp: **2026-10-26 20:58 CET**; last update: **2026-10-26 20:58 CET**; coordination contact: **/root**. Temporarily coordinated with unclaimed AD-M03-04 for `scripts/run_answer_delivery_compose.sh` probe wiring; no AD-M03-04 acceptance conclusion is delegated. Claim by filling every field and changing status to `claimed` before edits.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
@@ -75,6 +75,8 @@ Append dated entries; never rewrite or delete an earlier claim, command result, 
 - **2026-10-26 — Full gate and handoff:** `PATH=/private/tmp/librarian-m03-test-venv/bin:$PATH scripts/check.sh` passed, including 516 tests. The task moves to `in review` for PR #122; only documentation/evidence changes follow the live-tested commit. Merge is required before completion. This evidence does not complete M03, cutover/rollback, or AD-M03-04.
 
 - **2026-10-26 — Final approval:** `/root/reviewer` approved the complete implementation and evidence transition after the 516-test gate, with no blocking or important findings. Task remains `in review` until PR #122 merges.
+
+- **2026-10-26 — Merged completion:** verified PR #122 merged as `d2f7c37df61b5a9607f37fbd2ac4de5e40ca40c5`. Independent code/live/final review and the 516-test gate passed. Task is complete and releases its bounded harness reservation; AD-M03-04 still requires the separate API non-chat proof.
 
 ## Handoff
 

@@ -33,6 +33,7 @@ _ALLOWED_PROVIDER_MODES = {
     "r2_grpc",
 }
 _ALLOWED_ANSWER_CAPABILITIES = {"quality", "lightweight"}
+_ALLOWED_CHAT_DELIVERY_MODES = {"buffered", "progressive"}
 _ALLOWED_SEMANTIC_SELECTOR_PROVIDERS = {"codex", "docker_codex_broker"}
 _ALLOWED_EVALUATION_JUDGE_PROVIDERS = {
     "codex",
@@ -107,6 +108,13 @@ class SearchSettings:
 
 
 @dataclass(frozen=True)
+class ChatSettings:
+    """Public chat delivery behavior selected before API admission."""
+
+    delivery_mode: str
+
+
+@dataclass(frozen=True)
 class SummarySettings:
     chunk_timeout_seconds: float
     max_parallel_chunks: int
@@ -160,6 +168,7 @@ class LibrarianConfig:
     embedding: ProviderSettings
     generation: ProviderSettings
     search: SearchSettings
+    chat: ChatSettings
     summaries: SummarySettings
     semantic_source_selector: SemanticSourceSelectorSettings
     evaluation: EvaluationSettings | None
@@ -242,6 +251,7 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
             "embedding",
             "generation",
             "search",
+            "chat",
             "summaries",
             "semantic_source_selector",
             "evaluation",
@@ -273,6 +283,7 @@ def _load_librarian_config(path: Path) -> LibrarianConfig:
         ),
         generation=generation,
         search=_parse_search(root.get("search")),
+        chat=_parse_chat(root),
         summaries=_parse_summaries(root.get("summaries")),
         semantic_source_selector=_parse_semantic_source_selector(
             root.get("semantic_source_selector"), generation=generation
@@ -342,6 +353,25 @@ def _validate_r2_application_document(root: dict[str, Any], *, runtime_mode: str
     )
     answer_delivery = _require_mapping(root.get("answer_delivery"), "answer_delivery")
     _reject_unknown_keys(answer_delivery, {"codex_broker"}, "answer_delivery")
+
+
+def _parse_chat(root: dict[str, Any]) -> ChatSettings:
+    """Load the browser delivery mode while preserving buffered compatibility.
+
+    Existing version-1 and generated version-2 documents predate this section,
+    so its absence is intentionally the buffered, events-off behavior. Once
+    supplied, the section is strict: coercion could make a request appear to
+    have a different delivery contract than its configuration states.
+    """
+
+    if "chat" not in root:
+        return ChatSettings(delivery_mode="buffered")
+    chat = _require_mapping(root["chat"], "chat")
+    _reject_unknown_keys(chat, {"delivery_mode"}, "chat")
+    delivery_mode = chat.get("delivery_mode")
+    if not isinstance(delivery_mode, str) or delivery_mode not in _ALLOWED_CHAT_DELIVERY_MODES:
+        raise LibrarianConfigError("chat.delivery_mode must be buffered or progressive")
+    return ChatSettings(delivery_mode=delivery_mode)
 
 
 def resolve_books_dir(books_dir: str | Path | None = None) -> Path:
