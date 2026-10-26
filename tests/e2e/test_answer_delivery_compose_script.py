@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import os
@@ -12,15 +13,99 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from librarian_contracts.stack_contract import build_stack_contract
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_SCRIPT = REPO_ROOT / "scripts/run_answer_delivery_compose.sh"
 VALIDATOR_PATH = REPO_ROOT / "scripts/validate_answer_delivery_compose_reports.py"
+CALLER_PROBE_PATH = (
+    REPO_ROOT / "tests/fixtures/answer_delivery/r2-compose/caller_isolation_probe.py"
+)
 REPORT_PROFILES = ["codex-broker", "workers", "metadata-workers", "evaluation"]
 RESOLVER_PROFILES = ["config-resolver", *REPORT_PROFILES]
 
 
 class AnswerDeliveryComposeScriptTests(unittest.TestCase):
+    def test_caller_probe_uses_the_real_contract_for_all_mismatch_variants(self) -> None:
+        probe = _load_caller_probe()
+        contract = build_stack_contract(
+            stack_release_sha="a" * 40,
+            descriptor=probe.delivery_pb2.DESCRIPTOR.serialized_pb,
+        )
+        captured_requests = []
+
+        class Client:
+            def __init__(self) -> None:
+                self.contract = contract
+                self.closed = False
+
+            async def close(self) -> None:
+                self.closed = True
+
+        client = Client()
+
+        async def open_client(*, expected_principal: str):
+            self.assertEqual(expected_principal, "api")
+            return client
+
+        async def capture_mismatch(_client, request) -> None:
+            captured_requests.append(request.__class__.FromString(request.SerializeToString()))
+
+        with (
+            patch.object(probe, "open_r2_client", side_effect=open_client),
+            patch.object(probe, "_assert_alternate_network_is_unreachable") as isolation,
+            patch.object(probe, "_assert_contract_mismatch", side_effect=capture_mismatch),
+        ):
+            asyncio.run(probe._run(principal="api", alternate_broker_ip="192.0.2.1"))
+
+        isolation.assert_called_once_with("192.0.2.1")
+        self.assertTrue(client.closed)
+        self.assertEqual(len(captured_requests), 4)
+        self.assertEqual(captured_requests[0].stack_release_sha, "b" * 40)
+        self.assertEqual(captured_requests[1].descriptor_sha256, b"x" * 32)
+        self.assertEqual(captured_requests[2].contract_minor, contract.contract_minor + 1)
+        self.assertEqual(captured_requests[3].contract_major, contract.contract_major + 1)
+
+    def test_caller_probe_requires_cross_network_refusal_and_typed_mismatches(self) -> None:
+        probe = _load_caller_probe()
+
+        with patch.object(probe.socket, "create_connection", side_effect=OSError):
+            probe._assert_alternate_network_is_unreachable("192.0.2.1")
+        with (
+            patch.object(probe.socket, "create_connection", return_value=_SocketContext()),
+            self.assertRaisesRegex(RuntimeError, "another private network"),
+        ):
+            probe._assert_alternate_network_is_unreachable("192.0.2.1")
+
+        class FakeRpcError(Exception):
+            def code(self):
+                return probe.grpc.StatusCode.FAILED_PRECONDITION
+
+        class FailingStub:
+            async def GetCapabilities(self, *args, **kwargs):
+                raise FakeRpcError()
+
+        client = SimpleNamespace(_stub=FailingStub(), _metadata=lambda **kwargs: ())
+        with (
+            patch.object(probe.grpc.aio, "AioRpcError", FakeRpcError),
+            patch.object(
+                probe,
+                "_error_code",
+                return_value=probe.delivery_pb2.CONTRACT_MISMATCH,
+            ),
+        ):
+            asyncio.run(probe._assert_contract_mismatch(client, object()))
+
+        with (
+            patch.object(probe.grpc.aio, "AioRpcError", FakeRpcError),
+            patch.object(probe, "_error_code", return_value=0),
+            self.assertRaisesRegex(RuntimeError, "CONTRACT_MISMATCH"),
+        ):
+            asyncio.run(probe._assert_contract_mismatch(client, object()))
+
     def test_report_validator_writes_and_accepts_the_exact_redacted_schema(self) -> None:
         validator = _load_validator()
         with tempfile.TemporaryDirectory() as directory:
@@ -147,12 +232,32 @@ class AnswerDeliveryComposeScriptTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        services = json.loads(result.stdout)["services"]
+        model = json.loads(result.stdout)
+        services = model["services"]
         self.assertTrue(
             {"config-resolver", "api", "codex-broker", "summary-worker", "metadata-worker", "evaluator"}
             <= set(services),
             services.keys(),
         )
+        private_networks = {
+            "broker-api",
+            "broker-summary-worker",
+            "broker-metadata-worker",
+            "broker-evaluator",
+        }
+        self.assertTrue(all(model["networks"][network].get("internal") for network in private_networks))
+        self.assertFalse(model["networks"]["broker-egress"].get("internal", False))
+        self.assertEqual(
+            set(services["codex-broker"]["networks"]),
+            {*private_networks, "broker-egress"},
+        )
+        for service, private_network in {
+            "api": "broker-api",
+            "summary-worker": "broker-summary-worker",
+            "metadata-worker": "broker-metadata-worker",
+            "evaluator": "broker-evaluator",
+        }.items():
+            self.assertEqual(set(services[service]["networks"]), {"application", private_network})
 
     def test_resolver_bootstrap_profile_is_separate_from_reported_r2_profiles(self) -> None:
         resolver_profiles, report_profiles = _captured_harness_profiles()
@@ -272,6 +377,25 @@ def _load_validator():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_caller_probe():
+    spec = importlib.util.spec_from_file_location(
+        f"answer_delivery_caller_probe_{id(CALLER_PROBE_PATH)}", CALLER_PROBE_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class _SocketContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
 
 
 def _probe() -> dict[str, object]:

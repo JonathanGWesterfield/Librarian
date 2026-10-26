@@ -65,6 +65,8 @@ Append dated entries; never rewrite or delete an earlier claim, command result, 
 
 - **2026-10-26 — Shared-surface coordination:** AD-M03-21 reserves the harness script and harness-script regression for the bounded bootstrap dependency repair. This task remains unclaimed and its sequential acceptance prerequisites still apply; no M03-04 acceptance conclusion is delegated to maintenance work.
 
+- **2026-10-26 — Isolation probe coordination:** after merged AD-M03-21 released the harness, AD-M03-03 reserves bounded probe wiring in `scripts/run_answer_delivery_compose.sh` for caller-local handshake/isolation checks and the ephemeral evaluator network. AD-M03-04 stays unclaimed and its sequential acceptance prerequisites remain mandatory.
+
 ## Handoff
 
 Required evidence for M03 exit; hand reports to M07 UAT/review.
