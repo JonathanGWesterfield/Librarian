@@ -3,7 +3,7 @@
 - **Task ID:** `AD-M03-15`
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md); task status does not advance milestone status.
 - **Lifecycle status:** **blocked**
-- **Claim record:** owner: **`/root/m03_api_chat_implementer`**; branch/worktree: **`codex/m03-api-chat-grpc-proof` in the shared Librarian worktree**; claimed timestamp: **2026-10-26T10:54:52-05:00**; last update: **2026-10-26T10:58:00-05:00**; coordination contact: **`/root` via this task record**. Reserved paths: **this task record only**; `tests/answer/test_r2_api_non_chat_grpc.py` was released when its uncommitted proof was discarded.
+- **Claim record:** owner: **Unassigned**; branch/worktree: **Unassigned**; claimed timestamp: **Unassigned**; last update: **2026-10-26T13:10:00-05:00**; coordination contact: **M03 caller-proof owner.** The prior reservation is released; `tests/answer/test_r2_api_non_chat_grpc.py` remains available for this task's next claim.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 
 ## Immutable scope and goal
@@ -48,6 +48,8 @@ Append dated entries; never rewrite or delete earlier claims, commands, review f
 - **Reports / screenshots:** No report produced. The harness removed its disposable runtime state and retained no report after the pre-start failure.
 - **Review findings and repairs:** _Not recorded._
 - **Blockers / decisions:** 2026-10-26 — **Blocked on `AD-M03-04` harness repair.** Its script activates `codex-broker`, `workers`, `metadata-workers`, and `evaluation` profiles but omits the `config-resolver` profile. As a result, its direct config-resolver run does not receive the tracked answer-delivery overlay and reads a missing ignored local config file. Rendering with the missing profile enabled confirms the tracked fixture mount is otherwise correct. Reopen after the harness includes the config-resolver profile, produces all four redacted reports from a clean checkout, and the focused proof still passes. The proof runs the actual API composition seam with an authenticated generated stub and a live in-process gRPC listener. Test-local workload functions stand in only for unrelated storage/search work while invoking the real injected synchronous generator; there is no HTTP provider or legacy generator in the fixture.
+- **Blockers / decisions:** 2026-10-26 — **Resolved to planned.** [AD-M03-20](20-compose-harness-config-resolver-profile.md) merged in [PR #115](https://github.com/JonathanGWesterfield/Librarian/pull/115), adding the missing config-resolver profile without changing the four reported caller profiles. The clean-checkout harness and non-chat proof are now eligible for a new isolated claim; their required redacted reports remain unproduced.
+- **Blockers / decisions:** 2026-10-26 — **Blocked again by a later bootstrap failure.** After #115, the fresh canonical harness at `39644a32d4be28b07cea55d380b85a3ab7e98e03` fails before startup because API declares a dependency on undefined `codex-broker`. The earlier resolver-profile defect is resolved, but this task cannot produce its required clean Compose evidence until the current-main harness bootstrap failure is repaired and rerun.
 
 ## Handoff
 
