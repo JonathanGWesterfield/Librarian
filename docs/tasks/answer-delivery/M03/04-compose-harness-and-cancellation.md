@@ -63,6 +63,8 @@ Append dated entries; never rewrite or delete an earlier claim, command result, 
 - **Review findings and repairs:** _Not recorded._
 - **Blockers / decisions:** _Not recorded._
 
+- **2026-10-26 — Shared-surface coordination:** AD-M03-21 reserves the harness script and harness-script regression for the bounded bootstrap dependency repair. This task remains unclaimed and its sequential acceptance prerequisites still apply; no M03-04 acceptance conclusion is delegated to maintenance work.
+
 ## Handoff
 
 Required evidence for M03 exit; hand reports to M07 UAT/review.

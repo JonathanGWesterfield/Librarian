@@ -46,7 +46,7 @@ were reviewed; it never replaces the task-file update or its append-only note.
 | [M00](./M00/) | Design publication and approval | 1 |
 | [M01](./M01/) | Contracts, toolchain, inventory, and fixtures | 13 |
 | [M02](./M02/) | In-process answer-runtime extraction and parity | 3 |
-| [M03](./M03/) | Atomic gRPC Codex-broker migration | 18 |
+| [M03](./M03/) | Atomic gRPC Codex-broker migration | 21 |
 | [M04](./M04/) | Buffered JSON and progressive SSE delivery adapters | 4 |
 | [M05](./M05/) | Configuration, capabilities, and feature off-switch | 3 |
 | [M06](./M06/) | Web reducer and truthful progress UI | 4 |

@@ -83,6 +83,11 @@ config_resolver_compose=(
   docker compose
   --project-name "$project_name"
   --profile "$config_resolver_profile"
+)
+for profile in "${profiles[@]}"; do
+  config_resolver_compose+=(--profile "$profile")
+done
+config_resolver_compose+=(
   -f docker-compose.yml
   -f docker-compose.r2.yml
   -f docker-compose.answer-delivery.yml

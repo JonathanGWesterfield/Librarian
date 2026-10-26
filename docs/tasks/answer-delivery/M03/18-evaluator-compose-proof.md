@@ -2,7 +2,7 @@
 
 - **Task ID:** `AD-M03-18`
 - **Milestone:** [M03 — Atomic gRPC Codex-broker migration](README.md); task status does not advance milestone status.
-- **Lifecycle status:** **in review**
+- **Lifecycle status:** **complete**
 - **Claim record:** owner: **/root/implementer**; branch/worktree: **codex/ad-m03-18-evaluator-proof** / **/Users/codexai/Documents/Librarian-worktrees/ad-m03-18**; claimed timestamp: **2026-10-26 18:32 CET**; last update: **2026-10-26 18:35 CET**; coordination contact: **/root**.
 - **Progress ledger:** [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87)
 
@@ -60,6 +60,8 @@ Append dated entries; never rewrite or delete earlier claims, commands, review f
 - **2026-10-26 — Rebased validation:** rebased onto `81e72fa` without conflicts. The independent reviewer reran 41 evaluator/gRPC/broker tests against the merged cancellation changes and approved integration. Post-review full `scripts/check.sh` passed 512 tests in 7.722 seconds, exit 0; log `/tmp/librarian-ad-m03-18-rebased-check.log`. No current-main live Compose success is claimed.
 
 - **2026-10-26 — PR handoff:** [PR #119](https://github.com/JonathanGWesterfield/Librarian/pull/119) contains the reviewed evaluator proof and prior-task completion reconciliation. Its head commit identifies the implementation SHA. AD-M03-18 remains `in review` pending merge, with current-main Compose acceptance separately blocked.
+
+- **2026-10-26 — Merged completion:** verified PR #119 merged as `f738749ef228c424ad0566ec0bc1417e6ae69adf`. The approved evaluator proof and 512-test gate are merged; task is complete. Historical Compose evidence and the separate current-main bootstrap limitation remain explicitly distinguished.
 
 ## Handoff
 

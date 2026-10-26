@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_SCRIPT = REPO_ROOT / "scripts/run_answer_delivery_compose.sh"
 VALIDATOR_PATH = REPO_ROOT / "scripts/validate_answer_delivery_compose_reports.py"
+REPORT_PROFILES = ["codex-broker", "workers", "metadata-workers", "evaluation"]
+RESOLVER_PROFILES = ["config-resolver", *REPORT_PROFILES]
 
 
 class AnswerDeliveryComposeScriptTests(unittest.TestCase):
@@ -111,53 +114,92 @@ class AnswerDeliveryComposeScriptTests(unittest.TestCase):
         for secret in secrets.iterdir():
             self.assertTrue(secret.read_text(encoding="utf-8").startswith("synthetic-"))
 
-    def test_resolver_bootstrap_profile_is_separate_from_reported_r2_profiles(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            workspace = Path(directory)
-            command_dir = workspace / "bin"
-            command_dir.mkdir()
-            call_log = workspace / "docker-calls.jsonl"
-            _write_fake_docker(command_dir / "docker")
-            _write_fake_git(command_dir / "git")
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose is required to render the live model")
+    def test_resolver_bootstrap_profiles_render_the_real_r2_compose_model(self) -> None:
+        resolver_profiles, report_profiles = _captured_harness_profiles()
+        self.assertEqual(resolver_profiles, RESOLVER_PROFILES)
+        self.assertEqual(report_profiles, REPORT_PROFILES)
 
-            environment = {
-                **os.environ,
-                "ANSWER_DELIVERY_REPORT_DIR": str(workspace / "reports"),
-                "CALL_LOG": str(call_log),
-                "PATH": f"{command_dir}{os.pathsep}{os.environ['PATH']}",
-                "VERIFY_PROJECT": "answer-delivery-profile-proof",
-            }
-            result = subprocess.run(
-                ["bash", str(COMPOSE_SCRIPT)],
-                cwd=workspace,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 23, result.stderr)
-            compose_calls = [
-                command
-                for command in _recorded_commands(call_log)
-                if command and command[0] == "compose"
+        command = ["docker", "compose", "--project-name", "answer-delivery-profile-model"]
+        for profile in resolver_profiles:
+            command.extend(["--profile", profile])
+        command.extend(
+            [
+                "-f",
+                "docker-compose.yml",
+                "-f",
+                "docker-compose.r2.yml",
+                "-f",
+                "docker-compose.answer-delivery.yml",
+                "config",
+                "--format",
+                "json",
             ]
-            resolver_call = next(
-                command
-                for command in compose_calls
-                if command[-4:] == ["run", "--rm", "--build", "config-resolver"]
-            )
-            rendered_config_call = next(
-                command
-                for command in compose_calls
-                if "config" in command and "--format" in command
-            )
+        )
 
-            self.assertEqual(_profiles(resolver_call), ["config-resolver"])
-            self.assertEqual(
-                _profiles(rendered_config_call),
-                ["codex-broker", "workers", "metadata-workers", "evaluation"],
-            )
+        result = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env={**os.environ, "LIBRARIAN_STACK_RELEASE_SHA": "a" * 40},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        services = json.loads(result.stdout)["services"]
+        self.assertTrue(
+            {"config-resolver", "api", "codex-broker", "summary-worker", "metadata-worker", "evaluator"}
+            <= set(services),
+            services.keys(),
+        )
+
+    def test_resolver_bootstrap_profile_is_separate_from_reported_r2_profiles(self) -> None:
+        resolver_profiles, report_profiles = _captured_harness_profiles()
+
+        self.assertEqual(resolver_profiles, RESOLVER_PROFILES)
+        self.assertEqual(report_profiles, REPORT_PROFILES)
+
+
+def _captured_harness_profiles() -> tuple[list[str], list[str]]:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        command_dir = workspace / "bin"
+        command_dir.mkdir()
+        call_log = workspace / "docker-calls.jsonl"
+        _write_fake_docker(command_dir / "docker")
+        _write_fake_git(command_dir / "git")
+
+        environment = {
+            **os.environ,
+            "ANSWER_DELIVERY_REPORT_DIR": str(workspace / "reports"),
+            "CALL_LOG": str(call_log),
+            "PATH": f"{command_dir}{os.pathsep}{os.environ['PATH']}",
+            "VERIFY_PROJECT": "answer-delivery-profile-proof",
+        }
+        result = subprocess.run(
+            ["bash", str(COMPOSE_SCRIPT)],
+            cwd=workspace,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 23:
+            raise AssertionError(result.stderr)
+
+        compose_calls = [
+            command for command in _recorded_commands(call_log) if command and command[0] == "compose"
+        ]
+        resolver_call = next(
+            command
+            for command in compose_calls
+            if command[-4:] == ["run", "--rm", "--build", "config-resolver"]
+        )
+        rendered_config_call = next(
+            command for command in compose_calls if "config" in command and "--format" in command
+        )
+        return _profiles(resolver_call), _profiles(rendered_config_call)
 
 
 def _write_fake_docker(path: Path) -> None:
