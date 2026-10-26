@@ -15,6 +15,22 @@
   published. Keep technical decisions in the versioned documents rather than
   duplicating them in issues or pull requests.
 
+## Coordination and milestone status
+
+- Treat the milestone table in `docs/answer-delivery/README.md` as the
+  authoritative state for every branch and agent. Before starting work, read it
+  together with issue #87's current ledger entry; do not infer eligibility from
+  a branch name, chat history, or an unmerged commit.
+- When a PR changes a slice's completion, blocker, or next eligible work,
+  update the roadmap table and #87 in that PR. An unmerged implementation does
+  not advance a milestone. Record whether the work is parallel implementation
+  or an acceptance/release gate.
+- Milestone dependencies order final acceptance and release, not necessarily
+  implementation. Agents may implement and review independent later slices in
+  parallel when the roadmap identifies the dependency and their scope does not
+  require an uncompleted behavior. They must not mark that milestone complete,
+  claim release readiness, or skip the dependency's acceptance evidence.
+
 ## GitHub
 
 - Prefer the GitHub connector for reading PRs, comments, review threads, issues,
