@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic, perf_counter
-from typing import Awaitable, Callable
 from uuid import uuid4
 
 from librarian_answer import (
@@ -16,6 +16,7 @@ from librarian_answer import (
     AnswerScope,
     EvidenceSnapshot,
 )
+from librarian_answer.ports import resolve_cancellation_cause
 from librarian_answer_adapters.grpc_broker import GeneratedGrpcBrokerClient
 from librarian_answer_adapters.grpc_chat import GrpcChatOperations
 from librarian_answer_adapters.grpc_generation import GrpcGenerationGenerator
@@ -449,13 +450,24 @@ class _RequestContext:
             await asyncio.sleep(0.05)
 
     def is_cancelled(self) -> bool:
-        return self._cancelled.is_set() or monotonic() >= self._deadline_at
+        return self.cancellation_cause() is not None
+
+    def cancellation_cause(self) -> str | None:
+        """Return a transport-neutral terminal cause for one API request."""
+
+        if self._disconnected:
+            return "disconnect"
+        if self._cancelled.is_set():
+            return "explicit"
+        if monotonic() >= self._deadline_at:
+            return "deadline"
+        return None
 
     @property
     def was_disconnected(self) -> bool:
-        """Whether the browser, rather than a server deadline, ended this request."""
+        """Compatibility view for HTTP's 499 response mapping."""
 
-        return self._disconnected
+        return self.cancellation_cause() == "disconnect"
 
     def remaining_seconds(self) -> float | None:
         if self._cancelled.is_set():
@@ -471,7 +483,15 @@ class _PhaseRequestContext:
     deadline_at: float
 
     def is_cancelled(self) -> bool:
-        return self.parent.is_cancelled() or monotonic() >= self.deadline_at
+        return self.cancellation_cause() is not None
+
+    def cancellation_cause(self) -> str | None:
+        parent_cause = resolve_cancellation_cause(self.parent)
+        if parent_cause is not None:
+            return parent_cause
+        if monotonic() >= self.deadline_at:
+            return "deadline"
+        return None
 
     def remaining_seconds(self) -> float | None:
         parent_remaining = self.parent.remaining_seconds()

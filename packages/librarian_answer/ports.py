@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable
-from typing import Protocol
+from typing import Literal, Protocol
 
 from librarian_answer.models import (
     AnswerRequest,
@@ -15,6 +15,8 @@ from librarian_answer.models import (
     SupportReviewResult,
 )
 
+CancellationCause = Literal["explicit", "disconnect", "deadline"]
+
 
 class RequestContext(Protocol):
     """Request lifecycle state supplied by an API or other composition root."""
@@ -22,8 +24,21 @@ class RequestContext(Protocol):
     def is_cancelled(self) -> bool:
         """Return whether the caller has cancelled the answer request."""
 
+    def cancellation_cause(self) -> CancellationCause | None:
+        """Return the terminal cause, keeping cancellation distinct from deadline."""
+
     def remaining_seconds(self) -> float | None:
         """Return the remaining end-to-end budget, when one is enforced."""
+
+
+def resolve_cancellation_cause(context: RequestContext) -> CancellationCause | None:
+    """Read the explicit cause while retaining legacy context compatibility."""
+
+    cause_method = getattr(context, "cancellation_cause", None)
+    cause = cause_method() if callable(cause_method) else None
+    if cause in {"explicit", "disconnect", "deadline"}:
+        return cause
+    return "explicit" if context.is_cancelled() else None
 
 
 class EvidenceRetriever(Protocol):
