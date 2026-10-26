@@ -10,6 +10,7 @@ linked from [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87).
 - [Answer delivery technical design](technical-design.md)
 - [Compatibility and migration plan](compatibility-and-migration.md)
 - [Acceptance charter](acceptance.md)
+- **[Task ledger: discover, claim, and hand off slices](../tasks/answer-delivery/README.md)**
 
 ## Outcome
 
@@ -44,19 +45,19 @@ required M00/M01 deliverables have passed review.
 
 ## Milestones
 
-| ID | Deliverable | Depends on | Status |
-| --- | --- | --- | --- |
-| M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) |
-| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Complete ([PR #101](https://github.com/JonathanGWesterfield/Librarian/pull/101)) |
-| M02 | In-process answer-runtime extraction and parity | M01 | Complete ([#102](https://github.com/JonathanGWesterfield/Librarian/pull/102), [#103](https://github.com/JonathanGWesterfield/Librarian/pull/103)) |
-| M03 | Atomic gRPC Codex-broker migration | M02 | In progress |
-| M04 | Buffered JSON and progressive SSE delivery adapters | M03 | In progress in parallel with M03 ([#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)); M03 exit gates M04 acceptance and release |
-| M05 | Configuration, capabilities, and feature off-switch | M04 | Not started |
-| M06 | Web reducer and truthful progress UI | M04, M05 | Not started |
-| M07 | Compatibility, failure, Chrome UAT, and independent review | M06 | Not started |
-| M08 | Measured broker optimization | M03 baseline, M07 harness | Not started |
-| M09 | Separate answer-runtime deployment decision | M07, M08 | Not started |
-| M10 | Controlled rollout and operational handoff | M07–M09 | Not started |
+| ID | Deliverable | Depends on | Status | Task ledger |
+| --- | --- | --- | --- | --- |
+| M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) | [Tasks](../tasks/answer-delivery/M00/) |
+| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Complete ([PR #101](https://github.com/JonathanGWesterfield/Librarian/pull/101)) | [Tasks](../tasks/answer-delivery/M01/) |
+| M02 | In-process answer-runtime extraction and parity | M01 | Complete ([#102](https://github.com/JonathanGWesterfield/Librarian/pull/102), [#103](https://github.com/JonathanGWesterfield/Librarian/pull/103)) | [Tasks](../tasks/answer-delivery/M02/) |
+| M03 | Atomic gRPC Codex-broker migration | M02 | In progress | [Tasks](../tasks/answer-delivery/M03/) |
+| M04 | Buffered JSON and progressive SSE delivery adapters | M03 | In progress in parallel with M03 ([#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)); M03 exit gates M04 acceptance and release | [Tasks](../tasks/answer-delivery/M04/) |
+| M05 | Configuration, capabilities, and feature off-switch | M04 | Not started | [Tasks](../tasks/answer-delivery/M05/) |
+| M06 | Web reducer and truthful progress UI | M04, M05 | Not started | [Tasks](../tasks/answer-delivery/M06/) |
+| M07 | Compatibility, failure, Chrome UAT, and independent review | M06 | Not started | [Tasks](../tasks/answer-delivery/M07/) |
+| M08 | Measured broker optimization | M03 baseline, M07 harness | Not started | [Tasks](../tasks/answer-delivery/M08/) |
+| M09 | Separate answer-runtime deployment decision | M07, M08 | Not started | [Tasks](../tasks/answer-delivery/M09/) |
+| M10 | Controlled rollout and operational handoff | M07–M09 | Not started | [Tasks](../tasks/answer-delivery/M10/) |
 
 ## Coordination state
 
@@ -184,8 +185,8 @@ automation were implemented incrementally in
 [#111](https://github.com/JonathanGWesterfield/Librarian/pull/111). M03 remains
 in progress until the atomic R2 release, cutover/rollback, isolation, and live
 acceptance exit conditions below are satisfied. The remaining source-tree HTTP
-retirement code is part of unmerged [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112);
-it is not completion evidence until reviewed and merged. M04's API delivery
+retirement code merged in [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112);
+it remains insufficient by itself for M03 completion without the required live acceptance evidence. M04's API delivery
 adapter may be implemented and reviewed in parallel, but M03 exit remains its
 acceptance and release gate.
 
@@ -254,7 +255,7 @@ a mixed R0/R2 stack.
 Owner: API delivery.
 
 **Status:** in progress in parallel with M03. [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)
-contains the API-adapter slice. Its implementation and review may proceed now;
+merged the API-adapter slice. Its final acceptance and release remain gated by M03;
 M03 exit gates M04's final acceptance, release evidence, and any claim that
 M04 is complete. M05 and M06 retain their own listed dependencies.
 

@@ -3,7 +3,8 @@
 ## Active architecture roadmap
 
 - At the start of every repository task, read
-  [`docs/answer-delivery/README.md`](docs/answer-delivery/README.md).
+  [`docs/answer-delivery/README.md`](docs/answer-delivery/README.md) and
+  [`docs/tasks/answer-delivery/README.md`](docs/tasks/answer-delivery/README.md).
   For answer delivery, chat, broker, gRPC, streaming, configuration, testing,
   or architecture work, also read the ADR, technical design, compatibility
   plan, and acceptance charter linked from that roadmap.
@@ -14,6 +15,20 @@
 - Treat issue #87 as the progress ledger after the roadmap documentation is
   published. Keep technical decisions in the versioned documents rather than
   duplicating them in issues or pull requests.
+
+- The task ledger is the execution queue: after the roadmap/design set, read
+  `docs/tasks/answer-delivery/README.md`, the applicable milestone index, and
+  the selected task before editing. Claim the task in its file with owner,
+  branch/worktree, timestamp, exact reserved paths, and coordination contact;
+  respect its prerequisites, forbidden paths, and execution class. Task files
+  own mutable lifecycle/evidence, while the roadmap table and #87 own milestone
+  status.
+- The task ledger has a required freshness gate. When changing any canonical
+  answer-delivery source document, identify every affected task, update its
+  direct anchors, scope, acceptance, or handoff as needed, and refresh
+  `docs/tasks/answer-delivery/freshness.json` in the same PR with the reviewed
+  task IDs and a review note. Do not refresh a source hash without reviewing
+  the linked tasks. `scripts/check.sh` and CI reject a stale ledger.
 
 ## Coordination and milestone status
 

@@ -297,7 +297,9 @@ See the evaluation north star:
 ### Immediate Next: Search Performance and Correctness Hardening
 
 Answer delivery and internal RPC work is planned in the
-[answer-delivery roadmap](docs/answer-delivery/), tracked in
+[answer-delivery roadmap](docs/answer-delivery/), with a highly discoverable,
+file-backed [task ledger](docs/tasks/answer-delivery/) for claiming and handing
+off parallel milestone slices, and tracked in
 [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87). The roadmap
 is backed by [ADR 001](docs/answer-delivery/adr-internal-rpc-transport.md), a detailed
 [technical design](docs/answer-delivery/technical-design.md), a
