@@ -1,13 +1,15 @@
-# Librarian task ledgers
+# Librarian work tracking
 
-This directory is the discoverable home for file-backed execution ledgers. A
-ledger breaks an active program into independently claimable tasks and preserves
-its ownership, dependencies, evidence, review findings, and handoff notes.
+[Jira](https://jgwesterfield.atlassian.net/browse/LIB-1) is the sole mutable
+task and milestone ledger for the answer-delivery program. Read the applicable
+Jira epic and task before editing; record ownership, dependencies, evidence,
+review findings, and handoff there.
 
-## Active ledger
-
-[Answer delivery](answer-delivery/README.md) is the current M00–M10 execution
-ledger. It defines the task lifecycle and claim protocol; read that program
-ledger, its milestone index, and the selected task before editing.
-
-Individual task files are authoritative for a slice’s implementation artifacts, command results, reports, review findings, and handoff notes. The answer-delivery roadmap and [issue #87](https://github.com/JonathanGWesterfield/Librarian/issues/87) are authoritative for milestone state and cross-milestone acceptance/release evidence. A task file does not independently advance a milestone.
+The repository keeps technical design and implementation evidence in Git. The
+legacy answer-delivery task records, freshness manifest, and local freshness
+checker were retired after a verified Jira import and explicit approval; the remaining
+[Jira pointer](answer-delivery/README.md) preserves that provenance only. This
+directory does not maintain duplicate task files, lifecycle status, or a
+freshness manifest. New milestone work is strictly sequential: all tickets and
+epics in every preceding milestone must be Done and their technical exit
+evidence satisfied before the next milestone begins.

@@ -297,11 +297,12 @@ See the evaluation north star:
 ### Immediate Next: Search Performance and Correctness Hardening
 
 Answer delivery and internal RPC work is planned in the
-[answer-delivery roadmap](docs/answer-delivery/), with a highly discoverable,
-file-backed [task ledger](docs/tasks/answer-delivery/) for claiming and handing
-off parallel milestone slices, and tracked in
-[#87](https://github.com/JonathanGWesterfield/Librarian/issues/87). The roadmap
-is backed by [ADR 001](docs/answer-delivery/adr-internal-rpc-transport.md), a detailed
+[answer-delivery roadmap](docs/answer-delivery/) and tracked in the
+[LIB Jira project](https://jgwesterfield.atlassian.net/browse/LIB-1). Jira is
+the sole mutable task and milestone ledger; new work proceeds strictly only
+after every ticket and epic in every preceding milestone is Done and its
+technical exit evidence is satisfied. The roadmap is backed by
+[ADR 001](docs/answer-delivery/adr-internal-rpc-transport.md), a detailed
 [technical design](docs/answer-delivery/technical-design.md), a
 [compatibility plan](docs/answer-delivery/compatibility-and-migration.md), and an
 [acceptance charter](docs/answer-delivery/acceptance.md). These documents require

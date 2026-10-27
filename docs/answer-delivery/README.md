@@ -1,8 +1,8 @@
 # Modular answer delivery implementation roadmap
 
-**Status:** Planned. This document is the burn-down index, not the protocol
-specification. No milestone is complete until its listed evidence is merged and
-linked from [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87).
+**Status:** The technical roadmap is versioned here; mutable milestone and task
+state lives only in [Jira](https://jgwesterfield.atlassian.net/browse/LIB-1).
+No milestone is complete until its Jira epic is Done with its required evidence.
 
 **Design source of truth:**
 
@@ -10,7 +10,7 @@ linked from [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87).
 - [Answer delivery technical design](technical-design.md)
 - [Compatibility and migration plan](compatibility-and-migration.md)
 - [Acceptance charter](acceptance.md)
-- **[Task ledger: discover, claim, and hand off slices](../tasks/answer-delivery/README.md)**
+- **[Jira delivery epics and tasks](https://jgwesterfield.atlassian.net/browse/LIB-1)**
 
 ## Outcome
 
@@ -33,7 +33,7 @@ required M00/M01 deliverables have passed review.
 
 | Review finding | Resolution and acceptance condition |
 | --- | --- |
-| P0: tracker pointed to an unpublished design | **M00:** merge this documentation set in a focused PR; #87 then links to the immutable files and contains status/evidence only. Until then, #87 must say implementation is blocked on documentation publication. |
+| P0: tracker pointed to an unpublished design | **M00:** merge this documentation set in a focused PR; the Jira epic then links to the immutable files and records status/evidence only. Until then, Jira must say implementation is blocked on documentation publication. |
 | P0: migration inventory omitted callers | [Technical design inventory](technical-design.md#complete-boundary-and-migration-inventory) now enumerates chat, API and worker summary, metadata tag/genre, recommendation, evaluator, and every host CLI disposition. M03 migrates every supported Compose caller and rejects host Docker-broker execution before transport. |
 | P0: trust/authentication deferred | [ADR 001](adr-internal-rpc-transport.md#local-compose-trust-model) fixes the single-host Compose exception: five named networks, role-specific Compose secret mounts, generated sanitized per-service config files, health identity, rotation, and the multi-host block. M03 proves isolation as well as authorization denial. |
 | P1: incomplete proto and event semantics | The normative [v1 contract](technical-design.md#v1-grpc-contract) specifies canonical messages, fields, reservations, output matrix, typed error/status mapping, limits, and metadata. Its [compatibility handshake](technical-design.md#atomic-compatibility-handshake), evidence snapshot, and runtime lifecycle define the required implementation. M01 adds the canonical proto, JSON schema, generated stubs, and fixtures. |
@@ -45,46 +45,47 @@ required M00/M01 deliverables have passed review.
 
 ## Milestones
 
-| ID | Deliverable | Depends on | Status | Task ledger |
+| ID | Deliverable | Depends on | Technical provenance | Jira epic |
 | --- | --- | --- | --- | --- |
-| M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) | [Tasks](../tasks/answer-delivery/M00/) |
-| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Complete ([PR #101](https://github.com/JonathanGWesterfield/Librarian/pull/101)) | [Tasks](../tasks/answer-delivery/M01/) |
-| M02 | In-process answer-runtime extraction and parity | M01 | Complete ([#102](https://github.com/JonathanGWesterfield/Librarian/pull/102), [#103](https://github.com/JonathanGWesterfield/Librarian/pull/103)) | [Tasks](../tasks/answer-delivery/M02/) |
-| M03 | Atomic gRPC Codex-broker migration | M02 | In progress; metadata-worker proof merged ([#114](https://github.com/JonathanGWesterfield/Librarian/pull/114)); summary-worker proof merged ([#116](https://github.com/JonathanGWesterfield/Librarian/pull/116)); evaluator proof merged ([#119](https://github.com/JonathanGWesterfield/Librarian/pull/119)); bootstrap repair merged ([#120](https://github.com/JonathanGWesterfield/Librarian/pull/120)); isolation/handshake proof merged ([#122](https://github.com/JonathanGWesterfield/Librarian/pull/122)) | [Tasks](../tasks/answer-delivery/M03/) |
-| M04 | Buffered JSON and progressive SSE delivery adapters | M03 | In progress in parallel with M03 ([#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)); M03 exit gates M04 acceptance and release | [Tasks](../tasks/answer-delivery/M04/) |
-| M05 | Configuration, capabilities, and feature off-switch | M04 | Parallel configuration implementation in review ([#123](https://github.com/JonathanGWesterfield/Librarian/pull/123)); M04 acceptance and M03 exit still gate acceptance/release | [Tasks](../tasks/answer-delivery/M05/) |
-| M06 | Web reducer and truthful progress UI | M04, M05 | Not started | [Tasks](../tasks/answer-delivery/M06/) |
-| M07 | Compatibility, failure, Chrome UAT, and independent review | M06 | Not started | [Tasks](../tasks/answer-delivery/M07/) |
-| M08 | Measured broker optimization | M03 baseline, M07 harness | Not started | [Tasks](../tasks/answer-delivery/M08/) |
-| M09 | Separate answer-runtime deployment decision | M07, M08 | Not started | [Tasks](../tasks/answer-delivery/M09/) |
-| M10 | Controlled rollout and operational handoff | M07–M09 | Not started | [Tasks](../tasks/answer-delivery/M10/) |
+| M00 | Publish and approve the design source of truth | none | Complete ([#88](https://github.com/JonathanGWesterfield/Librarian/pull/88)) | [LIB-1](https://jgwesterfield.atlassian.net/browse/LIB-1) |
+| M01 | Contract, toolchain, inventory audit, and deterministic fixtures | M00 | Complete ([PR #101](https://github.com/JonathanGWesterfield/Librarian/pull/101)) | [LIB-2](https://jgwesterfield.atlassian.net/browse/LIB-2) |
+| M02 | In-process answer-runtime extraction and parity | M01 | Complete ([#102](https://github.com/JonathanGWesterfield/Librarian/pull/102), [#103](https://github.com/JonathanGWesterfield/Librarian/pull/103)) | [LIB-3](https://jgwesterfield.atlassian.net/browse/LIB-3) |
+| M03 | Atomic gRPC Codex-broker migration | M02 | Historical merged proofs include [#114](https://github.com/JonathanGWesterfield/Librarian/pull/114), [#116](https://github.com/JonathanGWesterfield/Librarian/pull/116), [#119](https://github.com/JonathanGWesterfield/Librarian/pull/119), [#120](https://github.com/JonathanGWesterfield/Librarian/pull/120), and [#122](https://github.com/JonathanGWesterfield/Librarian/pull/122) | [LIB-4](https://jgwesterfield.atlassian.net/browse/LIB-4) |
+| M04 | Buffered JSON and progressive SSE delivery adapters | M03 | Historical implementation includes [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112); no new work until all preceding Jira tickets/epics are Done and technical exits pass | [LIB-5](https://jgwesterfield.atlassian.net/browse/LIB-5) |
+| M05 | Configuration, capabilities, and feature off-switch | M04 | Historical implementation includes [#123](https://github.com/JonathanGWesterfield/Librarian/pull/123); no new work until all preceding Jira tickets/epics are Done and technical exits pass | [LIB-6](https://jgwesterfield.atlassian.net/browse/LIB-6) |
+| M06 | Web reducer and truthful progress UI | M04, M05 | No new work until all preceding Jira tickets/epics are Done and technical exits pass | [LIB-7](https://jgwesterfield.atlassian.net/browse/LIB-7) |
+| M07 | Compatibility, failure, Chrome UAT, and independent review | M06 | No new work until all preceding Jira tickets/epics are Done and technical exits pass | [LIB-8](https://jgwesterfield.atlassian.net/browse/LIB-8) |
+| M08 | Measured broker optimization | M03 baseline, M07 harness | No new work until all preceding Jira tickets/epics are Done and technical exits pass | [LIB-9](https://jgwesterfield.atlassian.net/browse/LIB-9) |
+| M09 | Separate answer-runtime deployment decision | M07, M08 | No new work until all preceding Jira tickets/epics are Done and technical exits pass | [LIB-10](https://jgwesterfield.atlassian.net/browse/LIB-10) |
+| M10 | Controlled rollout and operational handoff | M07–M09 | No new work until all preceding Jira tickets/epics are Done and technical exits pass | [LIB-11](https://jgwesterfield.atlassian.net/browse/LIB-11) |
 
 ## Coordination state
 
-This table is the authoritative milestone state for every branch and agent.
-Issue [#87](https://github.com/JonathanGWesterfield/Librarian/issues/87) is the
-companion progress ledger: it records merged PRs, acceptance evidence, active
-blockers, and the next eligible slice. A branch name, an unmerged commit, or
-conversation history does not advance a milestone.
+Jira is the authoritative milestone state for every branch and agent. A branch
+name, unmerged commit, or conversation history does not advance a milestone.
+The table records technical provenance and links to the corresponding Jira
+epics; it is not a mutable status ledger.
 
-Every implementation PR must update this table and #87 when it changes a
-slice's completion, blocker, or next eligible work. A dependency orders final
-acceptance and release; it does not prohibit independent implementation in
-parallel. Parallel work must state its dependency and cannot by itself advance
-the later milestone to complete.
+Every implementation PR must update its Jira task when it changes completion,
+a blocker, or the next eligible work. M00 through M10 are strictly sequential:
+every ticket and epic in every preceding milestone must be Done, with the
+required technical exit evidence, before new work starts in a later milestone.
+Historical later-milestone code remains provenance only and does not waive that
+gate. Jira dependency links and contributor discipline express this policy; no
+automatic Jira workflow validator is configured.
 
 ### M00 — Publish and approve the design source of truth
 
 Owner: architecture/documentation.
 
-- [x] Merge the ADR, technical design, compatibility plan, acceptance charter,
+- Merge the ADR, technical design, compatibility plan, acceptance charter,
   and this roadmap in one focused documentation PR.
-- [x] Update #87 to link to the merged file paths and retain only milestone
+- Update Jira to link to the merged file paths and retain only milestone
   status, PR links, blockers, and acceptance reports.
-- [x] Obtain architecture review approval for ADR 001 and the design's security,
+- Obtain architecture review approval for ADR 001 and the design's security,
   lifecycle, and resource decisions.
 
-**Exit:** all source links resolve on `main`; #87 does not duplicate the
+**Exit:** all source links resolve on `main`; Jira does not duplicate the
 specification; M01 has an approved design baseline. This is the required remedy
 for the unpublished-tracker P0.
 
@@ -130,23 +131,23 @@ normalized rendered path form. M03 wires those already-tested components into
 the full role-and-secret admission rule. These slices do not implement a broker,
 browser delivery, or Compose migration.
 
-- [x] Add the canonical v1 proto, public event JSON Schema, generated Python
+- Add the canonical v1 proto, public event JSON Schema, generated Python
   and TypeScript workflow, exact tool versions, and CI generation/drift and
   breaking-change checks described in the technical design.
-- [x] Turn each enumerated chat, summary, tag, genre, recommendation, worker,
+- Turn each enumerated chat, summary, tag, genre, recommendation, worker,
   evaluator, and host-guard row into a testable migration ticket. Re-run the
   source/configuration inventory; a new call site blocks M03 until it is added
   to the matrix with a migration or pre-transport rejection.
-- [x] Add tracked synthetic corpus fixtures and contract tests from the
+- Add tracked synthetic corpus fixtures and contract tests from the
   acceptance charter. They must run without Docker, private books, credentials,
   or model access.
-- [x] Implement and validate the full proto and status/size rules, immutable
+- Implement and validate the full proto and status/size rules, immutable
   release manifest, per-principal Compose secrets/networks, authenticated Health
   and capabilities handshake with client response validation, sanitized
   single-file config mounts, non-spoofable host guard, timeout/limit validation,
   log redaction, and deployment preflight specified by ADR 001 and the
   compatibility plan.
-- [x] Record a fresh baseline with the existing stack; label unavailable model
+- Record a fresh baseline with the existing stack; label unavailable model
   or Docker conditions rather than synthesizing measurements.
 
 **Exit:** a clean checkout generates and compiles contracts, detects descriptor
@@ -158,12 +159,12 @@ configuration decisions are executable tests, not comments.
 
 Owner: answer-runtime and retrieval owners.
 
-- [x] Extract the current answer orchestration from `prepare_answer_question()`
+- Extract the current answer orchestration from `prepare_answer_question()`
   behind the ports and immutable evidence snapshot defined in the technical
   design. Keep the runtime in process.
-- [x] Preserve scoped refusal, citation validation, repair budget, source
+- Preserve scoped refusal, citation validation, repair budget, source
   revision behavior, and final result semantics.
-- [x] Keep existing CLI/API entry points as thin facades and enforce dependency
+- Keep existing CLI/API entry points as thin facades and enforce dependency
   direction with focused tests.
 
 **Exit:** old and new paths yield equivalent terminal results for deterministic
@@ -186,21 +187,21 @@ automation were implemented incrementally in
 in progress until the atomic R2 release, cutover/rollback, isolation, and live
 acceptance exit conditions below are satisfied. The remaining source-tree HTTP
 retirement code merged in [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112);
-it remains insufficient by itself for M03 completion without the required live acceptance evidence. M04's API delivery
-adapter may be implemented and reviewed in parallel, but M03 exit remains its
-acceptance and release gate.
+it remains insufficient by itself for M03 completion without the required live
+acceptance evidence. Historical M04 implementation does not waive the strict
+M03-before-M04 gate for new work.
 
-- [ ] Implement the unary v1 broker service, generated clients, authenticated
+- Implement the unary v1 broker service, generated clients, authenticated
   Health and `GetCapabilities`, release-manifest enforcement, scheduler,
   process-group cleanup, deadlines, limits, and metrics.
-- [ ] Migrate chat synthesis/selection/review, API summary/genre/recommendation,
+- Migrate chat synthesis/selection/review, API summary/genre/recommendation,
   summary worker, metadata worker, and evaluator in the atomic
   Compose R2 release. Do not add a hidden HTTP fallback; host use is rejected
   before transport.
-- [ ] Create the metadata-worker profile, role-specific secret mounts, named
+- Create the metadata-worker profile, role-specific secret mounts, named
   two-service broker networks, and broker-only egress network specified by the
   technical design.
-- [ ] Apply the preflight, deployment, rollback, and HTTP retirement proof in
+- Apply the preflight, deployment, rollback, and HTTP retirement proof in
   the compatibility plan.
 
 **Exit:** Compose proves every supported inventory row uses generated gRPC stubs
@@ -254,16 +255,16 @@ a mixed R0/R2 stack.
 
 Owner: API delivery.
 
-**Status:** in progress in parallel with M03. [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)
-merged the API-adapter slice. Its final acceptance and release remain gated by M03;
-M03 exit gates M04's final acceptance, release evidence, and any claim that
-M04 is complete. M05 and M06 retain their own listed dependencies.
+**Historical provenance:** [#112](https://github.com/JonathanGWesterfield/Librarian/pull/112)
+merged an API-adapter slice before the sequential policy. No new M04 work may
+start until M03's Jira epic is Done; M05 and M06 remain gated by their listed
+predecessors.
 
-- [ ] Expose versioned event delivery as a serializer over the runtime iterator;
+- Expose versioned event delivery as a serializer over the runtime iterator;
   collect that same iterator for `POST /chat`.
-- [ ] Document every browser endpoint in `docs/api-endpoints.md` with examples
+- Document every browser endpoint in `docs/api-endpoints.md` with examples
   and update `docs/openapi.json` in the implementation PR.
-- [ ] Preserve the existing `/chat/stream` contract until separately deprecated.
+- Preserve the existing `/chat/stream` contract until separately deprecated.
 
 **Exit:** fixture tests prove JSON/SSE terminal parity, correct frame decoding,
 one terminal state, no raw draft, disconnect propagation, and first candidate
@@ -273,9 +274,9 @@ progress while fake generation is blocked.
 
 Owner: configuration and API composition root.
 
-- [ ] Add `chat.delivery_mode` with buffered default, progressive opt-in, and a
+- Add `chat.delivery_mode` with buffered default, progressive opt-in, and a
   pre-admission disabled response.
-- [ ] Publish a capability response containing only browser delivery mode and
+- Publish a capability response containing only browser delivery mode and
   supported event schema versions.
 
 **Exit:** both modes exercise the same gRPC broker and evidence policy. Invalid
@@ -286,8 +287,8 @@ not reintroduce inter-service HTTP.
 
 Owner: web application.
 
-- [ ] Isolate SSE parsing and state reduction behind the versioned event schema.
-- [ ] Implement Stop, explicit retry, scope changes, stale-response protection,
+- Isolate SSE parsing and state reduction behind the versioned event schema.
+- Implement Stop, explicit retry, scope changes, stale-response protection,
   unknown-version handling, and accessible truthful stage indicators.
 
 **Exit:** parser/reducer tests cover arbitrary UTF-8 boundaries, duplicate or
@@ -298,10 +299,10 @@ never render as answers and candidates never appear as final citations.
 
 Owner: evaluation/integration; an independent reviewer completes the final step.
 
-- [ ] Run deterministic contract/parity/cancellation suite.
-- [ ] Run the acceptance charter in Chrome against the actual React UI and
+- Run deterministic contract/parity/cancellation suite.
+- Run the acceptance charter in Chrome against the actual React UI and
   Compose/nginx stack for both delivery modes.
-- [ ] Exercise full failure/migration cases, then conduct independent code and
+- Exercise full failure/migration cases, then conduct independent code and
   live-service review before the full test suite.
 
 **Exit:** linked reports document citation quality, lifecycle, every caller
@@ -313,9 +314,9 @@ comes before the full suite.
 
 Owner: provider broker; coordinate in [#86](https://github.com/JonathanGWesterfield/Librarian/issues/86).
 
-- [ ] Measure channel connection, queue wait, broker startup/execution, provider
+- Measure channel connection, queue wait, broker startup/execution, provider
   work, review, repair, and terminal completion by query class.
-- [ ] Change process lifetime or provider integration only when the measurements
+- Change process lifetime or provider integration only when the measurements
   identify it as the bottleneck and the contract/cancellation guarantees hold.
 
 **Exit:** reproducible before/after evidence demonstrates an improvement or a
@@ -325,8 +326,8 @@ documented no-go. Correctness and credentials are unchanged.
 
 Owner: architecture and operations; coordinate in [#83](https://github.com/JonathanGWesterfield/Librarian/issues/83).
 
-- [ ] Review scaling, isolation, release, and ownership evidence.
-- [ ] If extraction is justified, create a scoped issue and use
+- Review scaling, isolation, release, and ownership evidence.
+- If extraction is justified, create a scoped issue and use
   `AnswerRuntime.Run` gRPC from its first deployment. If not, record the trigger
   that would reopen the decision.
 
@@ -337,13 +338,13 @@ and rollback evidence for the selected topology.
 
 Owner: API, web, and operations.
 
-- [ ] Ship progressive delivery opt-in while buffered remains default.
-- [ ] Publish operator recovery, gRPC health, secret rotation, cancellation,
+- Ship progressive delivery opt-in while buffered remains default.
+- Publish operator recovery, gRPC health, secret rotation, cancellation,
   metric, and rollback instructions.
-- [ ] Re-run Chrome UAT and timing samples before a later default change.
+- Re-run Chrome UAT and timing samples before a later default change.
 
 **Exit:** operators can roll back delivery mode without replaying work or
-changing grounding policy. #87 links the final evidence and reconciles #74,
+changing grounding policy. Jira links the final evidence and reconciles #74,
 #83, and #86 without claiming unverified success.
 
 ## Release evidence
