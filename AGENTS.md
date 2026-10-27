@@ -3,8 +3,9 @@
 ## Active architecture roadmap
 
 - At the start of every repository task, read
-  [`docs/answer-delivery/README.md`](docs/answer-delivery/README.md) and
-  [`docs/tasks/answer-delivery/README.md`](docs/tasks/answer-delivery/README.md).
+  [`docs/answer-delivery/README.md`](docs/answer-delivery/README.md) and the
+  applicable Jira epic and task in the
+  [LIB project](https://jgwesterfield.atlassian.net/browse/LIB-1).
   For answer delivery, chat, broker, gRPC, streaming, configuration, testing,
   or architecture work, also read the ADR, technical design, compatibility
   plan, and acceptance charter linked from that roadmap.
@@ -12,39 +13,32 @@
   later milestone before its documented exit conditions pass, and do not resume
   or reprioritize the higher-level README roadmap until this roadmap reaches its
   documented handoff or the user explicitly changes direction.
-- Treat issue #87 as the progress ledger after the roadmap documentation is
-  published. Keep technical decisions in the versioned documents rather than
-  duplicating them in issues or pull requests.
-
-- The task ledger is the execution queue: after the roadmap/design set, read
-  `docs/tasks/answer-delivery/README.md`, the applicable milestone index, and
-  the selected task before editing. Claim the task in its file with owner,
-  branch/worktree, timestamp, exact reserved paths, and coordination contact;
-  respect its prerequisites, forbidden paths, and execution class. Task files
-  own mutable lifecycle/evidence, while the roadmap table and #87 own milestone
-  status.
-- The task ledger has a required freshness gate. When changing any canonical
-  answer-delivery source document, identify every affected task, update its
-  direct anchors, scope, acceptance, or handoff as needed, and refresh
-  `docs/tasks/answer-delivery/freshness.json` in the same PR with the reviewed
-  task IDs and a review note. Do not refresh a source hash without reviewing
-  the linked tasks. `scripts/check.sh` and CI reject a stale ledger.
+- Jira is the sole mutable task and milestone ledger. Before editing, read the
+  selected Jira task and epic, then claim it there with owner,
+  branch/worktree, exact reserved paths, coordination contact, validation
+  evidence, review findings, and handoff. Keep technical decisions in the
+  versioned design documents rather than duplicating them in Jira or pull
+  requests.
+- When changing a canonical answer-delivery source document, review every
+  affected Jira task and update its anchors, scope, acceptance, dependencies,
+  or handoff in Jira. There is no repository freshness manifest or local task
+  lifecycle record.
 
 ## Coordination and milestone status
 
-- Treat the milestone table in `docs/answer-delivery/README.md` as the
-  authoritative state for every branch and agent. Before starting work, read it
-  together with issue #87's current ledger entry; do not infer eligibility from
-  a branch name, chat history, or an unmerged commit.
-- When a PR changes a slice's completion, blocker, or next eligible work,
-  update the roadmap table and #87 in that PR. An unmerged implementation does
-  not advance a milestone. Record whether the work is parallel implementation
-  or an acceptance/release gate.
-- Milestone dependencies order final acceptance and release, not necessarily
-  implementation. Agents may implement and review independent later slices in
-  parallel when the roadmap identifies the dependency and their scope does not
-  require an uncompleted behavior. They must not mark that milestone complete,
-  claim release readiness, or skip the dependency's acceptance evidence.
+- Jira epics and tasks are authoritative for every branch and agent. Before
+  starting work, read the roadmap for technical constraints and Jira for the
+  current state; do not infer eligibility from a branch name, chat history, or
+  an unmerged commit.
+- Milestones are strictly sequential: do not start new work in a milestone
+  until every ticket and epic in every preceding milestone is Done and their
+  technical exit evidence is satisfied. Historical later-milestone
+  implementation remains provenance only; it does not waive this gate. Jira
+  dependency links and contributor discipline express this policy; no automatic
+  Jira workflow validator is configured.
+- When a PR changes completion, a blocker, or the next eligible work, update
+  the relevant Jira task and epic. An unmerged implementation does not advance
+  a milestone.
 
 ## GitHub
 

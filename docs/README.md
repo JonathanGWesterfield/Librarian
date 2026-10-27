@@ -3,9 +3,10 @@
 ## Active program
 
 [Answer delivery and gRPC migration](answer-delivery/) is the active M00–M10
-course. Start with its [roadmap](answer-delivery/README.md), the [task-ledger area](tasks/), and the [answer-delivery task ledger](tasks/answer-delivery/README.md), then read its ADR,
-technical design, compatibility plan, and acceptance charter before planning or
-implementing related work.
+course. Start with its [roadmap](answer-delivery/README.md), the applicable
+[Jira epic or task](https://jgwesterfield.atlassian.net/browse/LIB-1), then read
+its ADR, technical design, compatibility plan, and acceptance charter before
+planning or implementing related work.
 
 ## Existing reference material
 

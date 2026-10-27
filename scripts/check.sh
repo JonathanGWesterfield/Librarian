@@ -57,7 +57,6 @@ trap 'cleanup_test_config_on_signal 143' TERM
 
 scripts/generate_contracts.sh --check
 python3 scripts/check_contract_breaking.py
-python3 scripts/check_task_ledger.py
 python3 -m compileall apps/api apps/codex_broker packages scripts tests
 # This runner already owns the temporary test configuration.  Let the nested
 # test runner reuse it so a signal cannot make two cleanup handlers race to
