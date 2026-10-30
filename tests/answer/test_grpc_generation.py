@@ -8,19 +8,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import grpc
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "apps" / "codex_broker"))
 sys.path.insert(0, str(REPO_ROOT / "packages"))
 
-from librarian_answer_adapters.grpc_broker import GrpcBrokerClientError
+from librarian_answer_adapters.grpc_broker import (
+    GeneratedGrpcBrokerClient,
+    GrpcBrokerClientError,
+)
 from librarian_answer_adapters.grpc_generation import (
     GrpcGenerationGenerator,
     R2GenerationDeadlineExceeded,
 )
 from librarian_answer_adapters.worker_lifecycle import WorkerGenerationContext
+from librarian_broker.execution import BrokerScheduler, ProviderExecutor
+from librarian_broker.grpc_service import BrokerCredentials, create_broker_server
 from librarian_chat.generation import ChatMessage
+from librarian_contracts.broker_limits import build_broker_execution_limits
 from librarian_contracts.generated.librarian.answer.v1 import (
     answer_delivery_pb2 as delivery_pb2,
 )
+from librarian_contracts.stack_contract import build_stack_contract
 from librarian_summarization.summarize import (
     _generate_book_summary,
     _generate_chunk_summary,
@@ -190,6 +199,107 @@ class GrpcGenerationGeneratorTests(unittest.IsolatedAsyncioTestCase):
             await generation
         self.assertTrue(client.cancelled)
 
+    async def test_explicit_cancellation_cancels_live_generated_rpc_without_late_output(self) -> None:
+        context = _CancellationContext()
+        provider, server, client, generator = await _live_generator(context)
+        try:
+            generation = asyncio.create_task(
+                asyncio.to_thread(
+                    generator.generate,
+                    [ChatMessage(role="user", content="Generate.")],
+                )
+            )
+            await asyncio.wait_for(provider.started.wait(), timeout=1)
+            context.cause = "explicit"
+            with self.assertRaises(asyncio.CancelledError):
+                await generation
+            await asyncio.wait_for(provider.cancelled.wait(), timeout=1)
+        finally:
+            await client.close()
+            await server.stop(0)
+
+        self.assertEqual(provider.completed_outputs, 0)
+
+    async def test_disconnect_cancellation_cancels_live_generated_rpc_without_late_output(self) -> None:
+        context = _CancellationContext()
+        provider, server, client, generator = await _live_generator(context)
+        try:
+            generation = asyncio.create_task(
+                asyncio.to_thread(
+                    generator.generate,
+                    [ChatMessage(role="user", content="Generate.")],
+                )
+            )
+            await asyncio.wait_for(provider.started.wait(), timeout=1)
+            context.cause = "disconnect"
+            with self.assertRaises(asyncio.CancelledError):
+                await generation
+            await asyncio.wait_for(provider.cancelled.wait(), timeout=1)
+        finally:
+            await client.close()
+            await server.stop(0)
+
+        self.assertEqual(provider.completed_outputs, 0)
+
+    async def test_deadline_cancellation_maps_live_generated_rpc_to_typed_deadline(self) -> None:
+        context = _CancellationContext()
+        provider, server, client, generator = await _live_generator(context)
+        try:
+            generation = asyncio.create_task(
+                asyncio.to_thread(
+                    generator.generate,
+                    [ChatMessage(role="user", content="Generate.")],
+                )
+            )
+            await asyncio.wait_for(provider.started.wait(), timeout=1)
+            context.cause = "deadline"
+            context.remaining = 0.0
+            with self.assertRaises(R2GenerationDeadlineExceeded):
+                await generation
+            await asyncio.wait_for(provider.cancelled.wait(), timeout=1)
+        finally:
+            await client.close()
+            await server.stop(0)
+
+        self.assertEqual(provider.completed_outputs, 0)
+
+    async def test_elapsed_context_deadline_rejects_before_live_broker_admission(self) -> None:
+        context = _CancellationContext()
+        context.cause = "deadline"
+        context.remaining = 0.0
+        provider, server, client, generator = await _live_generator(context)
+        try:
+            with self.assertRaises(R2GenerationDeadlineExceeded):
+                await asyncio.to_thread(
+                    generator.generate,
+                    [ChatMessage(role="user", content="Generate.")],
+                )
+        finally:
+            await client.close()
+            await server.stop(0)
+
+        self.assertFalse(provider.started.is_set())
+        self.assertEqual(provider.completed_outputs, 0)
+
+    async def test_explicit_and_disconnect_reject_before_live_broker_admission(self) -> None:
+        for cause in ("explicit", "disconnect"):
+            with self.subTest(cause=cause):
+                context = _CancellationContext()
+                context.cause = cause
+                provider, server, client, generator = await _live_generator(context)
+                try:
+                    with self.assertRaises(asyncio.CancelledError):
+                        await asyncio.to_thread(
+                            generator.generate,
+                            [ChatMessage(role="user", content="Generate.")],
+                        )
+                finally:
+                    await client.close()
+                    await server.stop(0)
+
+                self.assertFalse(provider.started.is_set())
+                self.assertEqual(provider.completed_outputs, 0)
+
     def test_summary_helpers_select_chapter_and_book_operations(self) -> None:
         generator = _SummaryGenerator()
         messages = [ChatMessage(role="user", content="Summarize.")]
@@ -254,6 +364,87 @@ class _BlockingClient:
         except asyncio.CancelledError:
             self.cancelled = True
             raise
+
+
+class _CancellationContext:
+    def __init__(self) -> None:
+        self.cause: str | None = None
+        self.remaining = 30.0
+
+    def is_cancelled(self) -> bool:
+        return self.cause is not None
+
+    def cancellation_cause(self) -> str | None:
+        return self.cause
+
+    @property
+    def was_disconnected(self) -> bool:
+        return self.cause == "disconnect"
+
+    def remaining_seconds(self) -> float:
+        return 0.0 if self.cause is not None else self.remaining
+
+
+class _LiveBlockingProvider(ProviderExecutor):
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+        self.completed_outputs = 0
+
+    async def generate(self, request, *, timeout_seconds: float) -> tuple[str, str]:
+        del timeout_seconds
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+        self.completed_outputs += 1
+        return "late output", request.model_id
+
+
+async def _live_generator(
+    context: _CancellationContext,
+) -> tuple[
+    _LiveBlockingProvider,
+    grpc.aio.Server,
+    GeneratedGrpcBrokerClient,
+    GrpcGenerationGenerator,
+]:
+    contract = build_stack_contract(
+        stack_release_sha="a" * 40,
+        descriptor=b"generated cancellation adapter proof descriptor",
+    )
+    provider = _LiveBlockingProvider()
+    server = create_broker_server(
+        contract=contract,
+        credentials=BrokerCredentials({"api": "api-token"}),
+        scheduler=BrokerScheduler(
+            provider,
+            limits=build_broker_execution_limits(validation_reserve_seconds=0.01),
+        ),
+    )
+    port = server.add_insecure_port("127.0.0.1:0")
+    await server.start()
+    client = GeneratedGrpcBrokerClient.connect(
+        target=f"127.0.0.1:{port}",
+        contract=contract,
+        principal="api",
+        bearer_token="api-token",
+    )
+    await client.ensure_ready()
+    return (
+        provider,
+        server,
+        client,
+        GrpcGenerationGenerator(
+            client=client,
+            model="fixture-model",
+            event_loop=asyncio.get_running_loop(),
+            context=context,
+            default_operation=delivery_pb2.GENRE_GENERATION,
+        ),
+    )
 
 
 class _SummaryGenerator:

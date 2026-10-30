@@ -11,23 +11,23 @@ another channel.
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import (
-    CancelledError as FutureCancelledError,
-    TimeoutError as FutureTimeoutError,
-)
+from concurrent.futures import CancelledError as FutureCancelledError
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import uuid4
 
 import grpc
+from librarian_answer.ports import resolve_cancellation_cause
+from librarian_contracts.admission import OPERATION_POLICIES
+from librarian_contracts.generated.librarian.answer.v1 import (
+    answer_delivery_pb2 as delivery_pb2,
+)
+
 from librarian_answer_adapters.grpc_broker import (
     GeneratedGrpcBrokerClient,
     GrpcBrokerClientError,
     _await_generation_with_context,
-)
-from librarian_contracts.admission import OPERATION_POLICIES
-from librarian_contracts.generated.librarian.answer.v1 import (
-    answer_delivery_pb2 as delivery_pb2,
 )
 
 _ROLE_BY_NAME = {
@@ -94,7 +94,10 @@ class GrpcGenerationGenerator:
 
         if operation not in OPERATION_POLICIES:
             raise ValueError("gRPC generation operation is not supported by v1")
-        if self.context.is_cancelled():
+        cancellation_cause = resolve_cancellation_cause(self.context)
+        if cancellation_cause == "deadline":
+            raise R2GenerationDeadlineExceeded("gRPC generation deadline elapsed")
+        if cancellation_cause is not None:
             raise asyncio.CancelledError("API generation was cancelled before broker admission")
         requested_timeout = (
             self.default_timeout_seconds if timeout_seconds is None else timeout_seconds
@@ -150,17 +153,10 @@ class GrpcGenerationGenerator:
                 self.client.generate(request, timeout=timeout_seconds), self.context
             )
         except asyncio.CancelledError:
-            # Request contexts use cancellation for both a browser abort and a
-            # deadline.  The API still needs the former to be a quiet abort,
-            # while durable workers must persist the latter as a failed job.
-            # ``was_disconnected`` is API-specific and intentionally optional
-            # here so worker contexts remain a small synchronous protocol.
-            remaining = self.context.remaining_seconds()
-            if (
-                not getattr(self.context, "was_disconnected", False)
-                and remaining is not None
-                and remaining <= 0
-            ):
+            # Request contexts distinguish a browser/adapter abort from an
+            # elapsed deadline.  Legacy worker contexts resolve a cancellation
+            # to ``explicit``, preserving their existing shutdown behavior.
+            if resolve_cancellation_cause(self.context) == "deadline":
                 raise R2GenerationDeadlineExceeded(
                     "gRPC generation deadline elapsed"
                 ) from None
